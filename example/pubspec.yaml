@@ -13,8 +13,7 @@ dependencies:
   flutter:
     sdk: flutter
   flutter_solidart: ^2.7.0
-  solid_annotations:
-    path: ../packages/solid_annotations
+  solid_annotations: ^1.0.0
 
 dev_dependencies:
   build_runner: ^2.10.0
