@@ -1,0 +1,72 @@
+---
+title: Environment
+description: Learn to inject environment providers in Solid.
+sidebar:
+  order: 4
+---
+import { Aside } from '@astrojs/starlight/components';
+
+The `@SolidEnvironment()` annotation will inject a provider from the widget tree into your Solid widget. It's pure dependency injection managed by Solid.
+
+## Usage
+
+To work, you've to provide an instance of the class you want to allow to be injected using the `SolidProvider` widget.
+
+```dart {6-9} title="source/environment_example.dart"
+class EnvironmentExample extends StatelessWidget {
+  const EnvironmentExample({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return SolidProvider(
+      create: (context) => Counter(),
+      child: EnvironmentInjectionExample(),
+    );
+  }
+}
+```
+
+Alternatively, you can use the `environment` extension (like SwiftUI) to provide the instance:
+
+```dart {6} title="source/environment_example.dart"
+class EnvironmentExample extends StatelessWidget {
+  const EnvironmentExample({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return EnvironmentInjectionExample.environment((context) => Counter());
+  }
+}
+```
+
+Then you can inject the instance (from a descendant) in your widget using the `@Environment()` annotation:
+
+```dart {4-5} title="source/environment_example.dart"
+class EnvironmentInjectionExample extends StatelessWidget {
+  EnvironmentInjectionExample({super.key});
+
+  @Environment()
+  late Counter counter;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Environment')),
+      body: Center(child: Text(counter.value.toString())),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => counter.value++,
+        child: const Icon(Icons.add),
+      ),
+    );
+  }
+}
+```
+
+For instance the code for `Counter` is:
+
+```dart title="source/environment_example.dart"
+class Counter {
+  @SolidState()
+  int value = 0;
+}
+```

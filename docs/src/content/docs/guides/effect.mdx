@@ -1,0 +1,37 @@
+---
+title: Effect
+description: Learn to write reactive effects in Solid.
+sidebar:
+  order: 3
+---
+import { Aside } from '@astrojs/starlight/components';
+
+The `@SolidEffect()` annotation will trigger a side effect whenever the reactive state variables it depends on change.
+
+## Usage
+
+```dart {7-10} title="source/effect_example.dart"
+class EffectExample extends StatelessWidget {
+  EffectExample({super.key});
+
+  @SolidState()
+  int counter = 0;
+
+  @SolidEffect()
+  void logCounter() {
+    print('Counter changed: $counter');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Effect')),
+      body: Center(child: Text('Counter: $counter')),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => counter++,
+        child: const Icon(Icons.add),
+      ),
+    );
+  }
+}
+```

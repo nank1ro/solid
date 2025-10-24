@@ -1,0 +1,144 @@
+---
+title: Query
+description: Learn to write queries in Solid.
+sidebar:
+  order: 5
+---
+import { Aside } from '@astrojs/starlight/components';
+
+The `@SolidQuery()` annotation allows you to create reactive state based on asynchronous data sources, such as fetching data from a network.
+
+## Usage
+
+```dart {4-8, 15-19} title="source/query_example.dart"
+class QueryExample extends StatelessWidget {
+  const QueryExample({super.key});
+
+  @SolidQuery()
+  Future<String> fetchData() async {
+    await Future.delayed(const Duration(seconds: 1));
+    return 'Fetched Data';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Query')),
+      body: Center(
+        child: fetchData().when(
+          ready: (data) => Text(data),
+          loading: () => CircularProgressIndicator(),
+          error: (error, stackTrace) => Text('Error: $error'),
+        ),
+      ),
+    );
+  }
+}
+```
+
+This example defines a `fetchData` method annotated with `@SolidQuery()`, which simulates fetching data asynchronously.
+The `when` method is used to handle the build different widgets based on the states of the query: `ready`, `loading`, and `error`.
+
+<Aside type="tip" icon='seti:dart'>
+You can also use the `maybeWhen` method to handle only specific states and provide a default widget for the `orElse` option.
+</Aside>
+
+---
+
+You can also use the `@SolidQuery()` annotation for streams.
+
+```dart title="source/query_example.dart"
+@SolidQuery()
+Stream<int> fetchData() {
+  return Stream.periodic(const Duration(seconds: 1), (i) => i);
+}
+```
+
+And **magically**, you don't have to change anything else.
+
+## Reacting to state
+
+A query can also depend on reactive state variables.
+
+```dart {4-5, 7-12, 19-28, 30-34} title="source/query_with_source_example.dart"
+class QueryWithSourceExample extends StatelessWidget {
+  QueryWithSourceExample({super.key});
+
+  @SolidState()
+  String? userId;
+
+  @SolidQuery(debounce: Duration(seconds: 1))
+  Future<String?> fetchData() async {
+    if (userId == null) return null;
+    await Future.delayed(const Duration(seconds: 1));
+    return 'Fetched Data for $userId';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('QueryWithSource')),
+      body: Center(
+        child: fetchData().when(
+          ready: (data) {
+            if (data == null) {
+              return const Text('No user ID provided');
+            }
+            return Text(data);
+          },
+          loading: () => CircularProgressIndicator(),
+          error: (error, stackTrace) => Text('Error: $error'),
+        ),
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () =>
+            userId = 'user_${DateTime.now().millisecondsSinceEpoch}',
+        child: const Icon(Icons.refresh),
+      ),
+    );
+  }
+}
+```
+
+<Aside type="note" icon='seti:dart' title='Interesting'>
+Any time the `userId` variable changes, the `fetchData` query will be re-executed.
+</Aside>
+
+<Aside type="tip" icon='seti:dart' title='Debounce'>
+As you can see, the `@SolidQuery()` annotation also supports a `debounce` parameter.
+`@SolidQuery(debounce: Duration(seconds: 1))` will wait for 1 second after the last change before executing the query.
+</Aside>
+
+<Aside type="caution">
+A function annotated with `@SolidQuery()` must return either a `Future<T>` or a `Stream<T>` and __cannot have parameters__.
+</Aside>
+
+## Detect if a query is refreshing
+
+By default, when a query is re-executed due to a dependency change, it doesn't enter the loading state again.
+Instead, it stays in the current state while the new data is being fetched. When the new data arrives, the state updates accordingly.
+This behavior is designed to provide a smoother user experience by avoiding unnecessary loading indicators during data refreshes.
+
+You can detect if a query is currently refreshing by using the `isRefreshing` property.
+
+```dart
+fetchData().isRefreshing
+```
+
+This property returns `true` if the query is in the process of refreshing its data, allowing you to adjust your UI accordingly (e.g., showing a subtle loading indicator or a refresh icon).
+
+You can disable this behavior by setting the `useRefreshing` parameter to `false` in the `@SolidQuery()` annotation.
+
+```dart
+@SolidQuery(useRefreshing: false)
+```
+
+In this case, the query will enter the loading state again when it is re-executed due to a dependency change.
+
+## Manually refreshing a query
+
+You can manually refresh a query by calling the `refresh` method on it.
+
+```dart
+fetchData.refresh();
+```

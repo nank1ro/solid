@@ -1,0 +1,77 @@
+---
+title: State
+description: Learn to write reactive state in Solid.
+sidebar:
+  order: 2
+---
+import { Aside } from '@astrojs/starlight/components';
+
+The `@SolidState()` annotation allows you to create reactive state variables in your Solid widgets.
+
+When you annotate a variable with `@SolidState()`, Solid will generate the necessary boilerplate code to make that variable reactive. This means that whenever the variable changes, any UI elements that depend on it will automatically update.
+
+## Usage
+
+```dart {7-8, 14, 17} title="source/counter.dart"
+import 'package:solid_annotations/solid_annotations.dart';
+import 'package:flutter/material.dart';
+
+class Counter extends StatelessWidget {
+  Counter({super.key});
+
+  @SolidState()
+  int counter = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Center(
+        child: Text('Counter is $counter'),
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => counter++,
+        child: const Icon(Icons.add),
+      ),
+    );
+  }
+}
+```
+
+In this example, the `counter` variable is annotated with `@SolidState()`. Whenever the floating action button is pressed, the `counter` variable is incremented, and the text displaying the counter value will automatically update to reflect the new value.
+
+<Aside type="tip" title='Interesting' icon='seti:dart'>
+Only the `Text` widget that accesses the `counter` variable is rebuilt when `counter` changes, thanks to Solid's fine-grained reactivity.
+</Aside>
+
+## Derived state
+
+You can also create computed properties that derive their values from reactive state variables.
+To do this, simply annotate a getter that accesses the reactive state variables with `@SolidState`.
+
+```dart {7-8, 15} title="source/computed_counter.dart"
+class Counter extends StatelessWidget {
+  Counter({super.key});
+
+  @SolidState()
+  int counter = 0;
+
+  @SolidState()
+  int get doubleCounter => counter * 2;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Computed')),
+      body: Center(
+        child: Text('Counter: $counter, DoubleCounter: $doubleCounter'),
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => counter++,
+        child: const Icon(Icons.add),
+      ),
+    );
+  }
+}
+```
+
+In this example, the `doubleCounter` getter computes its value based on the `counter` variable. Whenever `counter` changes, `doubleCounter` will also update, and any UI elements that depend on it will automatically refresh.

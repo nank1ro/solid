@@ -1,0 +1,11 @@
+name: _
+publish_to: none
+environment:
+  sdk: ^3.9.2
+workspace:
+  # - packages/solid_generator
+  - packages/solid_annotations
+  # - packages/example
+
+dev_dependencies:
+  very_good_analysis: ^10.0.0

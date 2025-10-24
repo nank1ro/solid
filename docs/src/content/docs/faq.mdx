@@ -1,0 +1,89 @@
+---
+title: FAQ
+description: Frequently Asked Questions about Solid.
+sidebar:
+  order: 6
+---
+import { Aside } from '@astrojs/starlight/components';
+
+## Why using `StatelessWidget` instead of `StatefulWidget`?
+
+The usage of `StatelessWidget` is intentional to reduce the boilerplate code you have to write.
+If the widget contains any solid annotation, it will be converted into a `StatefulWidget` by the code generator.
+
+<Aside type='note'>
+You can still write `StatefulWidget` classes if you need, but you probably don't have any reason to do it with Solid.
+</Aside>
+
+## Why my `StatelessWidget` is not immutable?
+
+The `StatelessWidget` you write is not immutable because it contains mutable variables.
+That's why I suggest to add:
+```yaml title='analysis_options.yaml'
+analyzer:
+  errors:
+    must_be_immutable: ignore
+```
+
+So you can ignore it. But **don't worry**, the generated code will be immutable and follow all the best practices.
+The code you write in the `source` directory needs to be valid Dart code, even if it's optimized later.
+
+## Why not using Macros?
+
+The feature to add macros in Dart has been stopped, as you can [read here](https://blog.dart.dev/an-update-on-dart-macros-data-serialization-06d3037d4f12?gi=608cf334bf75) 
+
+## Why not using augmentations?
+
+Augmentations in Dart have not been released yet, in addition, they are more limited than macros.
+
+For instance, you cannot augment a function that contains a body. So we can't have fine grained reactivity in the `build` of our widgets.
+
+## Why flutter_solidart as state management?
+
+I'm the author of [flutter_solidart](https://pub.dev/packages/flutter_solidart) so I'm surely biased.
+But having a state manament library that has an automatic reactive system helps a lot.
+For instance, in solidart you can write:
+```dart
+final counter = Signal(0);
+late final doubleCounter = Computed(() => counter.value * 2);
+```
+And it just works.
+
+In addition, `SignalBuilder` automatically reacts to any signal detected inside its builder. So I didn't have to generate any complex transpiler.
+If I had to work with `ValueNotifier` and `ValueListenableBuilder`, the amount of complexity and boilerplate would have been enormous.
+
+## Why writing code in the `source` directory and not on lib?
+
+Solid is not a simple code generator. In fact it doesn't compile code, but it transpiles it.
+For instance, the code you write gets transformed in a working code.
+
+For the limitations of how Flutter works, your app needs to be built from the `lib` directory.
+So the code I transpile must be transpiled in the `lib` folder.
+
+<Aside type="note">
+You can change the input and output directory by passing `--source` and `--output` to the `solid` command if you really need to.
+</Aside>
+
+## Why did I created Solid?
+
+You can learn more in my [blog post here](https://mariuti.com/posts/TODO)
+
+## How can I use Solid with other generators?
+
+Modify (or add) the `build.yaml` file in your project root.
+
+```yaml {6} title="build.yaml"
+targets:
+  $default:
+    sources:
+      - lib/**
+      - $package$
+      - source/**
+```
+
+This way, other generators will also consider the `source` directory as input.
+
+Then in one Terminal tab you simply use `solid --watch` to keep Solid running in watch mode.
+In another Terminal tab you can run `dart run build_runner build --delete-conflicting-outputs` to run other generators.
+
+Then write your code in the `source` directory, using `part` statements or what generators need.
