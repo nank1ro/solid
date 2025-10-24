@@ -1,0 +1,30 @@
+name: example
+description: "A new Flutter project."
+publish_to: 'none' 
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.9.2
+  
+resolution: workspace
+  
+dependencies:
+  dart_mappable: ^4.6.1
+  flutter:
+    sdk: flutter
+  flutter_solidart: ^2.7.0
+  solid_annotations:
+    path: ../packages/solid_annotations
+
+dev_dependencies:
+  build_runner: ^2.10.0
+  dart_mappable_builder: ^4.6.1
+  flutter_test:
+    sdk: flutter
+  very_good_analysis: ^10.0.0
+  
+dependency_overrides:
+  test_api: ^0.7.6
+
+flutter:
+  uses-material-design: true
