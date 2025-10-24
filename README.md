@@ -7,6 +7,7 @@
 [![solid_generator Pub Version (including pre-releases)](https://img.shields.io/pub/v/solid_generator?include_prereleases&label=solid_generator)](https://pub.dev/packages/solid_generator)
 [![solid_annotations Pub Version (including pre-releases)](https://img.shields.io/pub/v/solid_annotations?include_prereleases&label=solid_annotations)](https://pub.dev/packages/solid_annotations)
 [![GitHub Sponsors](https://img.shields.io/github/sponsors/nank1ro)](https://github.com/sponsors/nank1ro)
+
 <a href="https://www.buymeacoffee.com/nank1ro" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/default-orange.png" alt="Buy Me A Coffee" height="41" width="174"></a>
 
 Congrats on your interest in **Solid**! Let's make Flutter development even more enjoyable.
