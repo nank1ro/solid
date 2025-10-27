@@ -1,3 +1,7 @@
+## 1.0.2
+
+- **FIX**: Generator not transpiling code correctly in some cases.
+
 ## 1.0.1
 
 - **FIX**: Remove Flutter SDK.
