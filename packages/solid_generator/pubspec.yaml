@@ -1,6 +1,6 @@
 name: solid_generator
 description: The Solid transpiler to generate fine-grained reactivity in Flutter applications.
-version: 1.0.1
+version: 1.0.2
 homepage: https://solid.mariuti.com
 repository: https://github.com/nank1ro/solid
 documentation: https://solid.mariuti.com
