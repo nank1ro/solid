@@ -864,6 +864,65 @@ class SolidBuilder extends Builder {
 
     if (buildMethod == null) return content; // No build method found
 
+    // Apply reactive field transformation to the build method
+
+    // Extract field names, distinguishing between Signal fields and Resource/Effect methods
+    final signalFieldNames = <String>{}; // @SolidState fields that need .value
+    final resourceMethodNames = <String>{}; // @SolidQuery/@SolidEffect methods that don't need .value
+
+    for (final member in classDeclaration.members) {
+      if (member is FieldDeclaration) {
+        // Check for @SolidState annotation on fields
+        final annotations = member.metadata;
+        final hasSolidState = annotations.any(
+          (annotation) => annotation.name.name == 'SolidState',
+        );
+        if (hasSolidState) {
+          for (final variable in member.fields.variables) {
+            signalFieldNames.add(variable.name.lexeme);
+          }
+        }
+      } else if (member is MethodDeclaration) {
+        // Check for reactive annotations on methods/getters
+        final annotations = member.metadata;
+        final hasSolidQuery = annotations.any(
+          (annotation) => annotation.name.name == 'SolidQuery',
+        );
+        final hasSolidEffect = annotations.any(
+          (annotation) => annotation.name.name == 'SolidEffect',
+        );
+
+        if (hasSolidQuery || hasSolidEffect) {
+          // Resource/Effect methods don't need .value transformation
+          resourceMethodNames.add(member.name.lexeme);
+        }
+      }
+    }
+
+    // Transform reactive field access in the build method
+    // Only apply .value transformation to Signal fields, not Resource/Effect methods
+    if (signalFieldNames.isNotEmpty) {
+      for (final fieldName in signalFieldNames) {
+        // Transform string interpolation: $fieldName to ${fieldName.value}
+        final interpolationPattern = RegExp(
+          r'\$' + RegExp.escape(fieldName) + r'(?!\.value)(?!\w)',
+        );
+        buildMethod = buildMethod!.replaceAll(
+          interpolationPattern,
+          '\${$fieldName.value}',
+        );
+
+        // Transform direct access: fieldName to fieldName.value
+        final directAccessPattern = RegExp(
+          r'\b' + RegExp.escape(fieldName) + r'\b(?!\.value)(?!\()',
+        );
+        buildMethod = buildMethod.replaceAll(
+          directAccessPattern,
+          '$fieldName.value',
+        );
+      }
+    }
+
     // Check if there's already an initState method in the original class
     MethodDeclaration? existingInitState;
     for (final member in classDeclaration.members) {
@@ -1320,7 +1379,8 @@ class SolidBuilder extends Builder {
 
       // Look for lines that contain widget constructor calls
       // Pattern: WidgetName( or _WidgetName( (widget constructors)
-      final widgetCallPattern = RegExp(r'(\s*)(?:return\s+)?(_?[A-Z]\w*)\s*\(');
+      // This should match actual constructor calls, not method calls
+      final widgetCallPattern = RegExp(r'(\s*)(?:return\s+)?([A-Z]\w*)\s*\(');
       final match = widgetCallPattern.firstMatch(line);
 
       if (match != null) {
@@ -1339,17 +1399,44 @@ class SolidBuilder extends Builder {
         }
 
         final indentation = match.group(1) ?? '';
+        final widgetName = match.group(2) ?? '';
 
-        // Check if the line contains reactive field references
+        // Skip if this is clearly a method call (has a dot before the matched name)
+        if (line.contains('.$widgetName(')) {
+          resultLines.add(line);
+          continue;
+        }
+
+        // Skip non-widget classes
+        if (['Navigator', 'Future', 'Stream', 'Duration', 'Timer', 'Named', 'AllMapped', 'UpperCase', 'RegExp', 'At', 'Data', 'Counter'].contains(widgetName)) {
+          resultLines.add(line);
+          continue;
+        }
+
+        // Skip parameter assignments (lines containing : before =>)
+        if (line.contains(':') && line.contains('=>')) {
+          resultLines.add(line);
+          continue;
+        }
+
+        // Check if the line contains reactive field references AND is a widget constructor
         bool containsReactiveAccess = false;
-        for (final fieldName in signalFieldNames) {
-          if (line.contains('\$$fieldName') ||
-              line.contains('\${$fieldName') ||
-              line.contains('$fieldName.') ||
-              line.contains('$fieldName,') ||
-              line.contains('$fieldName)')) {
-            containsReactiveAccess = true;
-            break;
+
+        // First check if this is actually a widget constructor line
+        bool isWidgetConstructor = true; // Assume it's a widget if we got this far
+
+
+        // Only check for reactive access if this is actually a widget constructor
+        if (isWidgetConstructor) {
+          for (final fieldName in signalFieldNames) {
+            if (line.contains('\$$fieldName') ||
+                line.contains('\${$fieldName') ||
+                line.contains('$fieldName.') ||
+                line.contains('$fieldName,') ||
+                line.contains('$fieldName)')) {
+              containsReactiveAccess = true;
+              break;
+            }
           }
         }
 
@@ -1438,16 +1525,18 @@ class SolidBuilder extends Builder {
           }
 
           // Create SignalBuilder wrapper for ANY widget accessing reactive values
+          String transformedLine = cleanedLine;
+
           if (wasReturnStatement) {
             resultLines.add('${indentation}return SignalBuilder(');
             resultLines.add('$indentation  builder: (context, child) {');
-            resultLines.add('$indentation    return $cleanedLine;');
+            resultLines.add('$indentation    return $transformedLine;');
             resultLines.add('$indentation  },');
             resultLines.add('$indentation);');
           } else {
             resultLines.add('${indentation}SignalBuilder(');
             resultLines.add('$indentation  builder: (context, child) {');
-            resultLines.add('$indentation    return $cleanedLine;');
+            resultLines.add('$indentation    return $transformedLine;');
             resultLines.add('$indentation  },');
             resultLines.add('$indentation),');
           }
