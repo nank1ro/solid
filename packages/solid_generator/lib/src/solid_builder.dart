@@ -274,10 +274,16 @@ class SolidBuilder extends Builder {
     }
 
     // Fourth pass: Transform main function if it contains runApp
+    final beforeMainTransform = transpiledContent;
     transpiledContent = _transformMainFunction(transpiledContent, unit);
+    final mainFunctionWasTransformed = beforeMainTransform != transpiledContent;
+
+    // Check if SolidartConfig is used in the content (either newly added or already present)
+    final usesSolidartConfig = transpiledContent.contains('SolidartConfig.');
 
     // Fifth pass: Add imports for flutter_solidart since reactive transformations were done
-    if (hasReactiveCode || _hasMainFunctionWithRunApp(unit)) {
+    // Add import if there's reactive code, a main function with runApp, main function was transformed, or SolidartConfig is used
+    if (hasReactiveCode || _hasMainFunctionWithRunApp(unit) || mainFunctionWasTransformed || usesSolidartConfig) {
       importsToAdd.add(
         "import 'package:flutter_solidart/flutter_solidart.dart';",
       );
@@ -374,8 +380,8 @@ class SolidBuilder extends Builder {
       }
     }
 
-    // If no reactive code was found, return original content (copy as-is)
-    if (!hasReactiveCode) {
+    // If no reactive code was found and no imports need to be added, return original content (copy as-is)
+    if (!hasReactiveCode && importsToAdd.isEmpty) {
       return transpiledContent;
     }
 
