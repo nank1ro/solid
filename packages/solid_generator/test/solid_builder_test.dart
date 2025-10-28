@@ -1141,4 +1141,31 @@ class _QueryWithStreamExampleState extends State<QueryWithStreamExample> {
       outputs: {'a|source/example.solid.dart': expectedOutput},
     );
   });
+
+  test('transpiles main with SolidartConfig', () async {
+    const input = r'''
+import 'package:flutter/material.dart';
+
+void main() {
+  runApp(MaterialApp());
+}
+''';
+
+    final expectedOutput = r'''
+import 'package:flutter/material.dart';
+
+import 'package:flutter_solidart/flutter_solidart.dart';
+
+void main() {
+  SolidartConfig.autoDispose = false;
+  runApp(MaterialApp());
+}
+''';
+
+    await testBuilder(
+      SolidBuilder(),
+      {'a|source/main.dart': input},
+      outputs: {'a|source/main.solid.dart': expectedOutput},
+    );
+  });
 }

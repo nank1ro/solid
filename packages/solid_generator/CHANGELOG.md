@@ -1,3 +1,7 @@
+## 1.0.3
+
+- **FIX**: Missing `flutter_solidart` import in generated `main.dart` file, if no reactive annotations are used.
+
 ## 1.0.2
 
 - **FIX**: Generator not transpiling code correctly in some cases.
