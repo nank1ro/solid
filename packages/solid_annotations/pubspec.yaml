@@ -17,8 +17,6 @@ environment:
 resolution: workspace
 
 dependencies:
-  flutter:
-    sdk: flutter
   meta: ^1.16.0
 
 dev_dependencies:
