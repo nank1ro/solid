@@ -2,5 +2,3 @@
 library;
 
 export 'src/annotations.dart';
-export 'src/extensions.dart';
-export 'src/provider.dart';
