@@ -102,7 +102,7 @@ class SolidEnvironment { const SolidEnvironment(); }
 
 **Dependencies:** M0-01, M0-02.
 
-**Status:** TODO
+**Status:** DONE
 
 ---
 

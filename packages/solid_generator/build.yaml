@@ -1,0 +1,20 @@
+# Builders for the Solid generator. See SPEC Section 2.
+builders:
+  solid_builder:
+    import: "package:solid_generator/builder.dart"
+    builder_factories:
+      - solidBuilder
+    build_extensions:
+      "^source/{{}}.dart":
+        - "lib/{{}}.dart"
+    build_to: source
+    auto_apply: dependents
+    applies_builders: []
+
+targets:
+  $default:
+    sources:
+      - "source/**"
+      - "lib/**"
+      - "pubspec.*"
+      - "$package$"
