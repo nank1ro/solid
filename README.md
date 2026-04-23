@@ -55,7 +55,7 @@ class Counter extends StatelessWidget {
 
 You get this result, with real fine-grained reactivity:
 
-[![Demo of Solid fine-grained reactivity](./docs/src/assets/solid_demo.gif)](../../assets/solid_demo.gif)
+[![Demo of Solid fine-grained reactivity](https://raw.githubusercontent.com/nank1ro/solid/main/docs/src/assets/solid_demo.gif)](https://github.com/nank1ro/solid/blob/main/docs/src/assets/solid_demo.gif)
 
 As you can see, the `DateTime.now()` text does not update when the counter changes, only the `Counter is X` text updates. This is because Solid tracks which parts of the UI depend on which state, and only updates those parts when the state changes, without any manual work from you.
 
