@@ -29,7 +29,7 @@ Nothing about `@SolidState` works yet — only the plumbing.
 
 - **`build.yaml` shape.** Use `build_extensions` with capture groups. `auto_apply: dependents`, `build_to: source` (so writes land in real `lib/` files, not the build cache). Explicit `sources:` under `targets.$default` including both `source/**` and `lib/**` plus `pubspec.*` and `$package$`.
 - **Analyzer suppressions.** `example/analysis_options.yaml` needs `must_be_immutable: ignore`, `always_put_required_named_parameters_first: ignore`, `invalid_annotation_target: ignore` so that a `StatelessWidget` with mutable `@SolidState` fields does not trip lint.
-- **Versions.** Pin minimums for `build: ^2.4.0`, `build_runner: ^2.10.1`, `build_config: ^1.1.0`, `analyzer: ^6`, `dart_style: ^2.3`, `flutter_solidart: ^2.7.0`. Document in `packages/solid_generator/pubspec.yaml`.
+- **Versions.** Pin minimums for `build: ^4.0.5`, `build_runner: ^2.14.0`, `build_config: ^1.3.0`, `analyzer: ^13.0.0`, `dart_style: ^3.1.8`, `flutter_solidart: ^2.7.3`. Document in `packages/solid_generator/pubspec.yaml`.
 - **`.gitignore`.** Ignore `.dart_tool/`, `.packages`, `build/`, `.flutter-plugins`, `.flutter-plugins-dependencies`. Do NOT ignore `example/source/**` or `example/lib/**` — both are committed review artifacts.
 - **Package names.** Per SPEC Section 14 item 5: two packages. `package:solid_annotations` (runtime dep) hosts the annotations; `package:solid_generator` (dev_dep) hosts the builder. There is no `package:solid` umbrella. Users import `package:solid_annotations/solid_annotations.dart` for annotations and `package:flutter_solidart/flutter_solidart.dart` for reactive primitives.
 

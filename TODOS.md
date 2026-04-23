@@ -89,7 +89,7 @@ class SolidEnvironment { const SolidEnvironment(); }
 
 **Files to create/modify:**
 
-- `packages/solid_generator/pubspec.yaml` — deps on `analyzer`, `build`, `build_config`, `dart_style`, `solid_annotations` (path: `../solid_annotations`); dev_deps on `build_runner`, `build_test`, `test`.
+- `packages/solid_generator/pubspec.yaml` — deps on `analyzer: ^13.0.0`, `build: ^4.0.5`, `build_config: ^1.3.0`, `dart_style: ^3.1.8`, `solid_annotations` (path: `../solid_annotations`); dev_deps on `build_runner: ^2.14.0`, `build_test`, `test`.
 - `packages/solid_generator/build.yaml` — `build_extensions: {'^source/{{}}.dart': ['lib/{{}}.dart']}`, `build_to: source`, `auto_apply: dependents`, explicit `sources: [source/**, lib/**, pubspec.*, $package$]`.
 - `packages/solid_generator/lib/builder.dart` — `Builder solidBuilder(BuilderOptions opts)` factory that returns a no-op builder (reads input, writes it unchanged to the mapped output path).
 - `packages/solid_generator/test/.gitkeep`.
@@ -114,7 +114,7 @@ class SolidEnvironment { const SolidEnvironment(); }
 
 **Files to create/modify:**
 
-- `example/pubspec.yaml` — Flutter app deps on `solid_annotations` (path `../packages/solid_annotations`) and `flutter_solidart`; dev_deps on `solid_generator` (path `../packages/solid_generator`) and `build_runner`.
+- `example/pubspec.yaml` — Flutter app deps on `solid_annotations` (path `../packages/solid_annotations`) and `flutter_solidart: ^2.7.3`; dev_deps on `solid_generator` (path `../packages/solid_generator`) and `build_runner: ^2.14.0`.
 - `example/analysis_options.yaml` — `include: package:very_good_analysis/analysis_options.yaml`, lint suppressions: `must_be_immutable: ignore`, `always_put_required_named_parameters_first: ignore`, `invalid_annotation_target: ignore`.
 - `example/source/counter.dart` — hello-world stateful widget with no annotations (plain `Text('hello')`). Replaced by M1-05 golden source.
 - `example/lib/main.dart` — `void main() => runApp(MaterialApp(home: Counter()));` importing `counter.dart`. Hand-written; must survive `dart run build_runner build` because M0-03 is a no-op for files without annotations.
