@@ -699,7 +699,7 @@ These were open questions during SPEC drafting and have been answered by the dev
 2. **Compound-assignment operator list in Section 5.3** — complete.
 3. **`@SolidState` on `final` fields** — rejected with a clear error (wrapping a never-reassigned value in a `Signal` is pointless).
 4. **Custom `initState` / `didUpdateWidget` overrides in an existing State class (Section 8.2)** — preserved untouched. If an existing `dispose()` is present, reactive disposals are merged into its body.
-5. **User-facing package name** — keep the current layout: `package:solid_annotations` holds the annotations and `package:solid` is the umbrella package that re-exports the annotations plus the curated subset of `flutter_solidart` symbols Solid programs need.
+5. **User-facing packages** — two packages. `package:solid_annotations` (runtime dep) hosts the annotation classes (`@SolidState` today; `@SolidEffect`/`@SolidQuery`/`@SolidEnvironment` in later milestones). `package:solid_generator` (dev_dep) hosts the build_runner builder. There is no `package:solid` umbrella. Consumers add `solid_annotations` + `flutter_solidart` as runtime deps and `solid_generator` + `build_runner` as dev_deps, then import annotations and `flutter_solidart` primitives directly.
 6. **Shadowing rule (Section 5.5)** — handled by type resolution. Because Section 5.1 is type-driven, a shadowed local of a non-`SignalBase` type is never rewritten. A dedicated shadowing test case is required in M1.
 7. **`const` on the public widget constructor (Section 8.1)** — added when all fields and default values are `const`-compatible.
 

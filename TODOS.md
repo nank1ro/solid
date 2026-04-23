@@ -31,7 +31,7 @@ This file is the committed, resume-safe task queue for the v2 rebuild. A fresh a
 
 **Files to create/modify:**
 
-- `pubspec.yaml` (workspace root): workspace declaration listing all four sub-packages (`packages/solid_annotations`, `packages/solid_generator`, `packages/solid`, `example`).
+- `pubspec.yaml` (workspace root): workspace declaration listing all workspace members — two packages (`packages/solid_annotations`, `packages/solid_generator`) plus the `example/` Flutter app.
 - `analysis_options.yaml` (workspace root): `include: package:very_good_analysis/analysis_options.yaml`.
 - `.gitignore`: `.dart_tool/`, `.packages`, `build/`, `.flutter-plugins`, `.flutter-plugins-dependencies`. Do NOT ignore `source/**` or `lib/**`.
 
@@ -106,28 +106,6 @@ class SolidEnvironment { const SolidEnvironment(); }
 
 ---
 
-### TODO M0-04 — `solid` umbrella package
-
-**Goal:** The user-facing import. Re-exports `solid_annotations` plus the subset of `flutter_solidart` symbols listed in SPEC Section 9.
-
-**SPEC references:** Section 9, Section 14 item 5.
-
-**Files to create/modify:**
-
-- `packages/solid/pubspec.yaml` — deps on `solid_annotations` (path: `../solid_annotations`) and `flutter_solidart`.
-- `packages/solid/lib/solid.dart` — re-exports `package:solid_annotations/solid_annotations.dart` and `package:flutter_solidart/flutter_solidart.dart` (full export; `untracked` is a top-level function that comes for free).
-
-**Acceptance:**
-
-- `dart analyze packages/solid` → zero issues.
-- An external Dart file that does `import 'package:solid/solid.dart';` can name `SolidState`, `Signal`, `Computed`, `SignalBuilder`, `untracked`.
-
-**Dependencies:** M0-02.
-
-**Status:** TODO
-
----
-
 ### TODO M0-05 — `example/` hello-world shell
 
 **Goal:** Minimal Flutter app with `source/counter.dart` (hand-written) and `lib/main.dart` (entry point). Used as both M0 smoke-test and M1-05 canonical golden.
@@ -136,7 +114,7 @@ class SolidEnvironment { const SolidEnvironment(); }
 
 **Files to create/modify:**
 
-- `example/pubspec.yaml` — Flutter app deps on `solid` (path `../packages/solid`), dev_dep on `solid_generator` (path `../packages/solid_generator`) and `build_runner`.
+- `example/pubspec.yaml` — Flutter app deps on `solid_annotations` (path `../packages/solid_annotations`) and `flutter_solidart`; dev_deps on `solid_generator` (path `../packages/solid_generator`) and `build_runner`.
 - `example/analysis_options.yaml` — `include: package:very_good_analysis/analysis_options.yaml`, lint suppressions: `must_be_immutable: ignore`, `always_put_required_named_parameters_first: ignore`, `invalid_annotation_target: ignore`.
 - `example/source/counter.dart` — hello-world stateful widget with no annotations (plain `Text('hello')`). Replaced by M1-05 golden source.
 - `example/lib/main.dart` — `void main() => runApp(MaterialApp(home: Counter()));` importing `counter.dart`. Hand-written; must survive `dart run build_runner build` because M0-03 is a no-op for files without annotations.
@@ -147,7 +125,7 @@ class SolidEnvironment { const SolidEnvironment(); }
 - `dart run build_runner build --delete-conflicting-outputs` in `example/` exits 0; `example/lib/counter.dart` is identical to `example/source/counter.dart`.
 - `flutter run -d chrome` (or any device) boots and shows "hello".
 
-**Dependencies:** M0-03, M0-04.
+**Dependencies:** M0-03.
 
 **Status:** TODO
 
@@ -192,7 +170,7 @@ class SolidEnvironment { const SolidEnvironment(); }
 **Expected input content:**
 
 ```dart
-import 'package:solid/solid.dart';
+import 'package:solid_annotations/solid_annotations.dart';
 import 'package:flutter/widgets.dart';
 
 class Counter extends StatelessWidget {
@@ -269,7 +247,7 @@ class _CounterState extends State<Counter> {
 **Expected input content:**
 
 ```dart
-import 'package:solid/solid.dart';
+import 'package:solid_annotations/solid_annotations.dart';
 import 'package:flutter/widgets.dart';
 
 class Greeting extends StatelessWidget {
@@ -361,7 +339,7 @@ class _GreetingState extends State<Greeting> {
 **Expected input content:**
 
 ```dart
-import 'package:solid/solid.dart';
+import 'package:solid_annotations/solid_annotations.dart';
 import 'package:flutter/widgets.dart';
 
 class Score extends StatelessWidget {
@@ -449,7 +427,7 @@ class _ScoreState extends State<Score> {
 **Expected input content:**
 
 ```dart
-import 'package:solid/solid.dart';
+import 'package:solid_annotations/solid_annotations.dart';
 import 'package:flutter/material.dart';
 
 class CounterPage extends StatelessWidget {
@@ -537,7 +515,7 @@ class _CounterPageState extends State<CounterPage> {
 **Expected input content:**
 
 ```dart
-import 'package:solid/solid.dart';
+import 'package:solid_annotations/solid_annotations.dart';
 
 class Counter {
   @SolidState()
@@ -589,7 +567,7 @@ class Counter {
 **Expected input content:**
 
 ```dart
-import 'package:solid/solid.dart';
+import 'package:solid_annotations/solid_annotations.dart';
 import 'package:flutter/widgets.dart';
 
 class Counter extends StatefulWidget {
