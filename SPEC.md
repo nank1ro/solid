@@ -139,12 +139,12 @@ late String text;
 Output:
 
 ```dart
-final text = Signal<String>('', name: 'text');
+late final text = Signal<String>('', name: 'text');
 ```
 
 Rules:
 
-- The generator drops the `late` keyword; generated signals are always `final`.
+- The generator preserves the `late` keyword — valid Dart that defers `Signal` construction until first access.
 - Nullable fields (§4.3) do not require `late` because `null` is a valid default.
 
 Default values by declared type:
