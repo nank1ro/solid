@@ -30,12 +30,12 @@ Rules:
 
 - **Input path**: any `.dart` file under `source/` at any depth.
 - **Output path**: same relative path under `lib/`. No suffix change. `source/foo/bar.dart` becomes `lib/foo/bar.dart`.
-- **Non-Dart files are copied verbatim.** Any non-`.dart` file under `source/` is copied byte-for-byte to the mirrored path under `lib/` with no transformation. Only `.dart` files go through the generator.
+- **Transformation vs verbatim copy.** Solid reads every `.dart` file under `source/`. If a file contains at least one `@Solid*` annotation (`@SolidState` today; `@SolidEffect`, `@SolidQuery`, `@SolidEnvironment` in later milestones), Solid transforms it. Otherwise the file is copied verbatim to the mirrored path under `lib/`. Non-`.dart` files (assets, configs, etc.) are always copied verbatim. The key is annotation presence, not file extension.
 - **Both are committed to git.** Source is the review artifact for intent. Lib is the review artifact for correctness — every PR that changes `source/` must include the regenerated `lib/` diff so reviewers catch generator regressions.
-- **No `.g.dart` files are emitted.** Neither under `source/` nor under `lib/`.
+- **Solid emits no `.g.dart` files of its own.** Third-party generators (freezed, json_serializable, drift) may emit `.g.dart` or `.freezed.dart` files under `source/`; Solid copies those verbatim to the mirrored path under `lib/`.
 - **The example app's `main.dart`** lives in `lib/` (or `source/` if itself annotated) and imports from `lib/` using normal Flutter imports (`import 'counter.dart';`).
 - **Source is analyzed** with a couple of lint suppressions (notably `must_be_immutable`) so that a `StatelessWidget` with a mutable `@SolidState` field does not trip the analyzer. Source remains valid Dart at all times; any real error (typo, type error, undefined symbol) fails analysis.
-- **Hot reload works normally.** `dart run build_runner watch` regenerates `lib/` as the developer edits `source/`; `flutter run` hot-reloads from `lib/`. This is the whole flow; there is no separate CLI.
+- **Hot reload requires a bridge.** `dart run build_runner watch` regenerates `lib/` as the developer edits `source/`, but `flutter run` does not auto-detect that filesystem change because no IDE save event fires. The developer must either press `r` in the `flutter run` terminal after build_runner emits, or use `dashmon` (https://pub.dev/packages/dashmon) to bridge the filesystem change to Flutter's stdin automatically. See Section 12 for the full workflow.
 
 ---
 
@@ -64,7 +64,7 @@ int counter = 0;
 
 #### Valid targets
 
-- Instance field with or without an initializer.
+- Instance field with an initializer, or a `late` non-nullable field without one; nullable fields need neither.
 - Instance getter with an expression body (`=> ...`) or a block body (`{ return ...; }`).
 
 #### Invalid targets (the generator must reject with a clear error)
@@ -127,13 +127,13 @@ Rules:
 - Initializer expression → first positional argument of `Signal`.
 - Field name → `name:` argument, unless `@SolidState(name: '…')` overrides.
 
-### 4.2 Field with no initializer
+### 4.2 Field with no initializer (must be declared `late`)
 
 Input:
 
 ```dart
 @SolidState()
-String text;
+late String text;
 ```
 
 Output:
@@ -141,6 +141,11 @@ Output:
 ```dart
 final text = Signal<String>('', name: 'text');
 ```
+
+Rules:
+
+- The generator drops the `late` keyword; generated signals are always `final`.
+- Nullable fields (§4.3) do not require `late` because `null` is a valid default.
 
 Default values by declared type:
 
@@ -206,8 +211,9 @@ late final doubleCounter = Computed<int>(() => counter.value * 2, name: 'doubleC
 
 Rules:
 
-- The getter body MUST read at least one reactive declaration (a `@SolidState` field or another `@SolidState` getter) on the same class. A `Computed` with zero reactive dependencies is a plain constant and is rejected by the generator with: *"getter `<name>` has no reactive dependencies; use `final` or a plain getter instead of `@SolidState`."*
-- Identifiers in the body that resolve to reactive declarations on the same class are rewritten with `.value` (see Section 5).
+- The getter body MUST read at least one reactive declaration — any identifier whose resolved static type is `SignalBase<T>` or a subtype. A `Computed` with zero reactive dependencies is rejected: *"getter `<name>` has no reactive dependencies; use `final` or a plain getter instead of `@SolidState`."*
+- In M1 the only source of such a declaration is a `@SolidState` field or getter on the same class. Later milestones add cross-class declarations via `@SolidEnvironment` (Section 13); the rule is stated in terms of resolved type so no SPEC change is required when they land.
+- Identifiers in the body that resolve to reactive declarations are rewritten with `.value` (see Section 5).
 - The resulting `Computed` field is always declared `late final`, because it references other `final` instance fields whose initialization order is not guaranteed.
 
 ### 4.6 Getter with block body
@@ -437,6 +443,16 @@ If a read is not in one of the contexts defined in Sections 6.2, 6.3, or 6.4, it
 
 Tracking is determined by the innermost enclosing AST ancestor that matches a rule. A `Text(counter)` inside an `onPressed` callback is untracked. A `Text(counter)` outside any callback is tracked.
 
+Closures passed to non-user-interaction parameters (e.g., `Builder(builder: ...)`, `LayoutBuilder(builder: ...)`, `ListView.builder(itemBuilder: ...)`) do not create an untracked context. Reads inside those closures are tracked and trigger `SignalBuilder` wrapping per Section 7. Only the parameter names enumerated in Section 6.2 mark reads as untracked.
+
+Example:
+
+```dart
+Builder(builder: (context) => Text(counter))
+```
+
+Output wraps the `Text` in a `SignalBuilder` (see Section 7). `Builder`'s `builder:` is not on the Section 6.2 list.
+
 ---
 
 ## 7. SignalBuilder Placement Rules
@@ -584,7 +600,7 @@ class Counter {
 }
 ```
 
-If the developer has already declared a `dispose()` method, the generator merges: the generated disposal calls are prepended to the existing body, then `super.dispose()` is called only if the class `extends` a class that has its own `dispose()` (heuristic: if the source class extends anything other than `Object`, emit `super.dispose()` at the end; otherwise omit).
+If the developer has already declared a `dispose()` method, the generator merges: the generated disposal calls are prepended to the existing body, then `super.dispose()` is emitted if and only if the class's supertype chain contains a `dispose()` method (e.g., `State<T>`, `ChangeNotifier`). The generator determines this via the analyzer's type resolution, not by name matching. For a plain class with no `dispose()` in the supertype chain, `super.dispose()` is omitted.
 
 ### 8.4 StatelessWidget with zero `@SolidState` annotations
 
@@ -608,7 +624,7 @@ This is the fix for issue #8.
 
 Every generated `Signal` and `Computed` must be disposed when its owning class is disposed. The merging algorithm below applies identically to every class kind; the per-kind sections (8.1–8.3) describe how the algorithm is triggered.
 
-Algorithm: if the target class already has a `dispose()` body, prepend one `xxx.dispose()` call per reactive declaration to the top of the body and leave the rest untouched; if no `dispose()` exists, synthesize one. Emit `super.dispose()` at the end when the class extends anything other than `Object`.
+Algorithm: if the target class already has a `dispose()` body, prepend one `xxx.dispose()` call per reactive declaration to the top of the body and leave the rest untouched; if no `dispose()` exists, synthesize one. Emit `super.dispose()` at the end if and only if the class's supertype chain contains a `dispose()` method (e.g., `State<T>`, `ChangeNotifier`); the generator determines this via the analyzer's type resolution, not by name matching. For a plain class with no `dispose()` in the supertype chain, omit `super.dispose()`.
 
 Disposal order is **reverse declaration order**: dependents are disposed before their dependencies. Because a `Computed` must always be declared after the `Signal`s it reads (those `Signal`s are the `Computed`'s dependencies), reverse declaration order guarantees the `Computed` is disposed first and a `Signal` is never disposed while a live `Computed` still holds a subscription to it.
 
@@ -631,25 +647,30 @@ my_app/
   .gitignore              ← excludes .dart_tool/, build/
 ```
 
-The `source/` tree mirrors `lib/` one-to-one. Every file under `source/` has a counterpart at the mirrored path under `lib/` (`.dart` files transformed per Sections 4–10; non-`.dart` files copied verbatim per Section 2).
+The `source/` tree mirrors `lib/` one-to-one. Every file under `source/` has a counterpart at the mirrored path under `lib/` (`.dart` files with `@Solid*` annotations transformed per Sections 4–10; all other files copied verbatim per Section 2).
 
-No `.g.dart` files are emitted anywhere visible to the developer. (Test golden outputs inside the generator package may use `.g.dart` for clarity; that is an internal convention, not a user-facing one.)
+Third-party code generators (freezed, json_serializable, drift, etc.) may emit `.g.dart` or `.freezed.dart` files under `source/`. Solid copies those files verbatim to the mirrored path under `lib/`. Solid itself emits only plain `.dart` filenames — no `.g.dart` suffix for Solid's own output. (Test golden outputs inside Solid's generator package may use `.g.dart` for clarity; that is an internal convention.)
 
 ---
 
 ## 12. Hot Reload Contract
 
-Running the generator in watch mode alongside Flutter:
+`dart run build_runner watch` regenerates `lib/foo.dart` when `source/foo.dart` changes. However, `flutter run` does NOT auto-detect that change: Flutter hot-reload is triggered by IDE save events, not by filesystem changes. When build_runner emits a new file, no IDE save event fires, so Flutter does not hot-reload on its own.
+
+Two supported workflows (both require `dart run build_runner watch` in one terminal):
 
 ```bash
-# terminal 1
+# terminal 1 (both options)
 dart run build_runner watch
 
-# terminal 2
-flutter run
+# Option A: manual reload
+flutter run    # press r after build_runner emits
+
+# Option B: dashmon (https://pub.dev/packages/dashmon)
+dart pub global run dashmon    # wraps flutter run, auto-reloads on lib/ change
 ```
 
-When the developer saves a file under `source/`, the generator rewrites the corresponding file under `lib/`, and Flutter's file watcher picks up the `lib/` change and hot-reloads. The developer saves once.
+With Option A the developer saves `source/`, waits for build_runner to emit, then presses `r`. With Option B `dashmon` watches `lib/` for filesystem changes and sends the `r` keystroke to Flutter automatically.
 
 ---
 
@@ -698,6 +719,6 @@ This SPEC addresses the following real user-reported issues from the v1 repo:
 - **#4** — untracked reads (`ValueKey`, `onPressed`) were wrapped in `SignalBuilder`, breaking compilation; Section 6 defines the untracked-context rules.
 - **#6** — `Text(text)` did not receive `.value` because the rewriter missed bare identifier reads; Section 5.1 defines the rewrite rule exhaustively.
 - **#8** — generated `main.dart` used `SolidartConfig` without importing `flutter_solidart`; Section 9 defines the import-addition rule.
-- **#9** — hot reload required a double-save; Section 12 defines the expected single-save flow via `build_runner watch` + `flutter run`.
+- **#9** — hot reload required a double-save; Section 12 defines the two supported workflows: manual `r` after build_runner emits, or `dashmon` to bridge filesystem changes to Flutter's stdin automatically.
 
 Issue #11 (build speed) and issue #1 (docs typo) are process concerns addressed outside this SPEC.
