@@ -42,7 +42,7 @@ This file is the committed, resume-safe task queue for the v2 rebuild. A fresh a
 
 **Dependencies:** none.
 
-**Status:** TODO
+**Status:** DONE
 
 ---
 

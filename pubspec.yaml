@@ -5,6 +5,7 @@ environment:
 workspace:
   - packages/solid_generator
   - packages/solid_annotations
+  - example
 
 dev_dependencies:
   very_good_analysis: ^10.0.0
