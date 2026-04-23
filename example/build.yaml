@@ -1,0 +1,7 @@
+targets:
+  $default:
+    sources:
+      - source/**
+      - lib/**
+      - pubspec.*
+      - $package$

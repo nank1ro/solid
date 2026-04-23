@@ -2,7 +2,5 @@ include: package:very_good_analysis/analysis_options.yaml
 analyzer:
   errors:
     must_be_immutable: ignore
-    prefer_const_constructors_in_immutables: ignore
-linter:
-  rules:
-    public_member_api_docs: false
+    always_put_required_named_parameters_first: ignore
+    invalid_annotation_target: ignore
