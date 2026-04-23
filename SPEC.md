@@ -1,7 +1,7 @@
 # Solid — Product Specification (v2)
 
 **Status:** DRAFT — under review
-**Scope of this SPEC:** defines the user-facing contract for `@SolidState`. All other annotations are listed only to pin the v1 boundary; their full contract lives in a future SPEC revision.
+**Scope of this SPEC:** defines the user-facing contract for `@SolidState` (the first implementation milestone, M1). The other annotations shipped before v2 release — `@SolidEffect`, `@SolidQuery`, `@SolidEnvironment` — are reserved names only; their full contract lives in a future SPEC revision.
 
 This document is the single source of truth for what Solid does. Reviewer agents cite this document by section number when judging an implementation. It contains no file names, no class names, no AST details — only what the developer sees and the guarantees they get.
 
@@ -24,21 +24,26 @@ source/counter.dart        ← developer writes (committed)
 lib/counter.dart           ← Solid emits (committed)
 ```
 
+> **Why this differs from the pub.dev convention.** Most Dart generators read files from `lib/` and emit adjacent `*.g.dart` parts. Solid cannot: annotated Solid source violates Flutter invariants — e.g., a `StatelessWidget` with mutable fields — so it is not valid to ship as-is under `lib/`. The solution is to put source in its own top-level directory (`source/`) and let Solid emit the runnable form into `lib/`.
+
 Rules:
 
 - **Input path**: any `.dart` file under `source/` at any depth.
 - **Output path**: same relative path under `lib/`. No suffix change. `source/foo/bar.dart` becomes `lib/foo/bar.dart`.
+- **Non-Dart files are copied verbatim.** Any non-`.dart` file under `source/` is copied byte-for-byte to the mirrored path under `lib/` with no transformation. Only `.dart` files go through the generator.
 - **Both are committed to git.** Source is the review artifact for intent. Lib is the review artifact for correctness — every PR that changes `source/` must include the regenerated `lib/` diff so reviewers catch generator regressions.
 - **No `.g.dart` files are emitted.** Neither under `source/` nor under `lib/`.
 - **The example app's `main.dart`** lives in `lib/` (or `source/` if itself annotated) and imports from `lib/` using normal Flutter imports (`import 'counter.dart';`).
 - **Source is analyzed** with a couple of lint suppressions (notably `must_be_immutable`) so that a `StatelessWidget` with a mutable `@SolidState` field does not trip the analyzer. Source remains valid Dart at all times; any real error (typo, type error, undefined symbol) fails analysis.
-- **Hot reload works normally.** `dart run build_runner watch` regenerates `lib/` as the developer edits `source/`; `flutter run` hot-reloads from `lib/`. This is the whole flow; there is no separate CLI. (Addresses issue #9.)
+- **Hot reload works normally.** `dart run build_runner watch` regenerates `lib/` as the developer edits `source/`; `flutter run` hot-reloads from `lib/`. This is the whole flow; there is no separate CLI.
 
 ---
 
 ## 3. Annotations
 
-### 3.1 v1 scope: `@SolidState`
+> **Milestones vs v2.** The v2 public release ships the full annotation set: `@SolidState`, `@SolidEffect`, `@SolidQuery`, `@SolidEnvironment`. Implementation is split into internal milestones. M1 implements `@SolidState` only. Later milestones add the remaining annotations before v2 ships. The user-facing API of every annotation is fixed in this SPEC; no source-code change is required when a later milestone lands.
+
+### 3.1 M1 scope: `@SolidState`
 
 `@SolidState` declares a reactive property on a class. It attaches to either a field or a getter.
 
@@ -66,18 +71,18 @@ int counter = 0;
 
 - `final` field (a `Signal` wrapping a never-reassigned value is a static constant — pointless).
 - `const` field (same reason plus a type-system impossibility).
-- `static` field or getter (class-level, not instance; out of v1 scope).
+- `static` field or getter (class-level, not instance; out of M1 scope).
 - Top-level variable or getter.
 - Method (not a getter).
 - Setter.
 
-### 3.2 Out of v1 scope
+### 3.2 Later milestones (shipped before v2 release)
 
-The following annotations are defined by the blog-post vision but are NOT implemented in v1. If the developer uses them, the generator must fail with a clear error that names the annotation and says "not implemented in v1."
+The following annotations are part of the v2 public release but land in milestones after M1. Until each one ships, the generator must fail with a clear error that names the annotation and says "not yet implemented; scheduled for a later v2 milestone." Their names are reserved here; the full user-facing contract (parameters, valid targets, transformation rules) will be specified in a future SPEC revision before each lands.
 
-- `@SolidEffect()` — reactive side effect (method)
-- `@SolidQuery({Duration? debounce, bool? useRefreshing})` — async reactive source (method)
-- `@SolidEnvironment()` — dependency injection (field)
+- `@SolidEffect` — reactive side effect (method)
+- `@SolidQuery` — async reactive source (method)
+- `@SolidEnvironment` — dependency injection (field)
 
 ### 3.3 Permanent non-goals
 
@@ -86,7 +91,7 @@ Solid will never:
 - Replace `flutter_solidart`. Signal / Computed / Effect / Resource / SignalBuilder come from the upstream package.
 - Ship its own reactive runtime.
 - Use Dart Macros, Dart augmentations, or part-file patterns.
-- Support multi-file generation (one source file → one lib file).
+- Split one source file into multiple lib files. Each `source/*.dart` produces exactly one `lib/*.dart` at the mirrored path.
 
 ---
 
@@ -110,7 +115,7 @@ class Counter extends StatelessWidget {
 }
 ```
 
-Output (excerpt, see §8 for the full class transform):
+Output (excerpt, see Section 8 for the full class transform):
 
 ```dart
 final counter = Signal<int>(0, name: 'counter');
@@ -180,24 +185,7 @@ Output:
 final counter = Signal<int>(0, name: 'myCounter');
 ```
 
-### 4.5 Getter → Computed (no dependencies on other reactive state)
-
-Input:
-
-```dart
-@SolidState()
-String get label => 'hello';
-```
-
-Output:
-
-```dart
-final label = Computed<String>(() => 'hello', name: 'label');
-```
-
-Rule: when the getter body does not read any reactive identifier defined on the same class, the field is declared `final` (not `late final`).
-
-### 4.6 Getter → Computed (with dependencies)
+### 4.5 Getter → Computed
 
 Input:
 
@@ -218,10 +206,11 @@ late final doubleCounter = Computed<int>(() => counter.value * 2, name: 'doubleC
 
 Rules:
 
-- Identifiers in the body that match other reactive declarations on the same class are rewritten with `.value` (see §5).
-- The resulting `Computed` field is declared `late final` (not `final`), because it references other `final` instance fields whose initialization order is not guaranteed.
+- The getter body MUST read at least one reactive declaration (a `@SolidState` field or another `@SolidState` getter) on the same class. A `Computed` with zero reactive dependencies is a plain constant and is rejected by the generator with: *"getter `<name>` has no reactive dependencies; use `final` or a plain getter instead of `@SolidState`."*
+- Identifiers in the body that resolve to reactive declarations on the same class are rewritten with `.value` (see Section 5).
+- The resulting `Computed` field is always declared `late final`, because it references other `final` instance fields whose initialization order is not guaranteed.
 
-### 4.7 Getter with block body
+### 4.6 Getter with block body
 
 Input:
 
@@ -248,11 +237,13 @@ The block is copied verbatim into a function expression with reactive-read rewri
 
 ## 5. Reactive-Read Rules
 
-When a generated piece of code (anything under `lib/`) references a name that was declared reactive in the source, the reference is rewritten to read through the reactive primitive.
+When a generated piece of code (anything under `lib/`) references a reactive value, the reference is rewritten to read through the reactive primitive. The decision is **type-driven**, not name-driven: the generator uses the Dart analyzer's resolved static type, not a name-set, to decide whether to append `.value`.
 
 ### 5.1 Identifier rewrite
 
-Every bare `SimpleIdentifier` whose name matches a `@SolidState` field or getter on the enclosing class is rewritten to `<name>.value`.
+A bare `SimpleIdentifier` is rewritten to `<name>.value` if and only if its resolved static type is `SignalBase<T>` (or a subtype: `Signal<T>`, `Computed<T>`, `ReadSignal<T>`, `Resource<T>`) from `package:flutter_solidart`.
+
+In M1 the only way to introduce such an identifier is via `@SolidState` on the enclosing class, but the rule itself is expressed in terms of resolved type so later milestones (`@SolidEnvironment`, `@SolidQuery`) work without amendment.
 
 Source:
 
@@ -260,7 +251,7 @@ Source:
 Text(counter.toString())
 ```
 
-Output (inside a SignalBuilder — see §7):
+Output (inside a SignalBuilder — see Section 7):
 
 ```dart
 Text(counter.value.toString())
@@ -286,6 +277,8 @@ Already-qualified `${counter.value}` in source stays as-is (no double-append).
 
 ### 5.3 Compound assignment rewrite
 
+Only the **left-hand side** of an assignment expression is the write. The **right-hand side** is a read, and is subject to the normal `.value` rewriting rule from Section 5.1. In `counter = counter + 1`, the left `counter` is a write (never subscribes — see Section 6.0) and the right `counter` is a read (receives `.value`).
+
 Source:
 
 ```dart
@@ -294,7 +287,7 @@ onPressed: () { counter = counter + 1; }
 onPressed: () { counter += 5; }
 ```
 
-Output (see §6 for why these are not wrapped in SignalBuilder):
+Output (see Section 6.0 — writes never trigger subscription, but their RHS reads still get `.value`):
 
 ```dart
 onPressed: () => counter.value++
@@ -304,13 +297,19 @@ onPressed: () { counter.value += 5; }
 
 Supported operators: `=`, `+=`, `-=`, `*=`, `/=`, `~/=`, `%=`, `??=`, `<<=`, `>>=`, `|=`, `&=`, `^=`, `++` (prefix/postfix), `--` (prefix/postfix).
 
-### 5.4 Double-append protection
+Compound-assignment operators (`+=`, `++`, etc.) are sugar: the LHS position is simultaneously a read (to compute the new value) and a write (to store it). The `.value` appears once per textual occurrence, matching Dart's evaluation of the compound form.
 
-If the source already has `name.value`, the generator must NOT rewrite it to `name.value.value`. The rewriter is idempotent.
+### 5.4 Type-aware `.value` append
+
+The rewriter appends `.value` only when the receiver's resolved static type is `SignalBase<T>` or a subtype. If the type is anything else, the rewriter leaves the expression untouched.
+
+This matters because `.value` is a common field name on ordinary Dart objects (e.g., `TextEditingController.value`, `ValueNotifier.value`). A name-based rewriter would produce nonsensical `controller.value.value` code. The type-based rule is the only correct form and is also inherently idempotent: once `counter.value` has been rewritten, the outer expression's type is `int` (not `SignalBase<int>`), so the rule stops applying.
+
+The generator MUST resolve types through `package:analyzer`. Name-matching, regex, or string heuristics are not acceptable implementations of this rule.
 
 ### 5.5 Shadowing
 
-If a local variable or parameter inside a function shadows a reactive-field name, the generator does NOT rewrite the shadowed use.
+Shadowing is handled automatically because the rule in Section 5.1 is type-driven. If a local variable or parameter with a non-`SignalBase` type shadows a reactive-field name, the analyzer resolves the inner identifier to the local's type and the `.value` rewrite does not fire.
 
 Source:
 
@@ -319,27 +318,38 @@ Source:
 
 Widget build(BuildContext context) {
   return Builder(builder: (context) {
-    final counter = 'local'; // shadows the field
-    return Text(counter);     // stays as `counter`, not `counter.value`
+    final counter = 'local'; // shadows the field; type is String
+    return Text(counter);     // stays as `counter`
   });
 }
 ```
 
-Output: the inner `counter` stays untouched. (The outer field reference remains reactive if present.)
+Output: the inner `counter` stays untouched. The outer field reference, if present, still rewrites normally because its resolved type is `Signal<int>`.
 
-This is determined by analyzer scope resolution, not by name alone. v1 implementation may use a name-set heuristic because v1 scope is simple — but the SPEC contract is scope-aware; v2 tests must include a shadowing case and it must pass.
+M1 tests include a shadowing case to prove the rule.
 
 ---
 
 ## 6. Untracked-Context Rules
 
+### 6.0 Reads vs writes
+
+Every reference to a reactive identifier is either a **read** or a **write**. They behave differently.
+
+- A **write** is any assignment form listed in Section 5.3 (`=`, compound assignments, `++`, `--`). Writes never subscribe to the signal — subscribing to your own write is meaningless. The rewriter appends `.value` so the expression typechecks, but writes never cause `SignalBuilder` wrapping under any rule in this section.
+- A **read** observes the reactive value: `Text(counter)`, `if (counter > 0) ...`, `print(counter)`. Reads may or may not subscribe, depending on the context defined below.
+
+Tracking rules in the remainder of Section 6 apply only to reads.
+
+### 6.1 Tracked vs untracked reads
+
 A read is **tracked** if the widget subtree that contains it must rebuild when the signal changes. A read is **untracked** if the expression reads the current value but must NOT cause its enclosing widget subtree to subscribe.
 
-Untracked reads still get `.value` appended (so they typecheck). They just do NOT trigger `SignalBuilder` wrapping of their parent widget subtree (§7). This fixes issues #4 and #6.
+Untracked reads still get `.value` appended (so they typecheck). They just do NOT trigger `SignalBuilder` wrapping of their parent widget subtree (Section 7).
 
-### 6.1 Callbacks on widget constructors
+### 6.2 Reads inside user-interaction callbacks
 
-A read is untracked when the identifier appears inside a function expression that is the value of a named argument to a widget constructor and that named argument is a user-interaction callback.
+A read is untracked when the identifier appears inside a function expression that is the value of a named argument to a widget constructor and that named argument is a user-interaction callback. The callback fires in response to a user gesture, not in response to signal changes, so subscribing the enclosing widget to the read would be wrong.
 
 Callback parameter names treated as untracked:
 
@@ -348,13 +358,18 @@ Callback parameter names treated as untracked:
 - `onHorizontalDragUpdate`, `onVerticalDragUpdate`, `onPanUpdate`, `onScaleUpdate` (and their `Start`/`End`/`Cancel`/`Down` variants)
 - `onHover`, `onExit`, `onEnter`, `onFocusChange`
 - `onDismissed`, `onClosing`, `onAccept`, `onWillAccept`, `onLeave`, `onMove`
-- Future reviewers may add to this list. The list is maintained in this SPEC.
+- The list is maintained in this SPEC.
+
+The example below shows one read and one write inside `onPressed`. The read (`if (counter > 10)`) is untracked by this rule. The write (`counter++`) is untracked by Section 6.0 and would be untracked even outside a callback. Neither causes `SignalBuilder` wrapping.
 
 Source:
 
 ```dart
 FloatingActionButton(
-  onPressed: () => counter++,
+  onPressed: () {
+    if (counter > 10) showDialog(...);  // read, untracked by Section 6.2
+    counter++;                           // write, untracked by Section 6.0
+  },
   child: const Icon(Icons.add),
 )
 ```
@@ -363,13 +378,16 @@ Output:
 
 ```dart
 FloatingActionButton(
-  onPressed: () => counter.value++,  // `.value` appended
+  onPressed: () {
+    if (counter.value > 10) showDialog(...);
+    counter.value++;
+  },
   child: const Icon(Icons.add),
 )
 // NOT wrapped in SignalBuilder
 ```
 
-### 6.2 Key constructor arguments
+### 6.3 Reads inside Key constructor arguments
 
 A read is untracked when the identifier appears inside an `InstanceCreationExpression` whose constructor is `ValueKey`, `Key`, `ObjectKey`, `UniqueKey`, `GlobalKey`, `GlobalObjectKey`, or `PageStorageKey`, and that expression is passed to the `key:` parameter of a widget.
 
@@ -392,11 +410,30 @@ Container(
 // NOT wrapped in SignalBuilder
 ```
 
-### 6.3 Everything else is tracked
+### 6.4 Explicit opt-out via `untracked`
 
-If an identifier is neither under an untracked callback nor under a Key constructor, it is tracked. The containing widget subtree must be wrapped in `SignalBuilder` (§7).
+`flutter_solidart` exports a top-level function `untracked<T>(T Function() fn)` that reads signals without creating a subscription. Solid exposes this function as-is and recognizes it during transformation: reads inside an `untracked(() => ...)` callback are untracked.
 
-### 6.4 Nested cases
+Source:
+
+```dart
+Text('Static snapshot: ${untracked(() => counter)}')
+```
+
+Output:
+
+```dart
+Text('Static snapshot: ${untracked(() => counter.value)}')
+// NOT wrapped in SignalBuilder
+```
+
+The generator recognizes `untracked` by resolved identifier (the top-level function from `package:flutter_solidart/flutter_solidart.dart`), not by name alone. A user-defined local `untracked` variable would not apply this rule.
+
+### 6.5 Everything else is tracked
+
+If a read is not in one of the contexts defined in Sections 6.2, 6.3, or 6.4, it is tracked. The containing widget subtree must be wrapped in `SignalBuilder` (Section 7).
+
+### 6.6 Nested cases
 
 Tracking is determined by the innermost enclosing AST ancestor that matches a rule. A `Text(counter)` inside an `onPressed` callback is untracked. A `Text(counter)` outside any callback is tracked.
 
@@ -411,7 +448,7 @@ Tracking is determined by the innermost enclosing AST ancestor that matches a ru
 A widget subtree needs `SignalBuilder` wrapping if and only if all three hold:
 
 1. The subtree is a widget expression (an `InstanceCreationExpression` that constructs a widget, or a reference to one) used as the return value of the `build` method, or as the value of a child/children parameter of another widget.
-2. The subtree contains at least one **tracked** reactive read (§6.3).
+2. The subtree contains at least one **tracked** reactive read (Section 6.5).
 3. The subtree is not already inside a `SignalBuilder`.
 
 ### 7.2 Minimal-subtree rule (fine-grained)
@@ -426,7 +463,7 @@ Scaffold(
     child: Text('Counter is $counter'),   // ← ONLY this Text is wrapped
   ),
   floatingActionButton: FloatingActionButton(
-    onPressed: () => counter++,           // untracked, no wrap
+    onPressed: () => counter++,           // write — no wrap (Section 6.0)
     child: const Icon(Icons.add),
   ),
 )
@@ -559,9 +596,9 @@ Passes through unchanged to `lib/`.
 
 The generated `lib/` file's imports are computed from the source's imports plus what the generator added:
 
-- Remove any `import 'package:solid_annotations/solid_annotations.dart';` — the generated code never uses it.
-- Add `import 'package:flutter_solidart/flutter_solidart.dart';` if the generated output references any of: `Signal`, `Computed`, `Effect`, `Resource`, `SignalBuilder`, `SolidartConfig`. (Effect and Resource appear in future scope; they are listed here so the rule is future-proof.)
+- Add `import 'package:flutter_solidart/flutter_solidart.dart';` if the generated output references any of: `Signal`, `Computed`, `Effect`, `Resource`, `SignalBuilder`, `SolidartConfig`, `untracked`. (Effect, Resource, and `untracked` may appear via later milestones or opt-out rules in Section 6.4; they are listed here so the rule is future-proof.)
 - Every other import in the source is preserved verbatim, including aliases and `show`/`hide` combinators.
+- Unused imports left behind (e.g., `package:solid_annotations/...` when no annotation references remain in the generated output) are removed by running `dart fix --apply` on the generated file. The generator does NOT try to detect unused imports itself.
 
 This is the fix for issue #8.
 
@@ -569,13 +606,11 @@ This is the fix for issue #8.
 
 ## 10. `dispose()` Contract
 
-Every generated `Signal` and `Computed` must be disposed when its owning class is disposed.
+Every generated `Signal` and `Computed` must be disposed when its owning class is disposed. The merging algorithm below applies identically to every class kind; the per-kind sections (8.1–8.3) describe how the algorithm is triggered.
 
-- On a StatefulWidget's State (§8.1): the generator emits a `dispose()` override that calls `xxx.dispose()` for each reactive declaration in declaration order, then `super.dispose()`.
-- On an existing State (§8.2): if the developer wrote a `dispose()`, the generator inserts the reactive disposals at the top, preserves the rest, and keeps the existing `super.dispose()` call. If no `dispose()` existed, the generator emits one.
-- On a plain class (§8.3): `void dispose()` is synthesized per §8.3 merging rules.
+Algorithm: if the target class already has a `dispose()` body, prepend one `xxx.dispose()` call per reactive declaration to the top of the body and leave the rest untouched; if no `dispose()` exists, synthesize one. Emit `super.dispose()` at the end when the class extends anything other than `Object`.
 
-Disposal order: declaration order. A `Computed` that depends on a `Signal` is disposed before the `Signal` it depends on (declarations are emitted in source order, so Signal comes first; dispose in the same order, so Computed depending on Signal is disposed before Signal if declared before — matches the rule since Computed always follows its dependencies in source).
+Disposal order is **reverse declaration order**: dependents are disposed before their dependencies. Because a `Computed` must always be declared after the `Signal`s it reads (those `Signal`s are the `Computed`'s dependencies), reverse declaration order guarantees the `Computed` is disposed first and a `Signal` is never disposed while a live `Computed` still holds a subscription to it.
 
 ---
 
@@ -596,7 +631,7 @@ my_app/
   .gitignore              ← excludes .dart_tool/, build/
 ```
 
-The `source/` tree mirrors `lib/` one-to-one. Every `.dart` file under `source/` has a counterpart under `lib/`; nothing else.
+The `source/` tree mirrors `lib/` one-to-one. Every file under `source/` has a counterpart at the mirrored path under `lib/` (`.dart` files transformed per Sections 4–10; non-`.dart` files copied verbatim per Section 2).
 
 No `.g.dart` files are emitted anywhere visible to the developer. (Test golden outputs inside the generator package may use `.g.dart` for clarity; that is an internal convention, not a user-facing one.)
 
@@ -614,35 +649,38 @@ dart run build_runner watch
 flutter run
 ```
 
-When the developer saves a file under `source/`, the generator rewrites the corresponding file under `lib/`, and Flutter's file watcher picks up the `lib/` change and hot-reloads. The developer saves once. (Fixes issue #9.)
+When the developer saves a file under `source/`, the generator rewrites the corresponding file under `lib/`, and Flutter's file watcher picks up the `lib/` change and hot-reloads. The developer saves once.
 
 ---
 
-## 13. Out of Scope for v1
+## 13. Not in M1 (shipped before v2 release)
+
+These features are part of the v2 public release but land in milestones after M1. An M1 build that encounters any of them in source code must fail with a clear error naming the unsupported feature and referencing this section.
 
 - `@SolidEffect`
 - `@SolidQuery` (Future and Stream forms; `.when`, `.maybeWhen`, `.refresh`, `.isRefreshing`; debounce; useRefreshing)
 - `@SolidEnvironment`
 - `SolidProvider` / `InheritedSolidProvider` / `.environment()` widget extension / `context.read` / `context.watch`
-- Multi-file generation (one source file produces two or more lib files)
-- Dart Macros / augmentations / part-file patterns
-- CI workflow (local test only until Actions budget permits)
 
-A v1 build that encounters any of these in source code must fail with a clear error naming the unsupported feature.
+Permanent non-goals (never part of Solid) are defined in Section 3.3.
+
+Deferred operational concerns (time-boxed, not semantic):
+
+- CI workflow. Local-only testing until GitHub Actions budget permits.
 
 ---
 
-## 14. Open Questions for the Developer
+## 14. Resolved Decisions
 
-These are marked for explicit resolution before M1 implementation begins. Default answers are provided; the developer confirms or overrides.
+These were open questions during SPEC drafting and have been answered by the developer. Locked for M1:
 
-1. **Plain (non-Widget) classes with `@SolidState` fields** — the blog post shows a `Counter` PODO passed via `SolidProvider.create`. SPEC default: support them per §8.3. **Confirm: yes/no.**
-2. **`++`, `+=`, and other compound-assignment operators on fields** — SPEC default: rewrite all operators listed in §5.3. **Confirm the operator list is complete.**
-3. **`@SolidState` on `final` fields** — SPEC default: reject with a clear error (pointless). **Confirm.**
-4. **Custom `initState` / `didUpdateWidget` overrides in an existing State class (§8.2)** — SPEC default: preserve them untouched; insert reactive disposals into the existing `dispose()` only. **Confirm.**
-5. **User-facing package name** — current choice is to keep `solid_annotations` as the import root and add an umbrella `package:solid/solid.dart` that re-exports the annotations plus a pre-curated subset of `flutter_solidart` symbols. **Confirm name or rename.**
-6. **Shadowing rule (§5.5)** — SPEC says scope-aware; v1 implementation may use a name-set heuristic because the v1 scope is simple. **Confirm it's acceptable if v1 does not fully implement scope-aware shadowing, provided there is a test case that fails correctly when shadowing is added later.**
-7. **`const` on the public widget constructor (§8.1)** — SPEC default: add `const` when all fields and default values are `const`-compatible. **Confirm.**
+1. **Plain (non-Widget) classes with `@SolidState` fields** — supported per Section 8.3.
+2. **Compound-assignment operator list in Section 5.3** — complete.
+3. **`@SolidState` on `final` fields** — rejected with a clear error (wrapping a never-reassigned value in a `Signal` is pointless).
+4. **Custom `initState` / `didUpdateWidget` overrides in an existing State class (Section 8.2)** — preserved untouched. If an existing `dispose()` is present, reactive disposals are merged into its body.
+5. **User-facing package name** — keep the current layout: `package:solid_annotations` holds the annotations and `package:solid` is the umbrella package that re-exports the annotations plus the curated subset of `flutter_solidart` symbols Solid programs need.
+6. **Shadowing rule (Section 5.5)** — handled by type resolution. Because Section 5.1 is type-driven, a shadowed local of a non-`SignalBase` type is never rewritten. A dedicated shadowing test case is required in M1.
+7. **`const` on the public widget constructor (Section 8.1)** — added when all fields and default values are `const`-compatible.
 
 ---
 
@@ -656,10 +694,10 @@ Any change that alters user-observable behavior must be covered by a golden test
 
 This SPEC addresses the following real user-reported issues from the v1 repo:
 
-- **#3** — `@SolidEnvironment` inside an existing `State<X>` was not transformed; the class-kind handling in §8.2 makes this impossible to regress.
-- **#4** — untracked reads (`ValueKey`, `onPressed`) were wrapped in `SignalBuilder`, breaking compilation; §6 defines the untracked-context rules.
-- **#6** — `Text(text)` did not receive `.value` because the rewriter missed bare identifier reads; §5.1 defines the rewrite rule exhaustively.
-- **#8** — generated `main.dart` used `SolidartConfig` without importing `flutter_solidart`; §9 defines the import-addition rule.
-- **#9** — hot reload required a double-save; §12 defines the expected single-save flow via `build_runner watch` + `flutter run`.
+- **#3** — `@SolidEnvironment` inside an existing `State<X>` was not transformed; the class-kind handling in Section 8.2 makes this impossible to regress.
+- **#4** — untracked reads (`ValueKey`, `onPressed`) were wrapped in `SignalBuilder`, breaking compilation; Section 6 defines the untracked-context rules.
+- **#6** — `Text(text)` did not receive `.value` because the rewriter missed bare identifier reads; Section 5.1 defines the rewrite rule exhaustively.
+- **#8** — generated `main.dart` used `SolidartConfig` without importing `flutter_solidart`; Section 9 defines the import-addition rule.
+- **#9** — hot reload required a double-save; Section 12 defines the expected single-save flow via `build_runner watch` + `flutter run`.
 
 Issue #11 (build speed) and issue #1 (docs typo) are process concerns addressed outside this SPEC.
