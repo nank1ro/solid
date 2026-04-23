@@ -1,18 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
-import 'package:solid_annotations/extensions.dart';
-import 'package:solid_annotations/provider.dart';
+import 'package:solid_annotations/solid_annotations.dart';
 
 final routes = <String, WidgetBuilder>{
-  '/state': (_) => const CounterPage(),
-  '/computed': (_) => const ComputedExample(),
-  '/effect': (_) => const EffectExample(),
+  '/state': (_) => CounterPage(),
+  '/computed': (_) => ComputedExample(),
+  '/effect': (_) => EffectExample(),
   '/query': (_) => const QueryExample(),
-  '/query_with_source': (_) => const QueryWithSourceExample(),
-  '/query_with_multiple_sources': (_) => const QueryWithMultipleSourcesExample(),
+  '/query_with_source': (_) => QueryWithSourceExample(),
+  '/query_with_multiple_sources': (_) => QueryWithMultipleSourcesExample(),
   '/environment': (_) => const EnvironmentExample(),
   '/query_with_stream': (_) => const QueryWithStreamExample(),
-  '/query_with_stream_and_source': (_) => const QueryWithStreamAndSourceExample(),
+  '/query_with_stream_and_source': (_) => QueryWithStreamAndSourceExample(),
 };
 
 final routeToNameRegex = RegExp('(?:^/|-)([a-zA-Z])');
@@ -66,7 +65,7 @@ class MainPage extends StatelessWidget {
 }
 
 class CounterPage extends StatefulWidget {
-  const CounterPage({super.key});
+  CounterPage({super.key});
 
   @override
   State<CounterPage> createState() => _CounterPageState();
@@ -108,7 +107,7 @@ class _CounterPageState extends State<CounterPage> {
 }
 
 class ComputedExample extends StatefulWidget {
-  const ComputedExample({super.key});
+  ComputedExample({super.key});
 
   @override
   State<ComputedExample> createState() => _ComputedExampleState();
@@ -150,7 +149,7 @@ class _ComputedExampleState extends State<ComputedExample> {
 }
 
 class EffectExample extends StatefulWidget {
-  const EffectExample({super.key});
+  EffectExample({super.key});
 
   @override
   State<EffectExample> createState() => _EffectExampleState();
@@ -231,7 +230,7 @@ class _QueryExampleState extends State<QueryExample> {
 }
 
 class QueryWithSourceExample extends StatefulWidget {
-  const QueryWithSourceExample({super.key});
+  QueryWithSourceExample({super.key});
 
   @override
   State<QueryWithSourceExample> createState() => _QueryWithSourceExampleState();
@@ -287,7 +286,7 @@ class _QueryWithSourceExampleState extends State<QueryWithSourceExample> {
 }
 
 class QueryWithMultipleSourcesExample extends StatefulWidget {
-  const QueryWithMultipleSourcesExample({super.key});
+  QueryWithMultipleSourcesExample({super.key});
 
   @override
   State<QueryWithMultipleSourcesExample> createState() =>
@@ -378,13 +377,13 @@ class EnvironmentExample extends StatelessWidget {
   Widget build(BuildContext context) {
     return SolidProvider(
       create: (context) => ACustomClassWithSolidState(),
-      child: const EnvironmentInjectionExample(),
+      child: EnvironmentInjectionExample(),
     );
   }
 }
 
 class EnvironmentInjectionExample extends StatefulWidget {
-  const EnvironmentInjectionExample({super.key});
+  EnvironmentInjectionExample({super.key});
 
   @override
   State<EnvironmentInjectionExample> createState() =>
@@ -450,7 +449,7 @@ class _QueryWithStreamExampleState extends State<QueryWithStreamExample> {
 }
 
 class QueryWithStreamAndSourceExample extends StatefulWidget {
-  const QueryWithStreamAndSourceExample({super.key});
+  QueryWithStreamAndSourceExample({super.key});
 
   @override
   State<QueryWithStreamAndSourceExample> createState() =>

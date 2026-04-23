@@ -1,5 +1,5 @@
 import 'package:flutter/widgets.dart';
-import 'package:solid_annotations/provider.dart';
+import 'package:solid_annotations/src/provider.dart';
 
 /// Extension methods for Future and Stream to handle loading, error, and data
 /// states.

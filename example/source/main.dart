@@ -1,6 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:solid_annotations/extensions.dart';
-import 'package:solid_annotations/provider.dart';
 import 'package:solid_annotations/solid_annotations.dart';
 
 final routes = <String, WidgetBuilder>{
