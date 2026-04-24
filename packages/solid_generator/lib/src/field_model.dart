@@ -13,6 +13,7 @@ class FieldModel {
     required this.typeText,
     required this.initializerText,
     required this.annotationName,
+    required this.isLate,
   });
 
   /// Declared identifier of the field (e.g. `'counter'`).
@@ -31,4 +32,9 @@ class FieldModel {
   /// Value of the `name:` argument on `@SolidState(name: '…')`, or `null` if
   /// the annotation had no `name:` argument (SPEC Section 4.4).
   final String? annotationName;
+
+  /// Whether the source field was declared with the `late` modifier (SPEC
+  /// Section 4.2). Preserved verbatim on the emitted `Signal` field so that
+  /// `Signal` construction is deferred until first access.
+  final bool isLate;
 }

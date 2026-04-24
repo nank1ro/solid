@@ -262,9 +262,10 @@ class Greeting extends StatelessWidget {
 }
 ```
 
-**Expected output content:**
+**Expected output content:** (The generator preserves every source import verbatim per SPEC Section 9 and appends `flutter_solidart`; `dart fix --apply` prunes the now-unused `solid_annotations` import at the consumer-app level.)
 
 ```dart
+import 'package:solid_annotations/solid_annotations.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
 
@@ -298,7 +299,7 @@ class _GreetingState extends State<Greeting> {
 
 **Dependencies:** M1-01.
 
-**Status:** TODO
+**Status:** DONE
 
 ---
 

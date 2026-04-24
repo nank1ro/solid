@@ -15,7 +15,10 @@ import 'package:test/test.dart';
 /// M1+ TODOs append case names here. Each entry `name` requires:
 ///   `test/golden/inputs/<name>.dart`   — hand-written source with @Solid* annotations
 ///   `test/golden/outputs/<name>.g.dart` — expected builder output
-const List<String> _goldenNames = <String>['m1_01_int_field_with_initializer'];
+const List<String> _goldenNames = <String>[
+  'm1_01_int_field_with_initializer',
+  'm1_02_late_string_no_initializer',
+];
 
 /// Resolves the golden directory relative to the package root, regardless of
 /// where `dart test` is invoked from.

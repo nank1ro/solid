@@ -32,6 +32,7 @@ FieldModel? readSolidStateField(FieldDeclaration decl, String source) {
             variable.initializer!.end,
           ),
     annotationName: _extractNameArgument(annotation),
+    isLate: varList.isLate,
   );
 }
 
