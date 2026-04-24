@@ -1,5 +1,6 @@
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:solid_generator/src/field_model.dart';
+import 'package:solid_generator/src/transformation_error.dart';
 
 /// Rewrites a `StatelessWidget` class containing `@SolidState` fields as a
 /// `StatefulWidget` + `State<X>` pair.
@@ -49,13 +50,22 @@ String _extractBuildMethod(ClassDeclaration classDecl, String source) {
       return source.substring(member.offset, member.end);
     }
   }
-  throw StateError(
-    'rewriteStatelessWidget: class ${classDecl.name.lexeme} has no build()',
+  final className = classDecl.name.lexeme;
+  throw AnalysisError(
+    'StatelessWidget has no build() method to preserve',
+    null,
+    className,
   );
 }
 
 /// Emits the public `StatefulWidget` half of the class split
 /// (SPEC Section 8.1).
+//
+// TODO(M1-13): `const` is emitted unconditionally here. SPEC §8.1 says "gains
+// `const` where safe (all fields final and literal)". For M1-01 the single
+// `int counter = 0;` case is always const-eligible because the @SolidState
+// field moves off the widget class entirely. M1-13 introduces the general
+// const-eligibility check based on remaining non-`@SolidState` fields.
 String _emitWidgetClass(
   String className,
   String stateClassName,

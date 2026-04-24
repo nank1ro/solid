@@ -11,8 +11,6 @@ class FieldModel {
   const FieldModel({
     required this.fieldName,
     required this.typeText,
-    required this.isNullable,
-    required this.isLate,
     required this.initializerText,
     required this.annotationName,
   });
@@ -24,12 +22,6 @@ class FieldModel {
   /// `'List<String>'`). Empty string only if the field has no declared type —
   /// not expected for `@SolidState` fields per SPEC Section 3.1.
   final String typeText;
-
-  /// Whether the declared type ended with `?` (SPEC Section 4.3).
-  final bool isNullable;
-
-  /// Whether the field was declared with the `late` keyword (SPEC Section 4.2).
-  final bool isLate;
 
   /// Raw source text of the initializer expression (e.g. `'0'`), or empty
   /// string if the field has no initializer (valid for `late` or nullable

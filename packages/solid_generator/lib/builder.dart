@@ -9,15 +9,23 @@ import 'package:solid_generator/src/class_kind.dart';
 import 'package:solid_generator/src/field_model.dart';
 import 'package:solid_generator/src/import_rewriter.dart';
 import 'package:solid_generator/src/stateless_rewriter.dart';
+import 'package:solid_generator/src/transformation_error.dart';
 
 /// Factory invoked by `build_runner` to create the Solid builder.
 /// See SPEC Section 2.
 Builder solidBuilder(BuilderOptions options) => _SolidBuilder();
 
-/// Name prefix every Solid annotation shares (e.g. `SolidState`,
-/// `SolidEffect`). Used to decide whether a file is transformed or copied
-/// verbatim — see SPEC Section 2 ("Transformation vs verbatim copy").
-const String _solidAnnotationPrefix = 'Solid';
+/// Substring that must appear in any source file carrying a Solid annotation.
+/// A file without this substring cannot possibly need transformation and is
+/// skipped before `parseString` — the hot-path short-circuit for the typical
+/// "no annotation" file (SPEC Section 2).
+const String _solidAnnotationHint = '@Solid';
+
+/// Shared formatter; `DartFormatter` construction allocates non-trivial
+/// internal state, so hoisting out of `_renderOutput` avoids per-file cost.
+final DartFormatter _formatter = DartFormatter(
+  languageVersion: DartFormatter.latestLanguageVersion,
+);
 
 class _SolidBuilder implements Builder {
   @override
@@ -37,51 +45,83 @@ class _SolidBuilder implements Builder {
     );
     final source = await buildStep.readAsString(buildStep.inputId);
 
+    // SPEC Section 2: files without any @Solid* annotation pass through
+    // verbatim. A `source.contains` check is a cheap pre-parse guard — if the
+    // marker is absent the file cannot need transformation.
+    if (!source.contains(_solidAnnotationHint)) {
+      await buildStep.writeAsString(outputId, source);
+      return;
+    }
+
     final parsed = parseString(
       content: source,
       featureSet: FeatureSet.latestLanguageVersion(),
       throwIfDiagnostics: false,
     );
-    final unit = parsed.unit;
+    for (final diagnostic in parsed.errors) {
+      log.warning(
+        '${buildStep.inputId}: ${diagnostic.message} '
+        '(offset ${diagnostic.offset})',
+      );
+    }
 
-    if (!_hasSolidAnnotation(unit)) {
-      // SPEC Section 2: files without @Solid* annotations are copied verbatim.
+    final annotatedClasses = _collectAnnotatedClasses(parsed.unit, source);
+    if (annotatedClasses.every((c) => c.fields.isEmpty)) {
+      // Hint matched, but no `@SolidState` field resolved — e.g. the user has
+      // a comment mentioning `@Solid…` or a not-yet-implemented annotation.
+      // SPEC §3.2 rejections are M1-15's scope; for M1-01 we pass through.
       await buildStep.writeAsString(outputId, source);
       return;
     }
 
-    final transformed = _transform(source, unit);
+    final transformed = _renderOutput(parsed.unit, annotatedClasses, source);
     await buildStep.writeAsString(outputId, transformed);
   }
 }
 
-/// Whether [unit] contains at least one `@Solid*` annotation on a field.
-bool _hasSolidAnnotation(CompilationUnit unit) {
-  for (final decl in unit.declarations) {
-    if (decl is! ClassDeclaration) continue;
-    for (final member in decl.members) {
-      if (member is! FieldDeclaration) continue;
-      for (final ann in member.metadata) {
-        if (ann.name.name.startsWith(_solidAnnotationPrefix)) return true;
-      }
-    }
-  }
-  return false;
+/// One class declaration paired with the `@SolidState` fields it contains.
+///
+/// `fields` is empty when the class exists in the source but has no
+/// `@SolidState` annotations; such classes are passed through verbatim.
+class _AnnotatedClass {
+  _AnnotatedClass(this.decl, this.fields);
+  final ClassDeclaration decl;
+  final List<FieldModel> fields;
 }
 
-/// Runs the transform pipeline for a file that has at least one `@Solid*`
-/// annotation. Returns a fully-formatted Dart source string ready to write.
-String _transform(String source, CompilationUnit unit) {
-  final rewrittenClasses = <String>[];
+/// Walks [unit] once and returns every class paired with its `@SolidState`
+/// fields. Replaces an earlier double-walk (presence check + collection) with
+/// a single traversal per file.
+List<_AnnotatedClass> _collectAnnotatedClasses(
+  CompilationUnit unit,
+  String source,
+) {
+  final result = <_AnnotatedClass>[];
   for (final decl in unit.declarations) {
     if (decl is! ClassDeclaration) continue;
-    final fields = _collectSolidFields(decl, source);
-    if (fields.isEmpty) {
-      rewrittenClasses.add(source.substring(decl.offset, decl.end));
-      continue;
+    final fields = <FieldModel>[];
+    for (final member in decl.members) {
+      if (member is! FieldDeclaration) continue;
+      final model = readSolidStateField(member, source);
+      if (model != null) fields.add(model);
     }
-    rewrittenClasses.add(_rewriteClass(decl, fields, source));
+    result.add(_AnnotatedClass(decl, fields));
   }
+  return result;
+}
+
+/// Renders the full `lib/` output for a file that has at least one annotated
+/// class. Preserves non-annotated classes verbatim and rewrites annotated
+/// ones per their class kind.
+String _renderOutput(
+  CompilationUnit unit,
+  List<_AnnotatedClass> annotatedClasses,
+  String source,
+) {
+  final classTexts = annotatedClasses.map((c) {
+    if (c.fields.isEmpty) return source.substring(c.decl.offset, c.decl.end);
+    return _rewriteClass(c.decl, c.fields, source);
+  });
 
   final imports = computeOutputImports(
     unit.directives.whereType<ImportDirective>().map(_importUri).toList(),
@@ -89,21 +129,8 @@ String _transform(String source, CompilationUnit unit) {
   );
   final importBlock = imports.map((u) => "import '$u';").join('\n');
 
-  final combined = '$importBlock\n\n${rewrittenClasses.join('\n\n')}\n';
-  return DartFormatter(
-    languageVersion: DartFormatter.latestLanguageVersion,
-  ).format(combined);
-}
-
-/// Returns every `@SolidState`-annotated field declared inside [decl].
-List<FieldModel> _collectSolidFields(ClassDeclaration decl, String source) {
-  final fields = <FieldModel>[];
-  for (final member in decl.members) {
-    if (member is! FieldDeclaration) continue;
-    final model = readSolidStateField(member, source);
-    if (model != null) fields.add(model);
-  }
-  return fields;
+  final combined = '$importBlock\n\n${classTexts.join('\n\n')}\n';
+  return _formatter.format(combined);
 }
 
 /// Dispatches on [decl]'s class kind and emits the rewritten form.
@@ -119,9 +146,11 @@ String _rewriteClass(
     case ClassKind.statefulWidget:
     case ClassKind.stateClass:
     case ClassKind.plainClass:
-      throw UnimplementedError(
-        '${decl.name.lexeme}: class-kind $kind is not supported in M1-01 '
-        '(scheduled for a later M1 TODO).',
+      throw CodeGenerationError(
+        'class-kind $kind is not supported in M1-01 '
+        '(scheduled for a later M1 TODO)',
+        null,
+        decl.name.lexeme,
       );
   }
 }

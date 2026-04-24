@@ -25,8 +25,6 @@ FieldModel? readSolidStateField(FieldDeclaration decl, String source) {
   return FieldModel(
     fieldName: variable.name.lexeme,
     typeText: type == null ? '' : source.substring(type.offset, type.end),
-    isNullable: _typeIsNullable(type),
-    isLate: varList.isLate,
     initializerText: variable.initializer == null
         ? ''
         : source.substring(
@@ -43,16 +41,6 @@ Annotation? _findSolidStateAnnotation(FieldDeclaration decl) {
     if (ann.name.name == _solidStateName) return ann;
   }
   return null;
-}
-
-/// Whether [type] ends with `?`.
-///
-/// Uses `NamedType.question` for the common case; returns `false` if the type
-/// annotation is absent (fields without a declared type are not emitted by M1
-/// — see SPEC Section 3.1).
-bool _typeIsNullable(TypeAnnotation? type) {
-  if (type is NamedType) return type.question != null;
-  return false;
 }
 
 /// Extracts the string value of a `name: '…'` named argument on [annotation],
