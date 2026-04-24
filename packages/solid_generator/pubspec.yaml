@@ -1,6 +1,6 @@
 name: solid_generator
 description: Solid source-to-lib code generator for Flutter reactive state.
-version: 2.0.0-dev
+version: 2.0.0-dev.1
 publish_to: 'none'
 homepage: https://solid.mariuti.com
 repository: https://github.com/nank1ro/solid

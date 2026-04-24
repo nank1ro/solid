@@ -4,3 +4,6 @@ analyzer:
     must_be_immutable: ignore
     always_put_required_named_parameters_first: ignore
     invalid_annotation_target: ignore
+linter:
+  rules:
+    public_member_api_docs: false
