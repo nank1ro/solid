@@ -235,7 +235,7 @@ class _CounterState extends State<Counter> {
 
 ### TODO M1-02 — Golden: late non-nullable field
 
-**Goal:** `@SolidState() late String text;` becomes `late final text = Signal<String>('', name: 'text');`. Validates SPEC Section 4.2 default-value table + `late` preservation.
+**Goal:** `@SolidState() late String text;` becomes `late final text = Signal<String>.lazy(name: 'text');`. Validates SPEC Section 4.2 `Signal.lazy` emission + `late` preservation.
 
 **SPEC references:** Section 4.2, Section 3.1 (valid targets).
 
@@ -262,9 +262,10 @@ class Greeting extends StatelessWidget {
 }
 ```
 
-**Expected output content:**
+**Expected output content:** (The generator preserves every source import verbatim per SPEC Section 9 and appends `flutter_solidart`; `dart fix --apply` prunes the now-unused `solid_annotations` import at the consumer-app level.)
 
 ```dart
+import 'package:solid_annotations/solid_annotations.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
 
@@ -276,7 +277,7 @@ class Greeting extends StatefulWidget {
 }
 
 class _GreetingState extends State<Greeting> {
-  late final text = Signal<String>('', name: 'text');
+  late final text = Signal<String>.lazy(name: 'text');
 
   @override
   void dispose() {
@@ -289,7 +290,7 @@ class _GreetingState extends State<Greeting> {
 }
 ```
 
-**Expected implementation change:** Extend the field builder to look up default values from the Section 4.2 table when no initializer exists, and preserve the `late` keyword verbatim per SPEC Section 4.2.
+**Expected implementation change:** Extend the field builder to emit `Signal<T>.lazy(name: '…')` when the source field is `late` with no initializer (SPEC Section 4.2). Preserve the `late` modifier verbatim on the emitted Dart field. Works uniformly for any declared type.
 
 **Acceptance:**
 
@@ -298,30 +299,7 @@ class _GreetingState extends State<Greeting> {
 
 **Dependencies:** M1-01.
 
-**Status:** TODO
-
----
-
-### TODO M1-02b — Rejection: `late` field with unknown-default type
-
-**Goal:** A `late` non-nullable field whose declared type has no entry in the Section 4.2 defaults table is rejected with the SPEC's exact error string.
-
-**SPEC references:** Section 4.2 (last bullet in the defaults table).
-
-**Files to create:**
-
-- `packages/solid_generator/test/golden/inputs/m1_02b_late_unknown_type_rejected.dart`
-- `packages/solid_generator/test/rejections/m1_02b_late_unknown_type_test.dart` — asserts the builder raises an error with the exact SPEC quote: `"field 'foo' of type 'MyType' has no initializer and no default is known; add '= MyType(...)' or declare 'MyType?'"` (with `foo` and `MyType` substituted).
-
-**Expected input content:** A class with `@SolidState() late MyType foo;` where `MyType` is a user-defined class with no defaults-table entry.
-
-**Expected implementation change:** The default-value resolver (introduced in M1-02) returns a `Result.err` when the declared type does not match any defaults-table entry. The pipeline propagates the error with `foo` and the type name substituted.
-
-**Acceptance:** Rejection test passes; error message text matches the SPEC quote exactly (modulo the substituted identifier and type).
-
-**Dependencies:** M1-02.
-
-**Status:** TODO
+**Status:** DONE
 
 ---
 

@@ -100,12 +100,19 @@ $dispose
 }''';
 }
 
-/// Emits one `final <name> = Signal<T>(<init>, name: '<debug>');` line per
-/// SPEC Section 4.1.
+/// Emits one `[late ]final <name> = Signal<T>(…, name: '<debug>');` line per
+/// SPEC Section 4.1. When the source field is `late` with no initializer,
+/// emits `Signal<T>.lazy(name: '<debug>')` per SPEC Section 4.2 — reading
+/// `.value` before the first write throws `StateError`, matching Dart's own
+/// `late` semantics. The `late` modifier is preserved verbatim on the Dart
+/// field so that `Signal` construction itself is deferred to first access.
 String _emitSignalField(FieldModel f) {
   final debugName = f.annotationName ?? f.fieldName;
-  return '  final ${f.fieldName} = '
-      "Signal<${f.typeText}>(${f.initializerText}, name: '$debugName');";
+  final lateKw = f.isLate ? 'late ' : '';
+  final ctor = f.initializerText.isNotEmpty
+      ? "Signal<${f.typeText}>(${f.initializerText}, name: '$debugName')"
+      : "Signal<${f.typeText}>.lazy(name: '$debugName')";
+  return '  ${lateKw}final ${f.fieldName} = $ctor;';
 }
 
 /// Emits the `dispose()` method disposing every signal in reverse declaration
