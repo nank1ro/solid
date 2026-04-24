@@ -1,5 +1,8 @@
+import 'package:meta/meta.dart';
+
 /// Base class for Result types - immutable and pure
 abstract class Result<T, E> {
+  /// Default constructor for subclasses.
   const Result();
 
   /// True if this is a successful result
@@ -42,9 +45,12 @@ abstract class Result<T, E> {
 }
 
 /// Success case - immutable value container
+@immutable
 class Success<T, E> extends Result<T, E> {
+  /// Creates a [Success] wrapping [value].
   const Success(this.value);
 
+  /// The successful result value.
   final T value;
 
   @override
@@ -62,9 +68,12 @@ class Success<T, E> extends Result<T, E> {
 }
 
 /// Failure case - immutable error container
+@immutable
 class Failure<T, E> extends Result<T, E> {
+  /// Creates a [Failure] wrapping [error].
   const Failure(this.error);
 
+  /// The error value.
   final E error;
 
   @override

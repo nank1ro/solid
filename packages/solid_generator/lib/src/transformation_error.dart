@@ -1,8 +1,12 @@
 /// Base class for all transformation errors - immutable
 abstract class TransformationError {
+  /// Creates a [TransformationError] with [message] and optional [location].
   const TransformationError(this.message, this.location);
 
+  /// Human-readable description of the error.
   final String message;
+
+  /// Source location where the error occurred, or null if unknown.
   final String? location;
 
   @override
@@ -13,24 +17,29 @@ abstract class TransformationError {
 
 /// Error during annotation parsing - immutable
 class AnnotationParseError extends TransformationError {
+  /// Creates an [AnnotationParseError] for the given [annotationName].
   const AnnotationParseError(
     super.message,
     super.location,
     this.annotationName,
   );
 
+  /// The name of the annotation that failed to parse.
   final String annotationName;
 
   @override
   String toString() => location != null
-      ? 'AnnotationParseError at $location: Failed to parse @$annotationName - $message'
+      ? 'AnnotationParseError at $location: '
+            'Failed to parse @$annotationName - $message'
       : 'AnnotationParseError: Failed to parse @$annotationName - $message';
 }
 
 /// Error during field/method analysis - immutable
 class AnalysisError extends TransformationError {
+  /// Creates an [AnalysisError] for the given [elementName].
   const AnalysisError(super.message, super.location, this.elementName);
 
+  /// The name of the element that failed to analyze.
   final String elementName;
 
   @override
@@ -41,36 +50,48 @@ class AnalysisError extends TransformationError {
 
 /// Error during code generation - immutable
 class CodeGenerationError extends TransformationError {
+  /// Creates a [CodeGenerationError] for the given [targetType].
   const CodeGenerationError(super.message, super.location, this.targetType);
 
+  /// The name of the type that failed to generate.
   final String targetType;
 
   @override
   String toString() => location != null
-      ? 'CodeGenerationError at $location: Failed to generate $targetType - $message'
+      ? 'CodeGenerationError at $location: '
+            'Failed to generate $targetType - $message'
       : 'CodeGenerationError: Failed to generate $targetType - $message';
 }
 
 /// Validation error for reactive annotations - immutable
 class ValidationError extends TransformationError {
+  /// Creates a [ValidationError] with a [violationType] code.
   const ValidationError(super.message, super.location, this.violationType);
 
-  final String violationType;
-
-  /// Factory constructors for common validation errors
+  /// Factory for invalid-annotation-target errors.
   const ValidationError.invalidAnnotationTarget(
-    String elementName,
     String location,
   ) : violationType = 'INVALID_TARGET',
-      super('@SolidState can only be applied to fields and getters', location);
+      super(
+        '@SolidState can only be applied to fields and getters',
+        location,
+      );
 
+  /// Factory for missing-annotation errors.
   const ValidationError.missingAnnotation(String elementName, String? location)
     : violationType = 'MISSING_ANNOTATION',
-      super('Expected reactive annotation not found on $elementName', location);
+      super(
+        'Expected reactive annotation not found on $elementName',
+        location,
+      );
 
+  /// Factory for invalid-type errors.
   const ValidationError.invalidType(String typeName, String? location)
     : violationType = 'INVALID_TYPE',
       super('Type $typeName is not supported for reactive state', location);
+
+  /// Code identifying the type of validation violation.
+  final String violationType;
 
   @override
   String toString() => location != null
