@@ -1,5 +1,8 @@
-/// Base class for all transformation errors - immutable
-abstract class TransformationError {
+/// Base class for all transformation errors - immutable.
+///
+/// Implements [Exception] so subclasses can be `throw`n from the pipeline
+/// without tripping the `only_throw_errors` lint.
+abstract class TransformationError implements Exception {
   /// Creates a [TransformationError] with [message] and optional [location].
   const TransformationError(this.message, this.location);
 
