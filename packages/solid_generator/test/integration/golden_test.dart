@@ -15,7 +15,7 @@ import 'package:test/test.dart';
 /// M1+ TODOs append case names here. Each entry `name` requires:
 ///   `test/golden/inputs/<name>.dart`   — hand-written source with @Solid* annotations
 ///   `test/golden/outputs/<name>.g.dart` — expected builder output
-const List<String> _goldenNames = <String>[];
+const List<String> _goldenNames = <String>['m1_01_int_field_with_initializer'];
 
 /// Resolves the golden directory relative to the package root, regardless of
 /// where `dart test` is invoked from.
@@ -29,10 +29,6 @@ Future<String> _resolveGoldenDir() async {
 final bool _updateGoldens = Platform.environment['UPDATE_GOLDENS'] == '1';
 
 void main() {
-  // Guard test: ensures dart test exits 0 when _goldenNames is empty.
-  // Remove this test only if _goldenNames is guaranteed to be non-empty.
-  test('golden registry is valid', () => expect(_goldenNames, isEmpty));
-
   group('golden', () {
     for (final name in _goldenNames) {
       test(name, () async {
