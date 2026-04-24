@@ -33,6 +33,11 @@ FieldModel? readSolidStateField(FieldDeclaration decl, String source) {
           ),
     annotationName: _extractNameArgument(annotation),
     isLate: varList.isLate,
+    // `TypeAnnotation.question` is the `?` token at the top level of the
+    // declared type. Using it (vs. a `typeText.endsWith('?')` heuristic)
+    // correctly classifies nested-nullable types like `List<int?>` as
+    // non-nullable at the outer level (SPEC Section 4.3).
+    isNullable: type?.question != null,
   );
 }
 

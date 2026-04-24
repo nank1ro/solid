@@ -100,18 +100,34 @@ $dispose
 }''';
 }
 
-/// Emits one `[late ]final <name> = Signal<T>(…, name: '<debug>');` line per
-/// SPEC Section 4.1. When the source field is `late` with no initializer,
-/// emits `Signal<T>.lazy(name: '<debug>')` per SPEC Section 4.2 — reading
-/// `.value` before the first write throws `StateError`, matching Dart's own
-/// `late` semantics. The `late` modifier is preserved verbatim on the Dart
-/// field so that `Signal` construction itself is deferred to first access.
+/// Emits one `[late ]final <name> = Signal<T>(…, name: '<debug>');` line.
+///
+/// Three cases, in priority order:
+///
+/// 1. **Has initializer** (SPEC Section 4.1) →
+///    `Signal<T>(<init>, name: '<debug>')`. The `late` modifier (if any)
+///    is preserved verbatim so that `Signal` construction itself is deferred
+///    to first access.
+/// 2. **No initializer, nullable type** (SPEC Section 4.3) →
+///    `Signal<T?>(null, name: '<debug>')`. No `late` needed because `null`
+///    is a valid default.
+/// 3. **No initializer, non-nullable type** (SPEC Section 4.2) →
+///    `Signal<T>.lazy(name: '<debug>')`. The source field must have been
+///    declared `late` (the only way Dart accepts a non-nullable field with
+///    no initializer); the modifier is preserved on the emitted field so
+///    reads before the first write throw `StateError`, matching Dart's own
+///    `late` semantics.
 String _emitSignalField(FieldModel f) {
   final debugName = f.annotationName ?? f.fieldName;
   final lateKw = f.isLate ? 'late ' : '';
-  final ctor = f.initializerText.isNotEmpty
-      ? "Signal<${f.typeText}>(${f.initializerText}, name: '$debugName')"
-      : "Signal<${f.typeText}>.lazy(name: '$debugName')";
+  final String ctor;
+  if (f.initializerText.isNotEmpty) {
+    ctor = "Signal<${f.typeText}>(${f.initializerText}, name: '$debugName')";
+  } else if (f.isNullable) {
+    ctor = "Signal<${f.typeText}>(null, name: '$debugName')";
+  } else {
+    ctor = "Signal<${f.typeText}>.lazy(name: '$debugName')";
+  }
   return '  ${lateKw}final ${f.fieldName} = $ctor;';
 }
 

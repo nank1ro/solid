@@ -365,7 +365,7 @@ class _ScoreState extends State<Score> {
 
 **Dependencies:** M1-01.
 
-**Status:** TODO
+**Status:** DONE
 
 ---
 

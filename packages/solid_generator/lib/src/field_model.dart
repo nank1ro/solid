@@ -14,6 +14,7 @@ class FieldModel {
     required this.initializerText,
     required this.annotationName,
     required this.isLate,
+    required this.isNullable,
   });
 
   /// Declared identifier of the field (e.g. `'counter'`).
@@ -37,4 +38,13 @@ class FieldModel {
   /// Section 4.2). Preserved verbatim on the emitted `Signal` field so that
   /// `Signal` construction is deferred until first access.
   final bool isLate;
+
+  /// Whether the field's declared top-level type is nullable (SPEC Section
+  /// 4.3). True when the type annotation ends with `?` (e.g. `int?`,
+  /// `List<int>?`); false for non-nullable types (e.g. `int`, `List<int?>` —
+  /// the inner `?` does not make the outer type nullable). Determined from
+  /// the analyzer's `TypeAnnotation.question` token so nested generics are
+  /// handled correctly. A nullable field without an initializer emits
+  /// `Signal<T?>(null, name: '…')` rather than `Signal<T>.lazy(…)`.
+  final bool isNullable;
 }
