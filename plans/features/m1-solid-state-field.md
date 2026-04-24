@@ -54,7 +54,6 @@ A developer after M1 can:
 
 - **M1-14** — reject every invalid `@SolidState` target enumerated in Section 3.1 (`final`, `const`, `static`, top-level, method, setter) with a clear per-case error message.
 - **M1-15** — reject `@SolidEffect` / `@SolidQuery` / `@SolidEnvironment` at build time with the Section 3.2 error ("not yet implemented; scheduled for a later v2 milestone").
-- **M1-02b** — reject `late T foo;` where `T` has no known default per the Section 4.2 table with the exact SPEC error quoted in that section.
 
 Stages are sequential inside M1 (A → B → C → D → E), but items within a stage can run in parallel if two agents share a worktree.
 

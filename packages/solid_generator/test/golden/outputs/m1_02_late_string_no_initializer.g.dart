@@ -10,7 +10,7 @@ class Greeting extends StatefulWidget {
 }
 
 class _GreetingState extends State<Greeting> {
-  late final text = Signal<String>('', name: 'text');
+  late final text = Signal<String>.lazy(name: 'text');
 
   @override
   void dispose() {

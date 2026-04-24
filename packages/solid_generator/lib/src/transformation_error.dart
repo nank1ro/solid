@@ -93,22 +93,6 @@ class ValidationError extends TransformationError {
     : violationType = 'INVALID_TYPE',
       super('Type $typeName is not supported for reactive state', location);
 
-  /// Factory for "no default is known" errors on `late` fields whose declared
-  /// type has no entry in the SPEC Section 4.2 defaults table.
-  ///
-  /// Message text matches SPEC Section 4.2 verbatim (single-quote delimited
-  /// per the TODOS.md M1-02b rejection test expectation).
-  const ValidationError.noDefault(
-    String fieldName,
-    String typeName,
-    String? location,
-  ) : violationType = 'NO_DEFAULT',
-      super(
-        "field '$fieldName' of type '$typeName' has no initializer and "
-        "no default is known; add '= $typeName(...)' or declare '$typeName?'",
-        location,
-      );
-
   /// Code identifying the type of validation violation.
   final String violationType;
 

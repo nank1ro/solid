@@ -100,68 +100,19 @@ $dispose
 }''';
 }
 
-/// Emits one `[late ]final <name> = Signal<T>(<init>, name: '<debug>');` line
-/// per SPEC Section 4.1. When the field has no initializer, looks up a default
-/// from the SPEC Section 4.2 table via [_defaultValueFor]. Preserves the
-/// `late` keyword verbatim when present on the source field (SPEC Section 4.2).
+/// Emits one `[late ]final <name> = Signal<T>(…, name: '<debug>');` line per
+/// SPEC Section 4.1. When the source field is `late` with no initializer,
+/// emits `Signal<T>.lazy(name: '<debug>')` per SPEC Section 4.2 — reading
+/// `.value` before the first write throws `StateError`, matching Dart's own
+/// `late` semantics. The `late` modifier is preserved verbatim on the Dart
+/// field so that `Signal` construction itself is deferred to first access.
 String _emitSignalField(FieldModel f) {
   final debugName = f.annotationName ?? f.fieldName;
-  final init = f.initializerText.isNotEmpty
-      ? f.initializerText
-      : _defaultValueFor(f.typeText, f.fieldName);
   final lateKw = f.isLate ? 'late ' : '';
-  return '  ${lateKw}final ${f.fieldName} = '
-      "Signal<${f.typeText}>($init, name: '$debugName');";
-}
-
-/// Resolves the default-value literal for a field declared without an
-/// initializer, per the SPEC Section 4.2 defaults table.
-///
-/// Handles non-nullable primitives (`int`, `double`, `num`, `String`, `bool`)
-/// and collection types (`List<E>`, `Map<K, V>`, `Set<E>`), preserving the
-/// declared type arguments verbatim in the emitted literal. Nullable types
-/// (`T?` → `null`) are deferred to M1-03 — reaching them here throws the same
-/// unknown-default error as any other unhandled type.
-///
-/// Throws [ValidationError.noDefault] when [typeText] has no entry in the
-/// defaults table.
-String _defaultValueFor(String typeText, String fieldName) {
-  final trimmed = typeText.trim();
-  switch (trimmed) {
-    case 'int':
-      return '0';
-    case 'double':
-      return '0.0';
-    case 'num':
-      return '0';
-    case 'String':
-      return "''";
-    case 'bool':
-      return 'false';
-  }
-  final collection = _collectionDefault(trimmed);
-  if (collection != null) return collection;
-  throw ValidationError.noDefault(fieldName, typeText, null);
-}
-
-/// Resolves the empty-literal default for `List<E>`, `Map<K, V>`, or
-/// `Set<E>`, preserving the declared type arguments. Returns `null` when
-/// [trimmed] is not one of the three collection prefixes.
-String? _collectionDefault(String trimmed) {
-  const prefixes = <String, String>{
-    'List<': '[]',
-    'Map<': '{}',
-    'Set<': '{}',
-  };
-  if (!trimmed.endsWith('>')) return null;
-  for (final entry in prefixes.entries) {
-    if (trimmed.startsWith(entry.key)) {
-      // Keep the opening `<` so the emitted literal reads e.g. `<E>[]`.
-      final args = trimmed.substring(entry.key.length - 1);
-      return '$args${entry.value}';
-    }
-  }
-  return null;
+  final ctor = f.initializerText.isNotEmpty
+      ? "Signal<${f.typeText}>(${f.initializerText}, name: '$debugName')"
+      : "Signal<${f.typeText}>.lazy(name: '$debugName')";
+  return '  ${lateKw}final ${f.fieldName} = $ctor;';
 }
 
 /// Emits the `dispose()` method disposing every signal in reverse declaration

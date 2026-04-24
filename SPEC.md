@@ -139,26 +139,16 @@ late String text;
 Output:
 
 ```dart
-late final text = Signal<String>('', name: 'text');
+late final text = Signal<String>.lazy(name: 'text');
 ```
 
 Rules:
 
-- The generator preserves the `late` keyword — valid Dart that defers `Signal` construction until first access.
-- Nullable fields (Section 4.3) do not require `late` because `null` is a valid default.
-
-Default values by declared type:
-
-- `int` → `0`
-- `double` → `0.0`
-- `num` → `0`
-- `String` → `''`
-- `bool` → `false`
-- `T?` (any nullable type) → `null`
-- `List<E>` → `<E>[]`
-- `Map<K, V>` → `<K, V>{}`
-- `Set<E>` → `<E>{}`
-- Any other non-nullable type → **generator rejects with a clear error** ("field `foo` of type `MyType` has no initializer and no default is known; add `= MyType(...)` or declare `MyType?`").
+- For any `late` field declared without an initializer, the generator emits `Signal<T>.lazy(name: '…')` regardless of `T`. `Signal.lazy` (flutter_solidart ≥ 2.0) has no initial value; reading `.value` before the first write throws `StateError` — the one-to-one analogue of Dart's own `LateInitializationError` for `late` fields.
+- The `late` modifier is preserved on the emitted Dart field so that `Signal` construction itself is deferred until first access.
+- The rule is uniform across primitives, collections, and user-defined types: no defaults table, no rejection path. `@SolidState() late MyType foo;` is always valid as long as `MyType` is a real type.
+- Nullable fields (Section 4.3) do not require `late` because `null` is a valid default; those continue to emit `Signal<T?>(null, name: '…')`.
+- Caveat: only `Signal` has a `.lazy` constructor. `Computed` (Section 4.5) always has an initializer expression (the getter body), so this rule does not apply to it. `Resource` and `Effect` do not reach this code path.
 
 ### 4.3 Nullable field
 
