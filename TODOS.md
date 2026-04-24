@@ -416,19 +416,22 @@ class CounterPage extends StatelessWidget {
   int counter = 0;
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    body: Center(child: Text('Counter is $counter')),
-    floatingActionButton: FloatingActionButton(
-      onPressed: () => counter++,
-      child: const Icon(Icons.add),
-    ),
-  );
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Center(child: Text('Counter is $counter')),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => counter++,
+        child: const Icon(Icons.add),
+      ),
+    );
+  }
 }
 ```
 
 **Expected output content:**
 
 ```dart
+import 'package:solid_annotations/solid_annotations.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
 
@@ -449,23 +452,25 @@ class _CounterPageState extends State<CounterPage> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    body: Center(
-      child: SignalBuilder(
-        builder: (context, child) {
-          return Text('Counter is ${counter.value}');
-        },
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Center(
+        child: SignalBuilder(
+          builder: (context, child) {
+            return Text('Counter is ${counter.value}');
+          },
+        ),
       ),
-    ),
-    floatingActionButton: FloatingActionButton(
-      onPressed: () => counter.value++,
-      child: const Icon(Icons.add),
-    ),
-  );
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => counter.value++,
+        child: const Icon(Icons.add),
+      ),
+    );
+  }
 }
 ```
 
-**Expected implementation change:** Integration of field builder (M1-01), compound-assignment rewrite (Section 5.3), interpolation rewrite (Section 5.2), untracked-callback rule (Section 6.2), SignalBuilder minimum-subtree placement (Section 7.2).
+**Expected implementation change:** Integration of field builder (M1-01), compound-assignment rewrite (Section 5.3), interpolation rewrite (Section 5.2), untracked-callback rule (Section 6.2), SignalBuilder minimum-subtree placement (Section 7.2). Build method uses a block body (`{ return ...; }`) — the Flutter idiom for build methods — to establish the house style for every later golden.
 
 **Acceptance:**
 
@@ -475,7 +480,7 @@ class _CounterPageState extends State<CounterPage> {
 
 **Dependencies:** M1-01, M1-04 (for name handling wiring), and the visit-tree rewrite logic introduced here is reused by M3.
 
-**Status:** TODO
+**Status:** DONE
 
 ---
 
