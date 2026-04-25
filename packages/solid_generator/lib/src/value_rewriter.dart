@@ -38,48 +38,21 @@ class ValueRewriteResult {
   final List<int> trackedReadOffsets;
 }
 
-/// Names of callback parameters enumerated by SPEC Section 6.2. A read
-/// inside a function expression that is the value of a named argument
-/// with one of these parameter names is untracked.
-const Set<String> _untrackedCallbackParams = {
-  'onPressed',
-  'onTap',
-  'onLongPress',
-  'onDoubleTap',
-  'onChanged',
-  'onSubmitted',
-  'onEditingComplete',
-  'onFieldSubmitted',
-  'onSaved',
-  'onHorizontalDragStart',
-  'onHorizontalDragUpdate',
-  'onHorizontalDragEnd',
-  'onHorizontalDragCancel',
-  'onHorizontalDragDown',
-  'onVerticalDragStart',
-  'onVerticalDragUpdate',
-  'onVerticalDragEnd',
-  'onVerticalDragCancel',
-  'onVerticalDragDown',
-  'onPanStart',
-  'onPanUpdate',
-  'onPanEnd',
-  'onPanCancel',
-  'onPanDown',
-  'onScaleStart',
-  'onScaleUpdate',
-  'onScaleEnd',
-  'onHover',
-  'onExit',
-  'onEnter',
-  'onFocusChange',
-  'onDismissed',
-  'onClosing',
-  'onAccept',
-  'onWillAccept',
-  'onLeave',
-  'onMove',
-};
+/// True if [name] matches the SPEC Section 6.2 untracked-callback pattern:
+/// a named argument whose name starts with `on` followed by an uppercase
+/// ASCII letter. Matches every Flutter built-in callback (`onPressed`,
+/// `onTap`, `onChanged`, `onHorizontalDragUpdate`, …) and any user-defined
+/// `on*` callback on a custom widget (`onTrigger`, `onRefresh`, …).
+///
+/// Per SPEC 6.2 the rule is paired with a `FunctionExpression` value guard
+/// at the call site, so non-callback `on*` named args (e.g. an enum or a
+/// Duration) never match.
+bool _isOnPrefixedCallbackName(String name) {
+  if (name.length < 3) return false;
+  if (!name.startsWith('on')) return false;
+  final third = name.codeUnitAt(2);
+  return third >= 0x41 && third <= 0x5A; // 'A'..'Z'
+}
 
 /// Names of `Key`-family constructors enumerated by SPEC Section 6.3. A
 /// read inside an `InstanceCreationExpression` of one of these classes
@@ -265,12 +238,13 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
     return true;
   }
 
-  /// True if [fn] is the direct value of a `NamedExpression` whose name is
-  /// an SPEC-6.2 untracked-callback parameter.
+  /// True if [fn] is the direct value of a `NamedExpression` whose name
+  /// matches the SPEC Section 6.2 untracked-callback pattern
+  /// (see [_isOnPrefixedCallbackName]).
   bool _isUntrackedCallback(FunctionExpression fn) {
     final parent = fn.parent;
     if (parent is! NamedExpression) return false;
-    return _untrackedCallbackParams.contains(parent.name.label.name);
+    return _isOnPrefixedCallbackName(parent.name.label.name);
   }
 
   /// True if [node] is a `Key`-family constructor passed as the `key:`

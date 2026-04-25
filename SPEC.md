@@ -347,14 +347,16 @@ Untracked reads still get `.value` appended (so they typecheck). They just do NO
 
 A read is untracked when the identifier appears inside a function expression that is the value of a named argument to a widget constructor and that named argument is a user-interaction callback. The callback fires in response to a user gesture, not in response to signal changes, so subscribing the enclosing widget to the read would be wrong.
 
-Callback parameter names treated as untracked:
+A named argument is treated as a user-interaction callback when both hold:
 
-- `onPressed`, `onTap`, `onLongPress`, `onDoubleTap`
-- `onChanged`, `onSubmitted`, `onEditingComplete`, `onFieldSubmitted`, `onSaved`
-- `onHorizontalDragUpdate`, `onVerticalDragUpdate`, `onPanUpdate`, `onScaleUpdate` (and their `Start`/`End`/`Cancel`/`Down` variants)
-- `onHover`, `onExit`, `onEnter`, `onFocusChange`
-- `onDismissed`, `onClosing`, `onAccept`, `onWillAccept`, `onLeave`, `onMove`
-- The list is maintained in this SPEC.
+1. Its parameter name matches the pattern `on[A-Z]\w*` — `on` followed by an uppercase letter followed by zero or more word characters.
+2. Its argument value is a function expression (a `FunctionExpression` AST node).
+
+The pattern match covers every Flutter built-in callback (`onPressed`, `onTap`, `onLongPress`, `onDoubleTap`, `onChanged`, `onSubmitted`, `onEditingComplete`, `onFieldSubmitted`, `onSaved`, the `onHorizontalDrag*` / `onVerticalDrag*` / `onPan*` / `onScale*` families, `onHover`, `onExit`, `onEnter`, `onFocusChange`, `onDismissed`, `onClosing`, `onAccept`, `onWillAccept`, `onLeave`, `onMove`, and Flutter additions like `onRefresh`, `onGenerateRoute`, `onWillPop`, etc.) and any user-defined callback on a third-party or in-repo widget (`onTrigger`, `onSelect`, `onCustomAction`, etc.). The function-expression guard prevents non-callback `on*` named arguments (rare — e.g. an enum-valued `onFoo: Foo.bar`) from matching.
+
+For a callback whose parameter name does not begin with `on` (very rare; Flutter and community convention prefixes all interaction callbacks with `on`), the developer opts out explicitly via `untracked(() => ...)` (Section 6.4).
+
+A future SPEC revision paired with the M3 type-resolution pivot may refine this rule to detect void-returning function-typed parameters independent of name, making the `on*` convention unnecessary. Until then, the name-pattern + function-expression rule is the canonical detection mechanism.
 
 The example below shows one read and one write inside `onPressed`. The read (`if (counter > 10)`) is untracked by this rule. The write (`counter++`) is untracked by Section 6.0 and would be untracked even outside a callback. Neither causes `SignalBuilder` wrapping.
 
