@@ -513,6 +513,7 @@ class Counter {
 **Expected output content:**
 
 ```dart
+import 'package:solid_annotations/solid_annotations.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
 
 class Counter {
@@ -526,13 +527,15 @@ class Counter {
 }
 ```
 
+(Per SPEC §9 the generator preserves every source import verbatim and never prunes; unused-import cleanup is `dart fix --apply`'s job.)
+
 **Expected implementation change:** Class-kind dispatch adds "plain class" branch (Section 8.3). Dispose synthesis uses reverse declaration order (Section 10) and omits `super.dispose()` when the supertype chain has no `dispose()` method.
 
 **Acceptance:** `dart test --name=m1_06` passes; golden analyzes clean.
 
 **Dependencies:** M1-01.
 
-**Status:** TODO
+**Status:** DONE
 
 ---
 

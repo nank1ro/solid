@@ -1,6 +1,7 @@
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:solid_generator/src/build_rewriter.dart';
 import 'package:solid_generator/src/field_model.dart';
+import 'package:solid_generator/src/signal_emitter.dart';
 import 'package:solid_generator/src/transformation_error.dart';
 
 /// Rewrites a `StatelessWidget` class containing `@SolidState` fields as a
@@ -88,14 +89,17 @@ class $className extends StatefulWidget {
 }
 
 /// Emits the private `State<X>` half of the class split (SPEC Section 8.1).
+///
+/// `State<T>` has `dispose()` in its supertype chain, so the synthesized
+/// `dispose()` is `@override` and ends with `super.dispose();` (SPEC §10).
 String _emitStateClass(
   String className,
   String stateClassName,
   List<FieldModel> fields,
   String buildMethodText,
 ) {
-  final signalFields = fields.map(_emitSignalField).join('\n');
-  final dispose = _emitDispose(fields);
+  final signalFields = fields.map(emitSignalField).join('\n');
+  final dispose = emitDispose(fields, inheritsDispose: true);
 
   return '''
 class $stateClassName extends State<$className> {
@@ -105,51 +109,4 @@ $dispose
 
   $buildMethodText
 }''';
-}
-
-/// Emits one `[late ]final <name> = Signal<T>(…, name: '<debug>');` line.
-///
-/// Three cases, in priority order:
-///
-/// 1. **Has initializer** (SPEC Section 4.1) →
-///    `Signal<T>(<init>, name: '<debug>')`. The `late` modifier (if any)
-///    is preserved verbatim so that `Signal` construction itself is deferred
-///    to first access.
-/// 2. **No initializer, nullable type** (SPEC Section 4.3) →
-///    `Signal<T?>(null, name: '<debug>')`. No `late` needed because `null`
-///    is a valid default.
-/// 3. **No initializer, non-nullable type** (SPEC Section 4.2) →
-///    `Signal<T>.lazy(name: '<debug>')`. The source field must have been
-///    declared `late` (the only way Dart accepts a non-nullable field with
-///    no initializer); the modifier is preserved on the emitted field so
-///    reads before the first write throw `StateError`, matching Dart's own
-///    `late` semantics.
-String _emitSignalField(FieldModel f) {
-  final debugName = f.annotationName ?? f.fieldName;
-  final lateKw = f.isLate ? 'late ' : '';
-  final String ctor;
-  if (f.initializerText.isNotEmpty) {
-    ctor = "Signal<${f.typeText}>(${f.initializerText}, name: '$debugName')";
-  } else if (f.isNullable) {
-    ctor = "Signal<${f.typeText}>(null, name: '$debugName')";
-  } else {
-    ctor = "Signal<${f.typeText}>.lazy(name: '$debugName')";
-  }
-  return '  ${lateKw}final ${f.fieldName} = $ctor;';
-}
-
-/// Emits the `dispose()` method disposing every signal in reverse declaration
-/// order (SPEC Section 10). `super.dispose()` is always emitted here because
-/// `State<T>` has `dispose()` in its supertype chain.
-String _emitDispose(List<FieldModel> fields) {
-  final buffer = StringBuffer()
-    ..writeln('  @override')
-    ..writeln('  void dispose() {');
-  for (final f in fields.reversed) {
-    buffer.writeln('    ${f.fieldName}.dispose();');
-  }
-  buffer
-    ..writeln('    super.dispose();')
-    ..write('  }');
-  return buffer.toString();
 }
