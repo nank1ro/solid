@@ -1,6 +1,7 @@
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:solid_generator/src/build_rewriter.dart';
 import 'package:solid_generator/src/field_model.dart';
+import 'package:solid_generator/src/import_rewriter.dart';
 import 'package:solid_generator/src/signal_emitter.dart';
 import 'package:solid_generator/src/transformation_error.dart';
 
@@ -20,7 +21,7 @@ import 'package:solid_generator/src/transformation_error.dart';
 ///
 /// The emitted string is syntactically valid Dart but is not guaranteed to be
 /// pretty-printed — run through `DartFormatter` before writing.
-String rewriteStateClass(
+RewriteResult rewriteStateClass(
   ClassDeclaration classDecl,
   List<FieldModel> solidFields,
   String source,
@@ -68,7 +69,10 @@ String rewriteStateClass(
     classDecl.offset,
     classDecl.leftBracket.offset,
   );
-  return '$header{\n${pieces.join('\n\n')}\n}';
+  return (
+    text: '$header{\n${pieces.join('\n\n')}\n}',
+    solidartNames: const <String>{'Signal'},
+  );
 }
 
 /// Prepends one `<field>.dispose();` call per reactive declaration to the

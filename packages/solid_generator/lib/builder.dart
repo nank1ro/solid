@@ -115,28 +115,39 @@ List<_AnnotatedClass> _collectAnnotatedClasses(
 /// Renders the full `lib/` output for a file that has at least one annotated
 /// class. Preserves non-annotated classes verbatim and rewrites annotated
 /// ones per their class kind.
+///
+/// `flutter_solidart` is added to the import block iff any rewriter emitted
+/// a Section 9 identifier (SPEC §9).
 String _renderOutput(
   CompilationUnit unit,
   List<_AnnotatedClass> annotatedClasses,
   String source,
 ) {
-  final classTexts = annotatedClasses.map((c) {
-    if (c.fields.isEmpty) return source.substring(c.decl.offset, c.decl.end);
+  final results = annotatedClasses.map((c) {
+    if (c.fields.isEmpty) {
+      return (
+        text: source.substring(c.decl.offset, c.decl.end),
+        solidartNames: const <String>{},
+      );
+    }
     return _rewriteClass(c.decl, c.fields, source);
-  });
+  }).toList();
 
   final imports = computeOutputImports(
     unit.directives.whereType<ImportDirective>().map(_importUri).toList(),
-    addSolidart: true,
+    addSolidart: results.any(
+      (r) => r.solidartNames.any(solidartNames.contains),
+    ),
   );
   final importBlock = imports.map((u) => "import '$u';").join('\n');
 
-  final combined = '$importBlock\n\n${classTexts.join('\n\n')}\n';
+  final combined =
+      '$importBlock\n\n${results.map((r) => r.text).join('\n\n')}\n';
   return _formatter.format(combined);
 }
 
-/// Dispatches on [decl]'s class kind and emits the rewritten form.
-String _rewriteClass(
+/// Dispatches on [decl]'s class kind to the matching rewriter.
+RewriteResult _rewriteClass(
   ClassDeclaration decl,
   List<FieldModel> fields,
   String source,

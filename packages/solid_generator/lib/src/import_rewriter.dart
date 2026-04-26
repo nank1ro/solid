@@ -6,6 +6,29 @@
 const String flutterSolidartUri =
     'package:flutter_solidart/flutter_solidart.dart';
 
+/// Canonical set of identifiers exported by `flutter_solidart` whose presence
+/// in generated output triggers the import-add rule (SPEC Section 9).
+///
+/// Each rewriter declares which subset of these names it statically emits;
+/// the builder unions those subsets and adds `flutter_solidart` if the union
+/// is non-empty.
+const Set<String> solidartNames = {
+  'Signal',
+  'Computed',
+  'Effect',
+  'Resource',
+  'SignalBuilder',
+  'SolidartConfig',
+  'untracked',
+};
+
+/// One annotated class's contribution to the generated output.
+///
+/// `text` is the rewritten (or verbatim) source for the class; `solidartNames`
+/// enumerates which [solidartNames] identifiers `text` references, used by the
+/// builder to decide whether to add the `flutter_solidart` import.
+typedef RewriteResult = ({String text, Set<String> solidartNames});
+
 /// Returns the import URIs that should appear at the top of the generated
 /// `lib/` file.
 ///

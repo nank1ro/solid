@@ -14,8 +14,9 @@ class _CounterState extends State<Counter> {
   @SolidState()
   int counter = 0;
 
-  final StreamSubscription<void> _subscription =
-      Stream<void>.periodic(const Duration(seconds: 1)).listen((_) {});
+  final StreamSubscription<void> _subscription = Stream<void>.periodic(
+    const Duration(seconds: 1),
+  ).listen((_) {});
 
   @override
   void initState() {

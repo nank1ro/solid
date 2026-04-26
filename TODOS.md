@@ -641,7 +641,7 @@ class _CounterState extends State<Counter> {
 
 **Dependencies:** M1-01.
 
-**Status:** TODO
+**Status:** DONE
 
 ---
 
@@ -667,7 +667,7 @@ class _CounterState extends State<Counter> {
 
 **Dependencies:** M1-01.
 
-**Status:** TODO
+**Status:** DONE
 
 ---
 
