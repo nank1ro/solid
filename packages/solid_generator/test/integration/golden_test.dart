@@ -1,5 +1,5 @@
 // Integration suite for the Solid builder's paired-golden tests.
-// M1+ TODOs extend [_goldenNames]; the body of this file does not change.
+// M1+ TODOs extend [goldenNames]; the body of this file does not change.
 
 import 'dart:convert';
 import 'dart:io';
@@ -15,7 +15,7 @@ import 'package:test/test.dart';
 /// M1+ TODOs append case names here. Each entry `name` requires:
 ///   `test/golden/inputs/<name>.dart`   — hand-written source with @Solid* annotations
 ///   `test/golden/outputs/<name>.g.dart` — expected builder output
-const List<String> _goldenNames = <String>[
+const List<String> goldenNames = <String>[
   'm1_01_int_field_with_initializer',
   'm1_02_late_string_no_initializer',
   'm1_03_nullable_int_field',
@@ -28,7 +28,7 @@ const List<String> _goldenNames = <String>[
 
 /// Resolves the golden directory relative to the package root, regardless of
 /// where `dart test` is invoked from.
-Future<String> _resolveGoldenDir() async {
+Future<String> resolveGoldenDir() async {
   final libUri = await Isolate.resolvePackageUri(
     Uri.parse('package:solid_generator/builder.dart'),
   );
@@ -39,9 +39,9 @@ final bool _updateGoldens = Platform.environment['UPDATE_GOLDENS'] == '1';
 
 void main() {
   group('golden', () {
-    for (final name in _goldenNames) {
+    for (final name in goldenNames) {
       test(name, () async {
-        final goldenDir = await _resolveGoldenDir();
+        final goldenDir = await resolveGoldenDir();
         final inputPath = '$goldenDir/inputs/$name.dart';
         final expectedPath = '$goldenDir/outputs/$name.g.dart';
 
