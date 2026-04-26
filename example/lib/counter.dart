@@ -1,14 +1,37 @@
+import 'package:solid_annotations/solid_annotations.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_solidart/flutter_solidart.dart';
 
-/// Hello-world widget used as the M0 smoke-test.
-class Counter extends StatelessWidget {
-  /// Creates a [Counter] widget.
-  const Counter({super.key});
+class CounterPage extends StatefulWidget {
+  const CounterPage({super.key});
+
+  @override
+  State<CounterPage> createState() => _CounterPageState();
+}
+
+class _CounterPageState extends State<CounterPage> {
+  final counter = Signal<int>(0, name: 'counter');
+
+  @override
+  void dispose() {
+    counter.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
-      body: Center(child: Text('hello')),
+    return Scaffold(
+      body: Center(
+        child: SignalBuilder(
+          builder: (context, child) {
+            return Text('Counter is ${counter.value}');
+          },
+        ),
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => counter.value++,
+        child: const Icon(Icons.add),
+      ),
     );
   }
 }
