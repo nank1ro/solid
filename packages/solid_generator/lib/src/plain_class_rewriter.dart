@@ -1,5 +1,6 @@
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:solid_generator/src/field_model.dart';
+import 'package:solid_generator/src/import_rewriter.dart';
 import 'package:solid_generator/src/signal_emitter.dart';
 import 'package:solid_generator/src/transformation_error.dart';
 
@@ -21,7 +22,7 @@ import 'package:solid_generator/src/transformation_error.dart';
 /// [source] is unused here (full reconstruction from AST); it is part of the
 /// signature so the dispatcher in `builder.dart` can pass it uniformly to
 /// every class-kind rewriter.
-String rewritePlainClass(
+RewriteResult rewritePlainClass(
   ClassDeclaration classDecl,
   List<FieldModel> solidFields,
   String source,
@@ -32,12 +33,16 @@ String rewritePlainClass(
   final signalFields = solidFields.map(emitSignalField).join('\n');
   final dispose = emitDispose(solidFields, inheritsDispose: false);
 
-  return '''
+  return (
+    text:
+        '''
 class $className {
 $signalFields
 
 $dispose
-}''';
+}''',
+    solidartNames: const <String>{'Signal'},
+  );
 }
 
 /// Throws [CodeGenerationError] if [classDecl] contains any member other than

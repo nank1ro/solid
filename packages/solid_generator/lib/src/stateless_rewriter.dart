@@ -1,6 +1,7 @@
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:solid_generator/src/build_rewriter.dart';
 import 'package:solid_generator/src/field_model.dart';
+import 'package:solid_generator/src/import_rewriter.dart';
 import 'package:solid_generator/src/signal_emitter.dart';
 import 'package:solid_generator/src/transformation_error.dart';
 
@@ -10,7 +11,7 @@ import 'package:solid_generator/src/transformation_error.dart';
 /// See SPEC Section 8.1. The emitted string is syntactically valid Dart but
 /// is not guaranteed to be pretty-printed — run through `DartFormatter` before
 /// writing.
-String rewriteStatelessWidget(
+RewriteResult rewriteStatelessWidget(
   ClassDeclaration classDecl,
   List<FieldModel> solidFields,
   String source,
@@ -34,7 +35,10 @@ String rewriteStatelessWidget(
     buildMethodText,
   );
 
-  return '$widgetClass\n\n$stateClass\n';
+  return (
+    text: '$widgetClass\n\n$stateClass\n',
+    solidartNames: const <String>{'Signal', 'SignalBuilder'},
+  );
 }
 
 /// Extracts the parenthesized parameter list of the class's unnamed
