@@ -1,4 +1,5 @@
 import 'package:analyzer/dart/ast/ast.dart';
+import 'package:solid_generator/src/build_rewriter.dart';
 import 'package:solid_generator/src/field_model.dart';
 import 'package:solid_generator/src/transformation_error.dart';
 
@@ -16,7 +17,13 @@ String rewriteStatelessWidget(
   final className = classDecl.name.lexeme;
   final stateClassName = '_${className}State';
   final ctorParams = _extractCtorParams(classDecl, source);
-  final buildMethodText = _extractBuildMethod(classDecl, source);
+  final buildMethod = _findBuildMethod(classDecl);
+  final reactiveFieldNames = solidFields.map((f) => f.fieldName).toSet();
+  final buildMethodText = rewriteBuildMethod(
+    buildMethod,
+    reactiveFieldNames,
+    source,
+  );
 
   final widgetClass = _emitWidgetClass(className, stateClassName, ctorParams);
   final stateClass = _emitStateClass(
@@ -42,19 +49,19 @@ String _extractCtorParams(ClassDeclaration classDecl, String source) {
   return '()';
 }
 
-/// Extracts the full source text of the `build` method, including its
-/// `@override` annotation, return type, parameters, and body.
-String _extractBuildMethod(ClassDeclaration classDecl, String source) {
+/// Returns the `build` method declaration so it can be handed to the
+/// reactive-rewrite pipeline. Throws [AnalysisError] if the class has no
+/// `build` method (not a valid `StatelessWidget` under SPEC Section 8.1).
+MethodDeclaration _findBuildMethod(ClassDeclaration classDecl) {
   for (final member in classDecl.members) {
     if (member is MethodDeclaration && member.name.lexeme == 'build') {
-      return source.substring(member.offset, member.end);
+      return member;
     }
   }
-  final className = classDecl.name.lexeme;
   throw AnalysisError(
     'StatelessWidget has no build() method to preserve',
     null,
-    className,
+    classDecl.name.lexeme,
   );
 }
 
