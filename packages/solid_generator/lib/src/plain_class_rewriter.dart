@@ -10,21 +10,17 @@ import 'package:solid_generator/src/transformation_error.dart';
 /// See SPEC §8.3 and §10. The synthesized `dispose()` has neither `@override`
 /// nor `super.dispose()` because the supertype chain is `Object` only.
 ///
-/// **M1-06 scope.** This rewriter only handles classes whose every member is
-/// an `@SolidState`-annotated field. The following deferred cases throw
-/// [CodeGenerationError] rather than silently dropping data:
-///
-/// - Existing user-declared `dispose()` method (SPEC §10 merge algorithm) —
-///   scheduled for a later M1 TODO.
-/// - Any non-annotated field, constructor, method, or other member —
-///   scheduled for a later M1 TODO that introduces in-place SourceEdit
-///   patching (analogous to M1-07's `State<X>` approach).
+/// Currently only classes whose every member is an `@SolidState`-annotated
+/// field are supported. Any other member (existing `dispose()`, constructors,
+/// non-annotated fields, methods, …) throws [CodeGenerationError] —
+/// dispose-merge and in-place patching are scheduled for later milestones.
 ///
 /// The emitted string is syntactically valid Dart but is not guaranteed to be
 /// pretty-printed — run through `DartFormatter` before writing.
 ///
-/// The [source] parameter is unused today (full reconstruction) but is kept
-/// for signature parity with the other class-kind rewriters.
+/// [source] is unused here (full reconstruction from AST); it is part of the
+/// signature so the dispatcher in `builder.dart` can pass it uniformly to
+/// every class-kind rewriter.
 String rewritePlainClass(
   ClassDeclaration classDecl,
   List<FieldModel> solidFields,
@@ -34,11 +30,7 @@ String rewritePlainClass(
   _checkUnsupportedMembers(classDecl, solidFields, className);
 
   final signalFields = solidFields.map(emitSignalField).join('\n');
-  final dispose = emitDispose(
-    solidFields,
-    emitOverride: false,
-    emitSuperCall: false,
-  );
+  final dispose = emitDispose(solidFields, inheritsDispose: false);
 
   return '''
 class $className {
@@ -48,9 +40,9 @@ $dispose
 }''';
 }
 
-/// Throws [CodeGenerationError] if the class contains any member that is not
-/// an `@SolidState` field. Deferred cases are surfaced explicitly rather than
-/// silently dropped so the developer learns the case is unsupported.
+/// Throws [CodeGenerationError] if [classDecl] contains any member other than
+/// an `@SolidState` field. Surfacing these explicitly avoids silently dropping
+/// user code while the rewriter is incomplete.
 void _checkUnsupportedMembers(
   ClassDeclaration classDecl,
   List<FieldModel> solidFields,
@@ -62,29 +54,30 @@ void _checkUnsupportedMembers(
       final varName = member.fields.variables.first.name.lexeme;
       if (!annotatedNames.contains(varName)) {
         throw CodeGenerationError(
-          'plain class with non-annotated field "$varName" is not supported '
-          'in M1-06 (scheduled for a later M1 TODO that introduces in-place '
-          'patching)',
+          'plain class with non-annotated field "$varName" is not yet '
+          'supported',
           null,
           className,
         );
       }
-    } else if (member is MethodDeclaration && member.name.lexeme == 'dispose') {
-      throw CodeGenerationError(
-        'plain class with existing dispose() method is not supported in '
-        'M1-06 (scheduled for a later M1 TODO that adds dispose-merge '
-        'support per SPEC §10)',
-        null,
-        className,
-      );
-    } else {
-      throw CodeGenerationError(
-        'plain class with member of kind ${member.runtimeType} is not '
-        'supported in M1-06 (scheduled for a later M1 TODO that introduces '
-        'in-place patching)',
-        null,
-        className,
-      );
+      continue;
     }
+    throw CodeGenerationError(
+      'plain class with ${_memberKindLabel(member)} is not yet supported',
+      null,
+      className,
+    );
   }
+}
+
+/// Human-readable label for an unsupported [ClassMember], used in error
+/// messages. Avoids leaking the analyzer's `…Impl` runtime type names.
+String _memberKindLabel(ClassMember member) {
+  if (member is MethodDeclaration) {
+    return member.name.lexeme == 'dispose'
+        ? 'existing dispose() method'
+        : 'method "${member.name.lexeme}"';
+  }
+  if (member is ConstructorDeclaration) return 'constructor';
+  return 'member';
 }

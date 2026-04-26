@@ -99,11 +99,7 @@ String _emitStateClass(
   String buildMethodText,
 ) {
   final signalFields = fields.map(emitSignalField).join('\n');
-  final dispose = emitDispose(
-    fields,
-    emitOverride: true,
-    emitSuperCall: true,
-  );
+  final dispose = emitDispose(fields, inheritsDispose: true);
 
   return '''
 class $stateClassName extends State<$className> {

@@ -1,11 +1,6 @@
 import 'package:solid_generator/src/field_model.dart';
 
 /// Shared signal-emission helpers used by every class-kind rewriter.
-///
-/// Centralising these here keeps the SPEC §4.1/4.2/4.3 signal construction
-/// rules and the SPEC §10 dispose contract in a single place — rewriters for
-/// `StatelessWidget`, plain classes, and (later) `State<X>` all share the same
-/// output shape.
 
 /// Emits one `[late ]final <name> = Signal<T>(…, name: '<debug>');` line.
 ///
@@ -39,30 +34,26 @@ String emitSignalField(FieldModel f) {
 }
 
 /// Emits a `dispose()` method disposing every signal in reverse declaration
-/// order (SPEC Section 10).
+/// order (SPEC §10).
 ///
-/// [emitOverride] controls whether `@override` is prepended — `true` for
-/// `State<X>` subclasses (which override `State.dispose`), `false` for plain
-/// classes (no inherited `dispose` to override).
-///
-/// [emitSuperCall] controls whether `super.dispose();` is appended — `true`
-/// when the supertype chain contains a `dispose()` method (e.g. `State<T>`,
-/// `ChangeNotifier`), `false` for a plain class whose supertype chain is just
-/// `Object` (SPEC §8.3 / §10).
+/// [inheritsDispose] is `true` when the owning class's supertype chain contains
+/// a `dispose()` method (e.g. `State<T>`, `ChangeNotifier`); the emitted method
+/// is then `@override` and ends with `super.dispose();`. For a plain class
+/// whose supertype is `Object`, pass `false` — neither annotation nor
+/// super-call is emitted (SPEC §8.3).
 String emitDispose(
   List<FieldModel> fields, {
-  required bool emitOverride,
-  required bool emitSuperCall,
+  required bool inheritsDispose,
 }) {
   final buffer = StringBuffer();
-  if (emitOverride) {
+  if (inheritsDispose) {
     buffer.writeln('  @override');
   }
   buffer.writeln('  void dispose() {');
   for (final f in fields.reversed) {
     buffer.writeln('    ${f.fieldName}.dispose();');
   }
-  if (emitSuperCall) {
+  if (inheritsDispose) {
     buffer.writeln('    super.dispose();');
   }
   buffer.write('  }');
