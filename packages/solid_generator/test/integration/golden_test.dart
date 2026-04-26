@@ -21,6 +21,7 @@ const List<String> _goldenNames = <String>[
   'm1_03_nullable_int_field',
   'm1_04_custom_name_parameter',
   'm1_05_counter_stateless_full',
+  'm1_06_plain_class_no_widget',
 ];
 
 /// Resolves the golden directory relative to the package root, regardless of

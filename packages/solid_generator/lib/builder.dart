@@ -8,6 +8,7 @@ import 'package:solid_generator/src/annotation_reader.dart';
 import 'package:solid_generator/src/class_kind.dart';
 import 'package:solid_generator/src/field_model.dart';
 import 'package:solid_generator/src/import_rewriter.dart';
+import 'package:solid_generator/src/plain_class_rewriter.dart';
 import 'package:solid_generator/src/stateless_rewriter.dart';
 import 'package:solid_generator/src/transformation_error.dart';
 
@@ -143,11 +144,12 @@ String _rewriteClass(
   switch (kind) {
     case ClassKind.statelessWidget:
       return rewriteStatelessWidget(decl, fields, source);
+    case ClassKind.plainClass:
+      return rewritePlainClass(decl, fields, source);
     case ClassKind.statefulWidget:
     case ClassKind.stateClass:
-    case ClassKind.plainClass:
       throw CodeGenerationError(
-        'class-kind $kind is not supported in M1-01 '
+        'class-kind $kind is not supported yet '
         '(scheduled for a later M1 TODO)',
         null,
         decl.name.lexeme,
