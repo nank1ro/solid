@@ -1,5 +1,4 @@
 import 'package:analyzer/dart/ast/ast.dart';
-import 'package:solid_generator/src/annotation_reader.dart';
 import 'package:solid_generator/src/build_rewriter.dart';
 import 'package:solid_generator/src/field_model.dart';
 import 'package:solid_generator/src/signal_emitter.dart';
@@ -27,13 +26,18 @@ String rewriteStateClass(
   String source,
 ) {
   final className = classDecl.name.lexeme;
-  final reactiveNames = solidFields.map((f) => f.fieldName).toSet();
+  // Index annotated fields by name for O(1) lookup during the member walk.
+  // The builder already parsed `@SolidState` once when computing [solidFields];
+  // re-parsing here would double the annotation-reader cost per file.
+  final modelByName = {for (final f in solidFields) f.fieldName: f};
+  final reactiveNames = modelByName.keys.toSet();
   final pieces = <String>[];
   var sawDispose = false;
 
   for (final member in classDecl.members) {
     if (member is FieldDeclaration) {
-      final model = readSolidStateField(member, source);
+      final varName = member.fields.variables.first.name.lexeme;
+      final model = modelByName[varName];
       if (model != null) {
         pieces.add(emitSignalField(model));
       } else {
