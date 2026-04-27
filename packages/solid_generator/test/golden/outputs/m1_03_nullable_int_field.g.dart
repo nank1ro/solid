@@ -3,7 +3,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
 
 class Score extends StatefulWidget {
-  const Score({super.key});
+  Score({super.key});
 
   @override
   State<Score> createState() => _ScoreState();

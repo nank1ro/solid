@@ -3,7 +3,15 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
 
 class Counter extends StatefulWidget {
-  Counter({super.key});
+  Counter({super.key, this.title = 'Counter'});
+
+  Counter.named({super.key}) : title = 'Named';
+
+  factory Counter.fromInt(int value) {
+    return Counter(title: 'count=$value');
+  }
+
+  final String title;
 
   @override
   State<Counter> createState() => _CounterState();

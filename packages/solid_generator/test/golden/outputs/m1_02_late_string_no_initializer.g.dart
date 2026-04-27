@@ -3,7 +3,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
 
 class Greeting extends StatefulWidget {
-  const Greeting({super.key});
+  Greeting({super.key});
 
   @override
   State<Greeting> createState() => _GreetingState();

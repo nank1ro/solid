@@ -768,27 +768,25 @@ class Hello extends StatelessWidget {
 
 ---
 
-### TODO M1-13 — Golden: `const` on public widget constructor
+### DONE M1-13 — Golden: multi-ctor + factory + init-list preservation
 
-**Goal:** When the public `StatefulWidget` constructor (emitted per Section 8.1) has all-`const`-compatible fields and defaults, the generator emits `const` on that constructor. When a field's default is not `const`-compatible, `const` is omitted.
+**Goal:** A `StatelessWidget` with multiple constructors — unnamed + named generative + factory — round-trips through the rewriter with every constructor preserved verbatim on the public widget class. `this.X` parameters and constructor-initializer-list field assignments are recognised as widget-bound bindings; init-list-bound fields stay on the widget alongside `this.X` props; everything else moves to the State class.
 
-**SPEC references:** Section 8.1, Section 14 item 7.
+**SPEC references:** Section 8.1, Section 14 item 7, Section 9.
 
 **Files to create:**
 
-- `packages/solid_generator/test/golden/inputs/m1_13_const_ctor_eligible.dart` — a class whose non-`@SolidState` fields are all `final` and all default values are `const`-compatible.
-- `packages/solid_generator/test/golden/outputs/m1_13_const_ctor_eligible.g.dart` — public ctor is `const Counter({super.key})`.
-- `packages/solid_generator/test/golden/inputs/m1_13_const_ctor_ineligible.dart` — a class with a non-`const` default (e.g., `final Stopwatch watch = Stopwatch();`).
-- `packages/solid_generator/test/golden/outputs/m1_13_const_ctor_ineligible.g.dart` — public ctor is `Counter({super.key})` (no `const`).
-- entries in `golden_test.dart` for both.
+- `packages/solid_generator/test/golden/inputs/m1_13_multiple_constructors.dart` — `Counter` with an unnamed `this.title` ctor, a named generative ctor that binds `title` via init-list (`Counter.named({super.key}) : title = 'Named'`), and a factory ctor with a body (`factory Counter.fromInt(int value) { … }`); plus a `final String title;` widget prop and an `@SolidState() int counter = 0;`.
+- `packages/solid_generator/test/golden/outputs/m1_13_multiple_constructors.g.dart` — all three constructors preserved verbatim on the rewritten `StatefulWidget`; `final String title;` stays on the widget; `counter` becomes the only Signal on the State class.
+- entry in `golden_helpers.dart`.
 
-**Expected implementation change:** When emitting the public `StatefulWidget` constructor, walk the original class's fields; if every non-`@SolidState` field is `final` and every default-value expression evaluates at compile time (type system judgment), emit `const`. Otherwise omit.
+**Expected implementation change:** The stateless rewriter walks **every** `ConstructorDeclaration` on the source class (not just the unnamed) and emits each one verbatim. `this.X` field parameters and `: field = expr` initializer-list assignments are unioned across every generative constructor (factory ctors are skipped — they construct via a body, never bind). Every non-`@SolidState` field is then partitioned: widget-bound (name in the union) → kept on the widget verbatim; everything else → moved to the State class. The generator does NOT add or remove `const` on any constructor; per SPEC §9, `dart fix --apply` is the trusted lint pass that adds `const` after the class split removes mutable fields from the widget. Goldens are accordingly pre-`dart fix`; `prefer_const_constructors_in_immutables` is suppressed in `test/golden/analysis_options.yaml` for the same reason `unused_import` is.
 
-**Acceptance:** Both goldens pass; eligible ctor has `const`, ineligible does not.
+**Acceptance:** `dart test --name=m1_13_multiple_constructors` passes; `dart analyze --fatal-infos packages/solid_generator/` reports zero issues.
 
 **Dependencies:** M1-01.
 
-**Status:** TODO
+**Status:** DONE
 
 ---
 
