@@ -53,10 +53,11 @@ FieldModel? readSolidStateField(FieldDeclaration decl, String source) {
 /// `validateSolidStateTargets`, but this reader is defensive and skips them
 /// silently as well.
 ///
-/// The getter body's expression is rewritten in place per SPEC §5.1: any
-/// reference to a name in [reactiveFields] receives `.value`. M2-01 supports
-/// expression-body getters only (`get x => <expr>;`); a block-body getter is
-/// rejected with a clear error pointing at the M2-01b TODO.
+/// The getter body is rewritten in place per SPEC §5.1: any reference to a
+/// name in [reactiveFields] receives `.value`. Both expression-body
+/// (`get x => <expr>;` — SPEC §4.5) and block-body (`get x { ... }` —
+/// SPEC §4.6) shapes are supported. Other body kinds (abstract / native) are
+/// rejected with a [CodeGenerationError].
 GetterModel? readSolidStateGetter(
   MethodDeclaration decl,
   Set<String> reactiveFields,
@@ -66,37 +67,55 @@ GetterModel? readSolidStateGetter(
   final annotation = findSolidStateAnnotation(decl.metadata);
   if (annotation == null) return null;
 
-  final body = decl.body;
-  if (body is! ExpressionFunctionBody) {
-    throw CodeGenerationError(
-      '@SolidState block-body getter is not yet supported '
-      '(scheduled for TODO M2-01b)',
-      null,
-      decl.name.lexeme,
-    );
-  }
-
   final returnType = decl.returnType;
   final typeText = returnType == null
       ? ''
       : source.substring(returnType.offset, returnType.end);
 
-  // SPEC §5.1: rewrite reactive reads inside the body. `trackedReadOffsets`
-  // are intentionally ignored — SignalBuilder placement is a `build()`
-  // concern, not a `Computed` body concern.
-  final expr = body.expression;
-  final result = collectValueEdits(expr, reactiveFields, source);
-  final bodyExpressionText = applyEditsToRange(
-    source.substring(expr.offset, expr.end),
-    result.edits,
-    expr.offset,
-  );
+  final body = decl.body;
+  final String bodyText;
+  final bool isBlockBody;
+  if (body is ExpressionFunctionBody) {
+    bodyText = _rewriteNode(body.expression, reactiveFields, source);
+    isBlockBody = false;
+  } else if (body is BlockFunctionBody) {
+    bodyText = _rewriteNode(body.block, reactiveFields, source);
+    isBlockBody = true;
+  } else {
+    throw CodeGenerationError(
+      '@SolidState getter must have an expression body (=> ...) or a '
+      'block body ({ ... }); abstract and native bodies are not supported',
+      null,
+      decl.name.lexeme,
+    );
+  }
 
   return GetterModel(
     getterName: decl.name.lexeme,
     typeText: typeText,
-    bodyExpressionText: bodyExpressionText,
+    bodyText: bodyText,
+    isBlockBody: isBlockBody,
     annotationName: extractNameArgument(annotation),
+  );
+}
+
+/// Returns the source range covered by [node], with SPEC §5.1 reactive-read
+/// rewrites applied to every identifier in [reactiveFields]. Used for both
+/// the expression-body (`Expression`) and block-body (`Block`) getter
+/// shapes; the resulting text is spliced into the `Computed<T>(() ...)`
+/// closure by the emitter. `trackedReadOffsets` are intentionally ignored —
+/// SignalBuilder placement is a `build()` concern, not a `Computed` body
+/// concern.
+String _rewriteNode(
+  AstNode node,
+  Set<String> reactiveFields,
+  String source,
+) {
+  final result = collectValueEdits(node, reactiveFields, source);
+  return applyEditsToRange(
+    source.substring(node.offset, node.end),
+    result.edits,
+    node.offset,
   );
 }
 

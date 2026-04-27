@@ -34,18 +34,23 @@ String emitSignalField(FieldModel f) {
   return '  ${lateKw}final ${f.fieldName} = $ctor;';
 }
 
-/// Emits one `late final <name> = Computed<T>(() => <body>, name: '<debug>');`
-/// line per SPEC §4.5.
+/// Emits one `late final <name> = Computed<T>(<closure>, name: '<debug>');`
+/// line per SPEC §4.5 (expression body) or §4.6 (block body).
 ///
 /// The result is always `late final` because a `Computed` references other
 /// `final` instance fields whose initialization order is not guaranteed
-/// (SPEC §4.5 last bullet). The body expression text in [g] has already had
-/// the SPEC §5.1 `.value` rewrite applied by `readSolidStateGetter`, so the
-/// emitter splices it directly into the closure template.
+/// (SPEC §4.5 last bullet). The body text in [g] has already had the
+/// SPEC §5.1 `.value` rewrite applied by `readSolidStateGetter`, so the
+/// emitter splices it directly into the closure. The closure shape depends
+/// on `g.isBlockBody`:
+///
+/// * Expression body → `() => <bodyText>`.
+/// * Block body → `() <bodyText>` (where `bodyText` already includes the
+///   surrounding `{ ... }` braces, copied verbatim from the source).
 String emitComputedField(GetterModel g) {
   final debugName = g.annotationName ?? g.getterName;
-  final body = g.bodyExpressionText;
-  final ctor = "Computed<${g.typeText}>(() => $body, name: '$debugName')";
+  final closure = g.isBlockBody ? '() ${g.bodyText}' : '() => ${g.bodyText}';
+  final ctor = "Computed<${g.typeText}>($closure, name: '$debugName')";
   return '  late final ${g.getterName} = $ctor;';
 }
 
