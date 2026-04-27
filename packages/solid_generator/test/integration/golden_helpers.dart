@@ -68,3 +68,30 @@ Future<String> runBuilderCapture(String name, String input) async {
   if (captured == null) fail('builder produced no output for $name');
   return captured!;
 }
+
+/// Registers one rejection test per entry in [cases] inside a `group` named
+/// [groupName]. Each entry's `name` resolves to a fixture under
+/// `test/golden/inputs/<name>.dart`; the assertion is that the builder fails
+/// with exactly one error whose message contains `errorContains`.
+///
+/// `testBuilder` captures thrown exceptions into `result.errors`, so this
+/// inspects that list rather than relying on `throwsA`.
+void runRejectionCases(
+  String groupName,
+  List<({String name, String errorContains})> cases,
+) {
+  group(groupName, () {
+    for (final c in cases) {
+      test(c.name, () async {
+        final input = await loadGoldenInput(c.name);
+        final result = await testBuilder(
+          solidBuilder(BuilderOptions.empty),
+          {'a|source/${c.name}.dart': input},
+        );
+        expect(result.succeeded, isFalse);
+        expect(result.errors, hasLength(1));
+        expect(result.errors.single, contains(c.errorContains));
+      });
+    }
+  });
+}
