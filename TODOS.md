@@ -731,7 +731,7 @@ class _CounterState extends State<Counter> {
 
 ---
 
-### TODO M1-12 — Golden: class without annotations passes through
+### DONE M1-12 — Golden: class without annotations passes through
 
 **Goal:** A `.dart` file under `source/` that contains NO `@Solid*` annotation is copied byte-for-byte to `lib/`. No transformation, no re-formatting, no import addition.
 
@@ -758,13 +758,13 @@ class Hello extends StatelessWidget {
 
 **Expected output content:** Identical to input.
 
-**Expected implementation change:** The top-level pipeline scans the parsed file for any `@Solid*` annotation before invoking the rewriter. If none, write input bytes to the output path unchanged.
+**Expected implementation change:** The top-level pipeline checks for the `@Solid` substring (the `_solidAnnotationHint` guard in `packages/solid_generator/lib/builder.dart`) before invoking the parser/rewriter — SPEC Section 2 hot-path short-circuit. If absent, write input bytes to the output path unchanged. The post-parse fallback in `_collectAnnotatedClasses` covers the corner case where `@Solid` appears as a substring (e.g. inside a comment) but resolves to no fields; both paths preserve byte-identity.
 
 **Acceptance:** `dart test --name=m1_12` passes; output bytes equal input bytes.
 
 **Dependencies:** M1-01.
 
-**Status:** TODO
+**Status:** DONE
 
 ---
 
