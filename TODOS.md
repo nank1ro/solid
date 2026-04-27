@@ -758,7 +758,7 @@ class Hello extends StatelessWidget {
 
 **Expected output content:** Identical to input.
 
-**Expected implementation change:** The top-level pipeline checks for the `@Solid` substring before invoking the parser/rewriter (SPEC §2 hot-path short-circuit, implemented at `packages/solid_generator/lib/builder.dart:53-56`). If absent, write input bytes to the output path unchanged. The post-parse fallback at lines 71-77 covers the corner case where `@Solid` appears as a substring (e.g. inside a comment) but resolves to no fields; both paths preserve byte-identity.
+**Expected implementation change:** The top-level pipeline checks for the `@Solid` substring (the `_solidAnnotationHint` guard in `packages/solid_generator/lib/builder.dart`) before invoking the parser/rewriter — SPEC Section 2 hot-path short-circuit. If absent, write input bytes to the output path unchanged. The post-parse fallback in `_collectAnnotatedClasses` covers the corner case where `@Solid` appears as a substring (e.g. inside a comment) but resolves to no fields; both paths preserve byte-identity.
 
 **Acceptance:** `dart test --name=m1_12` passes; output bytes equal input bytes.
 
