@@ -27,6 +27,7 @@ const List<String> goldenNames = <String>[
   'm1_12_passthrough_no_annotations',
   'm1_13_multiple_constructors',
   'm2_01_simple_computed_with_deps',
+  'm2_01b_block_body_computed',
 ];
 
 /// Memoized golden directory resolution. Resolved relative to the package
