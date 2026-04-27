@@ -1,5 +1,6 @@
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:solid_generator/src/build_rewriter.dart';
+import 'package:solid_generator/src/const_eligibility.dart';
 import 'package:solid_generator/src/field_model.dart';
 import 'package:solid_generator/src/import_rewriter.dart';
 import 'package:solid_generator/src/signal_emitter.dart';
@@ -27,7 +28,23 @@ RewriteResult rewriteStatelessWidget(
     source,
   );
 
-  final widgetClass = _emitWidgetClass(className, stateClassName, ctorParams);
+  // Non-`@SolidState` fields stay on the public widget class (Flutter
+  // convention: widget config fields are read from State via `widget.foo`).
+  // Their compile-time-constness gates whether the public ctor gets `const`.
+  final nonSolidFieldsText = _collectNonSolidFields(
+    classDecl,
+    reactiveFieldNames,
+    source,
+  );
+  final constEligible = isConstEligible(classDecl, reactiveFieldNames);
+
+  final widgetClass = _emitWidgetClass(
+    className,
+    stateClassName,
+    ctorParams,
+    nonSolidFieldsText,
+    constEligible,
+  );
   final stateClass = _emitStateClass(
     className,
     stateClassName,
@@ -72,24 +89,50 @@ MethodDeclaration _findBuildMethod(ClassDeclaration classDecl) {
 
 /// Emits the public `StatefulWidget` half of the class split
 /// (SPEC Section 8.1).
-//
-// TODO(M1-13): `const` is emitted unconditionally here. SPEC §8.1 says "gains
-// `const` where safe (all fields final and literal)". For M1-01 the single
-// `int counter = 0;` case is always const-eligible because the @SolidState
-// field moves off the widget class entirely. M1-13 introduces the general
-// const-eligibility check based on remaining non-`@SolidState` fields.
+///
+/// [constEligible] is the result of [isConstEligible] over the original
+/// class's non-`@SolidState` fields (SPEC §14 item 7); when true, the public
+/// constructor is prefixed with `const`. [nonSolidFieldsText] is the verbatim
+/// source of every non-`@SolidState` field (already 2-space indented), spliced
+/// between the constructor and `createState`. `DartFormatter` normalises
+/// whitespace in the final output.
 String _emitWidgetClass(
   String className,
   String stateClassName,
   String ctorParams,
+  String nonSolidFieldsText,
+  bool constEligible,
 ) {
+  final constKw = constEligible ? 'const ' : '';
+  final fieldsBlock = nonSolidFieldsText.isNotEmpty
+      ? '\n\n$nonSolidFieldsText'
+      : '';
   return '''
 class $className extends StatefulWidget {
-  const $className$ctorParams;
+  $constKw$className$ctorParams;$fieldsBlock
 
   @override
   State<$className> createState() => $stateClassName();
 }''';
+}
+
+/// Returns the verbatim source text of every non-`@SolidState` field in
+/// [classDecl], joined with newlines and 2-space indented. Returns the empty
+/// string when the class has no non-`@SolidState` fields (the common M1-01
+/// case).
+String _collectNonSolidFields(
+  ClassDeclaration classDecl,
+  Set<String> solidFieldNames,
+  String source,
+) {
+  final buf = StringBuffer();
+  for (final member in classDecl.members) {
+    if (member is! FieldDeclaration) continue;
+    final firstName = member.fields.variables.first.name.lexeme;
+    if (solidFieldNames.contains(firstName)) continue;
+    buf.writeln('  ${source.substring(member.offset, member.end)}');
+  }
+  return buf.toString().trimRight();
 }
 
 /// Emits the private `State<X>` half of the class split (SPEC Section 8.1).

@@ -768,7 +768,7 @@ class Hello extends StatelessWidget {
 
 ---
 
-### TODO M1-13 — Golden: `const` on public widget constructor
+### DONE M1-13 — Golden: `const` on public widget constructor
 
 **Goal:** When the public `StatefulWidget` constructor (emitted per Section 8.1) has all-`const`-compatible fields and defaults, the generator emits `const` on that constructor. When a field's default is not `const`-compatible, `const` is omitted.
 
@@ -782,13 +782,13 @@ class Hello extends StatelessWidget {
 - `packages/solid_generator/test/golden/outputs/m1_13_const_ctor_ineligible.g.dart` — public ctor is `Counter({super.key})` (no `const`).
 - entries in `golden_test.dart` for both.
 
-**Expected implementation change:** When emitting the public `StatefulWidget` constructor, walk the original class's fields; if every non-`@SolidState` field is `final` and every default-value expression evaluates at compile time (type system judgment), emit `const`. Otherwise omit.
+**Expected implementation change:** When emitting the public `StatefulWidget` constructor, walk the original class's fields; if every non-`@SolidState` field is `final` and every default-value expression evaluates at compile time (type system judgment), emit `const`. Otherwise omit. The eligibility check lives in `packages/solid_generator/lib/src/const_eligibility.dart` and runs over the unresolved AST as a conservative syntactic whitelist (literals, `const` constructor calls, `const` collection literals, `-`/`!` over const operands, parenthesized const expressions). The stateless rewriter additionally preserves non-`@SolidState` fields verbatim on the public widget class so widget config like `final Stopwatch watch = Stopwatch();` round-trips correctly.
 
 **Acceptance:** Both goldens pass; eligible ctor has `const`, ineligible does not.
 
 **Dependencies:** M1-01.
 
-**Status:** TODO
+**Status:** DONE
 
 ---
 
