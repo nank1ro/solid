@@ -6,29 +6,11 @@ import 'package:solid_generator/src/signal_emitter.dart';
 import 'package:solid_generator/src/transformation_error.dart';
 
 /// Rewrites a `StatelessWidget` class containing `@SolidState` fields as a
-/// `StatefulWidget` + `State<X>` pair.
+/// `StatefulWidget` + `State<X>` pair. See SPEC §8.1 for the full
+/// field-partition and constructor-preservation contract.
 ///
-/// See SPEC Section 8.1. The emitted string is syntactically valid Dart but
-/// is not guaranteed to be pretty-printed — run through `DartFormatter` before
-/// writing.
-///
-/// Field placement (SPEC §8.1):
-///   - `@SolidState` fields → `Signal` declarations on the State class
-///     (SPEC §4).
-///   - Non-`@SolidState` fields whose name appears either as a `this.X`
-///     parameter or as the LHS of an init-list field assignment on **any**
-///     generative constructor → kept verbatim on the public widget class.
-///   - All other non-`@SolidState` fields (inline-init, `late`, unbound) →
-///     moved verbatim to the State class.
-///
-/// Constructor handling (SPEC §8.1):
-///   - Every constructor on the original class — unnamed, named generative,
-///     and factory — is preserved verbatim on the rewritten widget class.
-///   - The generator does NOT add or remove `const`. SPEC §9 already
-///     delegates lint-time fixes (unused-import removal) to `dart fix --apply`;
-///     the same step adds `const` to constructors that are eligible after the
-///     class split (the rewritten widget often becomes const-eligible because
-///     the `@SolidState` mutable field has moved to the State class).
+/// The emitted string is syntactically valid Dart but is not guaranteed to be
+/// pretty-printed — run through `DartFormatter` before writing.
 RewriteResult rewriteStatelessWidget(
   ClassDeclaration classDecl,
   List<FieldModel> solidFields,
@@ -38,19 +20,17 @@ RewriteResult rewriteStatelessWidget(
   final stateClassName = '_${className}State';
   final reactiveFieldNames = solidFields.map((f) => f.fieldName).toSet();
 
-  final ctors = _collectCtors(classDecl);
-  final widgetBoundNames = _collectWidgetBoundNames(ctors);
-  final partition = _partitionNonSolidFields(
-    classDecl,
+  final members = _splitMembers(classDecl);
+  final widgetBoundNames = _collectWidgetBoundNames(members.ctors);
+  final partition = _partitionFields(
+    members.fields,
     reactiveFieldNames,
     widgetBoundNames,
     source,
   );
-  final ctorsBlock = _emitCtors(ctors, source);
-
-  final buildMethod = _findBuildMethod(classDecl);
+  final ctorsBlock = _emitCtors(members.ctors, source);
   final buildMethodText = rewriteBuildMethod(
-    buildMethod,
+    members.buildMethod,
     reactiveFieldNames,
     source,
   );
@@ -75,20 +55,46 @@ RewriteResult rewriteStatelessWidget(
   );
 }
 
-/// Returns every `ConstructorDeclaration` (unnamed, named, factory) on
-/// [classDecl] in declaration order.
-List<ConstructorDeclaration> _collectCtors(ClassDeclaration classDecl) {
-  return [
-    for (final member in classDecl.members)
-      if (member is ConstructorDeclaration) member,
-  ];
+/// Single-pass classification of [classDecl]'s members into the three buckets
+/// the rewriter cares about: every `ConstructorDeclaration`, every
+/// `FieldDeclaration`, and the (required) `build` method. Throws
+/// [AnalysisError] if no `build` method is present — not a valid
+/// `StatelessWidget` per SPEC §8.1.
+({
+  List<ConstructorDeclaration> ctors,
+  List<FieldDeclaration> fields,
+  MethodDeclaration buildMethod,
+})
+_splitMembers(ClassDeclaration classDecl) {
+  final ctors = <ConstructorDeclaration>[];
+  final fields = <FieldDeclaration>[];
+  MethodDeclaration? buildMethod;
+  for (final member in classDecl.members) {
+    if (member is ConstructorDeclaration) {
+      ctors.add(member);
+    } else if (member is FieldDeclaration) {
+      fields.add(member);
+    } else if (member is MethodDeclaration && member.name.lexeme == 'build') {
+      buildMethod = member;
+    }
+  }
+  if (buildMethod == null) {
+    throw AnalysisError(
+      'StatelessWidget has no build() method to preserve',
+      null,
+      classDecl.name.lexeme,
+    );
+  }
+  return (ctors: ctors, fields: fields, buildMethod: buildMethod);
 }
 
 /// Union of field names bound by any **generative** constructor in [ctors] —
 /// either as a `this.X` formal parameter or as the LHS of an init-list field
 /// assignment. Factory constructors are skipped: their body returns an
 /// instance via redirection or a regular method call and never binds a field
-/// directly to a parameter.
+/// directly to a parameter. (`ConstructorDeclaration` exposes only
+/// `factoryKeyword` in the public analyzer API; there is no `isFactory`
+/// getter, hence the null-check.)
 Set<String> _collectWidgetBoundNames(List<ConstructorDeclaration> ctors) {
   final names = <String>{};
   for (final ctor in ctors) {
@@ -108,37 +114,33 @@ Set<String> _collectWidgetBoundNames(List<ConstructorDeclaration> ctors) {
   return names;
 }
 
-/// Verbatim source text of every non-`@SolidState` field, partitioned into
-/// (widget-bound, state-bound) by [_collectWidgetBoundNames]. Each block is
-/// 2-space indented and trimmed; either may be empty.
-class _FieldPartition {
-  _FieldPartition(this.widgetFieldsText, this.stateFieldsText);
-  final String widgetFieldsText;
-  final String stateFieldsText;
-}
+typedef _FieldPartition = ({String widgetFieldsText, String stateFieldsText});
 
-_FieldPartition _partitionNonSolidFields(
-  ClassDeclaration classDecl,
+/// Returns the verbatim source text of every non-`@SolidState` field in
+/// [fields], partitioned into widget-bound (per [widgetBoundNames]) and
+/// state-bound. Each block is 2-space indented and trimmed; either may be
+/// empty.
+_FieldPartition _partitionFields(
+  List<FieldDeclaration> fields,
   Set<String> solidFieldNames,
   Set<String> widgetBoundNames,
   String source,
 ) {
   final widgetBuf = StringBuffer();
   final stateBuf = StringBuffer();
-  for (final member in classDecl.members) {
-    if (member is! FieldDeclaration) continue;
-    final firstName = member.fields.variables.first.name.lexeme;
+  for (final field in fields) {
+    final firstName = field.fields.variables.first.name.lexeme;
     if (solidFieldNames.contains(firstName)) continue;
-    final memberText = source.substring(member.offset, member.end);
+    final memberText = source.substring(field.offset, field.end);
     if (widgetBoundNames.contains(firstName)) {
       widgetBuf.writeln('  $memberText');
     } else {
       stateBuf.writeln('  $memberText');
     }
   }
-  return _FieldPartition(
-    widgetBuf.toString().trimRight(),
-    stateBuf.toString().trimRight(),
+  return (
+    widgetFieldsText: widgetBuf.toString().trimRight(),
+    stateFieldsText: stateBuf.toString().trimRight(),
   );
 }
 
@@ -150,22 +152,6 @@ String _emitCtors(List<ConstructorDeclaration> ctors, String source) {
   return ctors
       .map((c) => '  ${source.substring(c.offset, c.end)}')
       .join('\n\n');
-}
-
-/// Returns the `build` method declaration so it can be handed to the
-/// reactive-rewrite pipeline. Throws [AnalysisError] if the class has no
-/// `build` method (not a valid `StatelessWidget` under SPEC Section 8.1).
-MethodDeclaration _findBuildMethod(ClassDeclaration classDecl) {
-  for (final member in classDecl.members) {
-    if (member is MethodDeclaration && member.name.lexeme == 'build') {
-      return member;
-    }
-  }
-  throw AnalysisError(
-    'StatelessWidget has no build() method to preserve',
-    null,
-    classDecl.name.lexeme,
-  );
 }
 
 /// Emits the public `StatefulWidget` half of the class split (SPEC §8.1).
