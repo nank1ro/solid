@@ -73,25 +73,36 @@ GetterModel? readSolidStateGetter(
       : source.substring(returnType.offset, returnType.end);
 
   final body = decl.body;
+  final getterName = decl.name.lexeme;
   final String bodyText;
   final bool isBlockBody;
   if (body is ExpressionFunctionBody) {
-    bodyText = _rewriteNode(body.expression, reactiveFields, source);
+    bodyText = _rewriteGetterBody(
+      body.expression,
+      reactiveFields,
+      source,
+      getterName,
+    );
     isBlockBody = false;
   } else if (body is BlockFunctionBody) {
-    bodyText = _rewriteNode(body.block, reactiveFields, source);
+    bodyText = _rewriteGetterBody(
+      body.block,
+      reactiveFields,
+      source,
+      getterName,
+    );
     isBlockBody = true;
   } else {
     throw CodeGenerationError(
       '@SolidState getter must have an expression body (=> ...) or a '
       'block body ({ ... }); abstract and native bodies are not supported',
       null,
-      decl.name.lexeme,
+      getterName,
     );
   }
 
   return GetterModel(
-    getterName: decl.name.lexeme,
+    getterName: getterName,
     typeText: typeText,
     bodyText: bodyText,
     isBlockBody: isBlockBody,
@@ -106,12 +117,25 @@ GetterModel? readSolidStateGetter(
 /// closure by the emitter. `trackedReadOffsets` are intentionally ignored —
 /// SignalBuilder placement is a `build()` concern, not a `Computed` body
 /// concern.
-String _rewriteNode(
+///
+/// Throws [CodeGenerationError] for SPEC §4.5: a `Computed` with zero
+/// reactive dependencies would never invalidate, so an empty edit set is
+/// surfaced as a build error instead of a useless `Computed`.
+String _rewriteGetterBody(
   AstNode node,
   Set<String> reactiveFields,
   String source,
+  String getterName,
 ) {
   final result = collectValueEdits(node, reactiveFields, source);
+  if (result.edits.isEmpty) {
+    throw CodeGenerationError(
+      "getter '$getterName' has no reactive dependencies; "
+      'use `final` or a plain getter instead of `@SolidState`',
+      null,
+      getterName,
+    );
+  }
   return applyEditsToRange(
     source.substring(node.offset, node.end),
     result.edits,
