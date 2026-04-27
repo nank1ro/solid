@@ -1,5 +1,8 @@
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:solid_generator/src/field_model.dart';
+import 'package:solid_generator/src/getter_model.dart';
+import 'package:solid_generator/src/transformation_error.dart';
+import 'package:solid_generator/src/value_rewriter.dart';
 
 /// Name of the annotation class this reader looks for.
 ///
@@ -34,13 +37,66 @@ FieldModel? readSolidStateField(FieldDeclaration decl, String source) {
             variable.initializer!.offset,
             variable.initializer!.end,
           ),
-    annotationName: _extractNameArgument(annotation),
+    annotationName: extractNameArgument(annotation),
     isLate: varList.isLate,
     // `TypeAnnotation.question` is the `?` token at the top level of the
     // declared type. Using it (vs. a `typeText.endsWith('?')` heuristic)
     // correctly classifies nested-nullable types like `List<int?>` as
     // non-nullable at the outer level (SPEC Section 4.3).
     isNullable: type?.question != null,
+  );
+}
+
+/// Reads a `@SolidState(...)` annotation on the getter [decl] and returns a
+/// [GetterModel]. Returns `null` when the method is not an `@SolidState`
+/// getter; non-getter methods and static getters are filtered out earlier by
+/// `validateSolidStateTargets`, but this reader is defensive and skips them
+/// silently as well.
+///
+/// The getter body's expression is rewritten in place per SPEC §5.1: any
+/// reference to a name in [reactiveFields] receives `.value`. M2-01 supports
+/// expression-body getters only (`get x => <expr>;`); a block-body getter is
+/// rejected with a clear error pointing at the M2-01b TODO.
+GetterModel? readSolidStateGetter(
+  MethodDeclaration decl,
+  Set<String> reactiveFields,
+  String source,
+) {
+  if (!decl.isGetter || decl.isStatic) return null;
+  final annotation = findSolidStateAnnotation(decl.metadata);
+  if (annotation == null) return null;
+
+  final body = decl.body;
+  if (body is! ExpressionFunctionBody) {
+    throw CodeGenerationError(
+      '@SolidState block-body getter is not yet supported '
+      '(scheduled for TODO M2-01b)',
+      null,
+      decl.name.lexeme,
+    );
+  }
+
+  final returnType = decl.returnType;
+  final typeText = returnType == null
+      ? ''
+      : source.substring(returnType.offset, returnType.end);
+
+  // SPEC §5.1: rewrite reactive reads inside the body. `trackedReadOffsets`
+  // are intentionally ignored — SignalBuilder placement is a `build()`
+  // concern, not a `Computed` body concern.
+  final expr = body.expression;
+  final result = collectValueEdits(expr, reactiveFields, source);
+  final bodyExpressionText = applyEditsToRange(
+    source.substring(expr.offset, expr.end),
+    result.edits,
+    expr.offset,
+  );
+
+  return GetterModel(
+    getterName: decl.name.lexeme,
+    typeText: typeText,
+    bodyExpressionText: bodyExpressionText,
+    annotationName: extractNameArgument(annotation),
   );
 }
 
@@ -56,8 +112,10 @@ Annotation? findSolidStateAnnotation(NodeList<Annotation> metadata) {
 }
 
 /// Extracts the string value of a `name: '…'` named argument on [annotation],
-/// or `null` if the annotation has no such argument.
-String? _extractNameArgument(Annotation annotation) {
+/// or `null` if the annotation has no such argument. Shared between the field
+/// and getter readers so both reactive shapes thread the SPEC §4.4 debug name
+/// uniformly.
+String? extractNameArgument(Annotation annotation) {
   final args = annotation.arguments?.arguments ?? const [];
   for (final arg in args) {
     if (arg is NamedExpression && arg.name.label.name == 'name') {

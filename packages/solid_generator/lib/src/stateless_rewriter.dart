@@ -1,38 +1,50 @@
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:solid_generator/src/build_rewriter.dart';
 import 'package:solid_generator/src/field_model.dart';
+import 'package:solid_generator/src/getter_model.dart';
 import 'package:solid_generator/src/import_rewriter.dart';
 import 'package:solid_generator/src/signal_emitter.dart';
 import 'package:solid_generator/src/transformation_error.dart';
 
-/// Rewrites a `StatelessWidget` class containing `@SolidState` fields as a
-/// `StatefulWidget` + `State<X>` pair. See SPEC §8.1 for the full
-/// field-partition and constructor-preservation contract.
+/// Rewrites a `StatelessWidget` class containing `@SolidState` fields and/or
+/// `@SolidState` getters as a `StatefulWidget` + `State<X>` pair. See SPEC
+/// §8.1 for the full field-partition and constructor-preservation contract;
+/// SPEC §4.5 for the getter→`Computed` lowering.
 ///
 /// The emitted string is syntactically valid Dart but is not guaranteed to be
 /// pretty-printed — run through `DartFormatter` before writing.
 RewriteResult rewriteStatelessWidget(
   ClassDeclaration classDecl,
   List<FieldModel> solidFields,
+  List<GetterModel> solidGetters,
   String source,
 ) {
   final className = classDecl.name.lexeme;
   final stateClassName = '_${className}State';
-  final reactiveFieldNames = solidFields.map((f) => f.fieldName).toSet();
+  final reactiveNames = <String>{
+    ...solidFields.map((f) => f.fieldName),
+    ...solidGetters.map((g) => g.getterName),
+  };
 
   final members = _splitMembers(classDecl);
   final widgetBoundNames = _collectWidgetBoundNames(members.ctors);
   final partition = _partitionFields(
     members.fields,
-    reactiveFieldNames,
+    reactiveNames,
     widgetBoundNames,
     source,
   );
   final ctorsBlock = _emitCtors(members.ctors, source);
   final buildMethodText = rewriteBuildMethod(
     members.buildMethod,
-    reactiveFieldNames,
+    reactiveNames,
     source,
+  );
+
+  final reactiveBlock = _emitReactiveBlock(
+    classDecl,
+    solidFields,
+    solidGetters,
   );
 
   final widgetClass = _emitWidgetClass(
@@ -44,14 +56,62 @@ RewriteResult rewriteStatelessWidget(
   final stateClass = _emitStateClass(
     className,
     stateClassName,
-    solidFields,
+    reactiveBlock.fieldsText,
+    reactiveBlock.disposeNamesInDeclarationOrder,
     partition.stateFieldsText,
     buildMethodText,
   );
 
+  final solidartNames = <String>{'Signal', 'SignalBuilder'};
+  if (solidGetters.isNotEmpty) solidartNames.add('Computed');
+
   return (
     text: '$widgetClass\n\n$stateClass\n',
-    solidartNames: const <String>{'Signal', 'SignalBuilder'},
+    solidartNames: solidartNames,
+  );
+}
+
+/// Returns the source-ordered emission of every reactive declaration on
+/// [classDecl] (Signal field + Computed getter) as a single 2-space-indented
+/// block, plus the declaration-order list of dispose names that pairs with
+/// it. Source order — not field-then-getter — is the contract a `Computed`
+/// depends on: it must reference fields declared before it, so the emitted
+/// `late final` Computed must appear after the `Signal`s it reads in the
+/// rewritten State class.
+({String fieldsText, List<String> disposeNamesInDeclarationOrder})
+_emitReactiveBlock(
+  ClassDeclaration classDecl,
+  List<FieldModel> solidFields,
+  List<GetterModel> solidGetters,
+) {
+  final fieldByName = {for (final f in solidFields) f.fieldName: f};
+  final getterByName = {for (final g in solidGetters) g.getterName: g};
+  final lines = <String>[];
+  final disposeNames = <String>[];
+
+  for (final member in classDecl.members) {
+    if (member is FieldDeclaration) {
+      final name = member.fields.variables.first.name.lexeme;
+      final f = fieldByName[name];
+      if (f != null) {
+        lines.add(emitSignalField(f));
+        disposeNames.add(f.fieldName);
+      }
+      continue;
+    }
+    if (member is MethodDeclaration && member.isGetter) {
+      final name = member.name.lexeme;
+      final g = getterByName[name];
+      if (g != null) {
+        lines.add(emitComputedField(g));
+        disposeNames.add(g.getterName);
+      }
+    }
+  }
+
+  return (
+    fieldsText: lines.join('\n'),
+    disposeNamesInDeclarationOrder: disposeNames,
   );
 }
 
@@ -184,21 +244,26 @@ String _emitWidgetClass(
 /// `dispose()` is `@override` and ends with `super.dispose();` (SPEC §10).
 /// [stateFieldsText] is the verbatim source of every non-`@SolidState`
 /// non-widget-bound field that has been moved off the widget; emitted before
-/// the synthesized signal fields so original declaration order is preserved.
+/// the synthesized reactive fields so original declaration order is preserved.
+/// [reactiveFieldsText] is the source-ordered emission of every reactive
+/// declaration (Signal field + Computed getter) on the original class.
 String _emitStateClass(
   String className,
   String stateClassName,
-  List<FieldModel> fields,
+  String reactiveFieldsText,
+  List<String> disposeNamesInDeclarationOrder,
   String stateFieldsText,
   String buildMethodText,
 ) {
-  final signalFields = fields.map(emitSignalField).join('\n');
-  final dispose = emitDispose(fields, inheritsDispose: true);
+  final dispose = emitDispose(
+    disposeNamesInDeclarationOrder,
+    inheritsDispose: true,
+  );
   final fieldsPrefix = stateFieldsText.isNotEmpty ? '$stateFieldsText\n\n' : '';
 
   return '''
 class $stateClassName extends State<$className> {
-$fieldsPrefix$signalFields
+$fieldsPrefix$reactiveFieldsText
 
 $dispose
 

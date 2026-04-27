@@ -67,21 +67,43 @@ const Set<String> _keyConstructors = {
   'PageStorageKey',
 };
 
-/// Walks [buildMethod] and returns every offset-based value edit plus the
+/// Walks [node] and returns every offset-based value edit plus the
 /// tracked-read offsets that downstream placement needs.
 ///
-/// [reactiveFields] is the name-set of `@SolidState` fields declared on the
-/// enclosing class. The rewrite is name-based (see SPEC 5.4 note in the
-/// orchestrator `rewriteBuildMethod`); M3-05 upgrades to type-driven
-/// resolution.
+/// [reactiveFields] is the name-set of `@SolidState` fields and getters
+/// declared on the enclosing class. The rewrite is name-based (see SPEC 5.4
+/// note in the orchestrator `rewriteBuildMethod`); M3-05 upgrades to
+/// type-driven resolution.
+///
+/// [node] is typically the `build()` `MethodDeclaration` (the M1-05 path) or
+/// the body expression of a `@SolidState` getter (the M2-01 path). Both share
+/// the same identifier-rewrite contract; only `build()` consumes
+/// [ValueRewriteResult.trackedReadOffsets] for SignalBuilder placement.
 ValueRewriteResult collectValueEdits(
-  MethodDeclaration buildMethod,
+  AstNode node,
   Set<String> reactiveFields,
   String source,
 ) {
   final visitor = _ValueRewriteVisitor(reactiveFields);
-  buildMethod.accept(visitor);
+  node.accept(visitor);
   return ValueRewriteResult(visitor.edits, visitor.trackedReadOffsets);
+}
+
+/// Applies offset-based [edits] (with absolute file offsets) to [text] whose
+/// original file offset begins at [baseOffset]. Returns the rewritten string.
+///
+/// Edits are sorted reverse-by-offset so earlier offsets stay stable while
+/// each splice executes. Empty [edits] short-circuits without allocating.
+String applyEditsToRange(String text, List<ValueEdit> edits, int baseOffset) {
+  if (edits.isEmpty) return text;
+  final sorted = [...edits]..sort((a, b) => b.offset.compareTo(a.offset));
+  var result = text;
+  for (final e in sorted) {
+    final start = e.offset - baseOffset;
+    final end = e.end - baseOffset;
+    result = result.substring(0, start) + e.replacement + result.substring(end);
+  }
+  return result;
 }
 
 /// AST visitor that accumulates [ValueEdit]s for reactive-field identifiers.

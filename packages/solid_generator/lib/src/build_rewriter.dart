@@ -70,7 +70,7 @@ String rewriteBuildMethod(
     final innerValueEdits = valueResult.edits
         .where((e) => e.offset >= node.offset && e.end <= node.end)
         .toList();
-    final rewrittenInner = _applyEditsToRange(
+    final rewrittenInner = applyEditsToRange(
       innerOriginal,
       innerValueEdits,
       node.offset,
@@ -103,20 +103,6 @@ String rewriteBuildMethod(
         result.substring(0, edit.offset) +
         edit.replacement +
         result.substring(edit.end);
-  }
-  return result;
-}
-
-/// Applies [edits] (offsets relative to the full source) to the substring
-/// [text] whose original file offset begins at [baseOffset]. Returns the
-/// rewritten substring.
-String _applyEditsToRange(String text, List<ValueEdit> edits, int baseOffset) {
-  final sorted = [...edits]..sort((a, b) => b.offset.compareTo(a.offset));
-  var result = text;
-  for (final e in sorted) {
-    final start = e.offset - baseOffset;
-    final end = e.end - baseOffset;
-    result = result.substring(0, start) + e.replacement + result.substring(end);
   }
   return result;
 }

@@ -1,4 +1,5 @@
 import 'package:solid_generator/src/field_model.dart';
+import 'package:solid_generator/src/getter_model.dart';
 
 /// Shared signal-emission helpers used by every class-kind rewriter.
 
@@ -33,16 +34,37 @@ String emitSignalField(FieldModel f) {
   return '  ${lateKw}final ${f.fieldName} = $ctor;';
 }
 
-/// Emits a `dispose()` method disposing every signal in reverse declaration
-/// order (SPEC §10).
+/// Emits one `late final <name> = Computed<T>(() => <body>, name: '<debug>');`
+/// line per SPEC §4.5.
 ///
-/// [inheritsDispose] is `true` when the owning class's supertype chain contains
-/// a `dispose()` method (e.g. `State<T>`, `ChangeNotifier`); the emitted method
-/// is then `@override` and ends with `super.dispose();`. For a plain class
-/// whose supertype is `Object`, pass `false` — neither annotation nor
-/// super-call is emitted (SPEC §8.3).
+/// The result is always `late final` because a `Computed` references other
+/// `final` instance fields whose initialization order is not guaranteed
+/// (SPEC §4.5 last bullet). The body expression text in [g] has already had
+/// the SPEC §5.1 `.value` rewrite applied by `readSolidStateGetter`, so the
+/// emitter splices it directly into the closure template.
+String emitComputedField(GetterModel g) {
+  final debugName = g.annotationName ?? g.getterName;
+  final body = g.bodyExpressionText;
+  final ctor = "Computed<${g.typeText}>(() => $body, name: '$debugName')";
+  return '  late final ${g.getterName} = $ctor;';
+}
+
+/// Emits a `dispose()` method disposing every name in
+/// [disposeNamesInDeclarationOrder] in **reverse declaration order** (SPEC
+/// §10).
+///
+/// The list is the unified, source-ordered sequence of every reactive
+/// declaration (Signal field + Computed getter) on the owning class.
+/// Reverse-iterating it puts dependents (a `Computed` declared after the
+/// `Signal`s it reads) ahead of their dependencies in the dispose body.
+///
+/// [inheritsDispose] is `true` when the owning class's supertype chain
+/// contains a `dispose()` method (e.g. `State<T>`, `ChangeNotifier`); the
+/// emitted method is then `@override` and ends with `super.dispose();`. For
+/// a plain class whose supertype is `Object`, pass `false` — neither
+/// annotation nor super-call is emitted (SPEC §8.3).
 String emitDispose(
-  List<FieldModel> fields, {
+  List<String> disposeNamesInDeclarationOrder, {
   required bool inheritsDispose,
 }) {
   final buffer = StringBuffer();
@@ -50,8 +72,8 @@ String emitDispose(
     buffer.writeln('  @override');
   }
   buffer.writeln('  void dispose() {');
-  for (final f in fields.reversed) {
-    buffer.writeln('    ${f.fieldName}.dispose();');
+  for (final name in disposeNamesInDeclarationOrder.reversed) {
+    buffer.writeln('    $name.dispose();');
   }
   if (inheritsDispose) {
     buffer.writeln('    super.dispose();');
