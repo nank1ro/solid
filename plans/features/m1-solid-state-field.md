@@ -62,7 +62,7 @@ Stages are sequential inside M1 (A → B → C → D → E), but items within a 
 - **AST rewriter uses analyzer, not regex.** Every identifier rewrite (Section 5.1) is gated on resolved static type being `SignalBase<T>` or a subtype. Reviewer rubric item 3 blocks any regex-based transformation.
 - **Dispose ordering.** Reverse declaration order — `Computed` disposes before `Signal` (Section 10). M1 has no `Computed` yet, but M2 depends on this invariant, so emit even single-field dispose bodies with the ordering rule encoded (easier to extend than retrofit).
 - **Class-kind dispatch.** Implement as a visitor that walks the class declaration and returns one of four enum values: `statelessWidget`, `statefulWidget`, `stateClass`, `plainClass`. SPEC Section 8 is the truth table.
-- **Test helpers.** `BuildTracker` and `SpySignal` live in `example/test/helpers/`. Shared between M1-10, M1-11, and M3-04.
+- **Test helpers.** `BuildTracker` lives in `example/test/helpers/` and is shared between M1-10 and M3-04. M1-11 does not need a helper: it observes dispose via `SignalBase<T>.onDispose(VoidCallback)` (the public contract exported by `flutter_solidart`), so a `SpySignal` subclass is unnecessary and the same hook composes for M2-04 (`Computed` dispose-order golden).
 - **`dart fix --apply` is the import pruner.** Per SPEC Section 9, the generator adds `flutter_solidart` but does NOT remove `solid_annotations`. The expectation is that users run `dart fix --apply` (or their IDE does). M1-08 asserts the raw generator output; the example app's CI (when it lands post-M1) will assert the post-`dart fix` state.
 - **Goldens are canonical.** If SPEC and a golden output disagree, SPEC wins and the golden is regenerated. Never modify SPEC to match a bug.
 

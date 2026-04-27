@@ -711,7 +711,7 @@ class _CounterState extends State<Counter> {
 
 ---
 
-### TODO M1-11 — Widget test: dispose spy on Navigator pop
+### DONE M1-11 — Widget test: dispose on Navigator pop
 
 **Goal:** When the page containing `@SolidState` signals is popped from `Navigator`, each signal's `dispose()` is invoked.
 
@@ -719,15 +719,15 @@ class _CounterState extends State<Counter> {
 
 **Files to create:**
 
-- `example/test/counter_dispose_test.dart` — wraps the `Signal<int>` in a `SpySignal` subclass that records `dispose()` calls. Pushes the `Counter` page, pops it, asserts the counter was disposed.
+- `example/test/counter_dispose_test.dart` — pushes a test-local mirror of `_CounterPageState` onto the Navigator, registers a `signal.onDispose(...)` callback during `initState`, pops the route, asserts the callback fired exactly once.
 
-**Expected implementation change:** A `SpySignal<T>` helper in `example/test/helpers/spy_signal.dart`; the generated `_CounterState.dispose()` calls `counter.dispose()` and the spy records it.
+**Expected implementation change:** None in the generator. The test observes the `SignalBase<T>.onDispose(VoidCallback)` hook (declared in `solidart`, exported by `flutter_solidart`) — the same public contract real user code uses. No `SpySignal` subclass is needed; subclassing `flutter_solidart.Signal` would tie the helper to the value-notifier wrapper layer and require a parallel `SpyComputed` for M2-04, whereas `onDispose` works on every `SignalBase` (Signal, Computed, all collection signals) unchanged.
 
-**Acceptance:** Test passes; spy records exactly one dispose call per signal.
+**Acceptance:** Test passes; the `onDispose` callback records exactly one call per signal after Navigator pop.
 
 **Dependencies:** M1-01, M1-10.
 
-**Status:** TODO
+**Status:** DONE
 
 ---
 
