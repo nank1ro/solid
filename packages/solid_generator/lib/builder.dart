@@ -9,6 +9,7 @@ import 'package:solid_generator/src/class_kind.dart';
 import 'package:solid_generator/src/field_model.dart';
 import 'package:solid_generator/src/import_rewriter.dart';
 import 'package:solid_generator/src/plain_class_rewriter.dart';
+import 'package:solid_generator/src/reserved_annotation_validator.dart';
 import 'package:solid_generator/src/state_class_rewriter.dart';
 import 'package:solid_generator/src/stateless_rewriter.dart';
 import 'package:solid_generator/src/target_validator.dart';
@@ -68,15 +69,19 @@ class _SolidBuilder implements Builder {
       );
     }
 
+    // SPEC §3.2 + §13: reject reserved annotations (`@SolidEffect`,
+    // `@SolidQuery`, `@SolidEnvironment`) before any other pass so the user
+    // gets a fail-fast error instead of a silent passthrough.
+    validateReservedAnnotations(parsed.unit);
     // SPEC §3.1 invalid-target guard. Must run before
     // `_collectAnnotatedClasses`, which only walks `FieldDeclaration`s.
     validateSolidStateTargets(parsed.unit);
 
     final annotatedClasses = _collectAnnotatedClasses(parsed.unit, source);
     if (annotatedClasses.every((c) => c.fields.isEmpty)) {
-      // Hint matched, but no `@SolidState` field resolved — e.g. the user has
-      // a comment mentioning `@Solid…` or a not-yet-implemented annotation.
-      // SPEC §3.2 rejections are M1-15's scope; for M1-01 we pass through.
+      // Hint matched, but no `@SolidState` field resolved — the file likely
+      // contains a comment or string literal mentioning `@Solid…`. Reserved
+      // annotations are caught upstream.
       await buildStep.writeAsString(outputId, source);
       return;
     }
