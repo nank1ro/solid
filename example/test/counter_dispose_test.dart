@@ -1,22 +1,19 @@
-// M1-11 — proves SPEC §10 (dispose contract) at runtime: when the route
+// M1-11 — fences SPEC §10 (dispose contract) at runtime: when the route
 // containing a `@SolidState` signal is popped from `Navigator`, the emitted
 // `signal.dispose()` actually fires. Static byte-equality of the emitted
-// `dispose()` body is already covered by the M1-08 golden + idempotency
-// suites; this test fences the runtime invariant that the call happens.
+// `dispose()` body is covered by the M1-08 golden + idempotency suites;
+// this test asserts the runtime invariant that the call happens.
 //
-// Observation hook: `SignalBase<T>.onDispose(VoidCallback)` (declared in
-// `solidart` and exported via `flutter_solidart`). This is the same public
-// hook real user code uses, so the test exercises the SignalBase contract
-// directly rather than a private subclass shim.
+// Observed via `SignalBase<T>.onDispose(VoidCallback)` — the public hook
+// real user code uses, exported by `flutter_solidart`. The test exercises
+// the SignalBase contract directly rather than a private subclass shim, and
+// the same hook composes for M2-04's dispose-order golden.
 //
-// `_ProbedCounterPage` mirrors the M1-05 generated `_CounterPageState` shape
-// (see `example/lib/counter.dart`); the production `_CounterPageState` is
-// library-private so the test cannot reach into it to register `onDispose`,
-// hence the test-local mirror — same pattern M1-10 uses for `BuildTracker`.
-//
-// Forward compatibility: when M2-04 introduces the dispose-order golden for
-// `Computed`, this same `onDispose` hook composes — register it on each
-// signal, append a tag to a shared list, assert order. No new helper needed.
+// `_ProbedCounterPage` is a test-local mirror of `_CounterPageState`'s
+// shape: the production `_CounterPageState` is library-private and cannot
+// expose its signal to the test (same pattern M1-10 uses for `BuildTracker`).
+
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
@@ -26,32 +23,24 @@ void main() {
   testWidgets('Navigator pop disposes the signal exactly once', (
     tester,
   ) async {
+    final navigatorKey = GlobalKey<NavigatorState>();
+    final pageKey = GlobalKey<_ProbedCounterPageState>();
     var disposeCount = 0;
 
     await tester.pumpWidget(
-      MaterialApp(
-        home: Builder(
-          builder: (context) => Scaffold(
-            body: Center(
-              child: ElevatedButton(
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => _ProbedCounterPage(
-                      onSignalCreated: (signal) =>
-                          signal.onDispose(() => disposeCount++),
-                    ),
-                  ),
-                ),
-                child: const Text('Open'),
-              ),
-            ),
-          ),
+      MaterialApp(navigatorKey: navigatorKey, home: const SizedBox.shrink()),
+    );
+
+    unawaited(
+      navigatorKey.currentState!.push(
+        MaterialPageRoute<void>(
+          builder: (_) => _ProbedCounterPage(key: pageKey),
         ),
       ),
     );
-
-    await tester.tap(find.text('Open'));
     await tester.pumpAndSettle();
+
+    pageKey.currentState!.counter.onDispose(() => disposeCount++);
 
     expect(
       disposeCount,
@@ -60,7 +49,7 @@ void main() {
     );
     expect(find.text('Counter is 0'), findsOneWidget);
 
-    Navigator.of(tester.element(find.byType(_ProbedCounterPage))).pop();
+    navigatorKey.currentState!.pop();
     await tester.pumpAndSettle();
 
     expect(
@@ -72,9 +61,7 @@ void main() {
 }
 
 class _ProbedCounterPage extends StatefulWidget {
-  const _ProbedCounterPage({required this.onSignalCreated});
-
-  final void Function(SignalBase<int> signal) onSignalCreated;
+  const _ProbedCounterPage({super.key});
 
   @override
   State<_ProbedCounterPage> createState() => _ProbedCounterPageState();
@@ -82,12 +69,6 @@ class _ProbedCounterPage extends StatefulWidget {
 
 class _ProbedCounterPageState extends State<_ProbedCounterPage> {
   final counter = Signal<int>(0, name: 'counter');
-
-  @override
-  void initState() {
-    super.initState();
-    widget.onSignalCreated(counter);
-  }
 
   @override
   void dispose() {
