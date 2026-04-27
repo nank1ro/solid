@@ -7,7 +7,10 @@ import 'package:solid_generator/src/field_model.dart';
 /// resolution is required for `.value` rewriting, but annotation detection is
 /// acceptable on names because the user must import `solid_annotations` to use
 /// `@SolidState` at all).
-const String _solidStateName = 'SolidState';
+///
+/// Exposed package-publicly so the target validator (SPEC Section 3.1
+/// rejections) can match the same identifier on non-field declarations.
+const String solidStateName = 'SolidState';
 
 /// Reads a `@SolidState(...)` annotation on [decl] and returns a [FieldModel].
 ///
@@ -15,7 +18,7 @@ const String _solidStateName = 'SolidState';
 /// [source] is passed in so each string member of the returned [FieldModel]
 /// can be extracted verbatim via `source.substring(offset, end)`.
 FieldModel? readSolidStateField(FieldDeclaration decl, String source) {
-  final annotation = _findSolidStateAnnotation(decl);
+  final annotation = findSolidStateAnnotation(decl.metadata);
   if (annotation == null) return null;
 
   final varList = decl.fields;
@@ -41,10 +44,13 @@ FieldModel? readSolidStateField(FieldDeclaration decl, String source) {
   );
 }
 
-/// Returns the first `@SolidState(...)` annotation on [decl], or `null`.
-Annotation? _findSolidStateAnnotation(FieldDeclaration decl) {
-  for (final ann in decl.metadata) {
-    if (ann.name.name == _solidStateName) return ann;
+/// Returns the first `@SolidState(...)` annotation in [metadata], or `null`.
+///
+/// Package-public so the target validator (SPEC §3.1 rejections) can reuse
+/// the same matcher on `MethodDeclaration` and `FunctionDeclaration` metadata.
+Annotation? findSolidStateAnnotation(NodeList<Annotation> metadata) {
+  for (final ann in metadata) {
+    if (ann.name.name == solidStateName) return ann;
   }
   return null;
 }

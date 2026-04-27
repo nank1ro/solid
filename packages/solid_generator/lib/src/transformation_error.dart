@@ -71,28 +71,6 @@ class ValidationError extends TransformationError {
   /// Creates a [ValidationError] with a [violationType] code.
   const ValidationError(super.message, super.location, this.violationType);
 
-  /// Factory for invalid-annotation-target errors.
-  const ValidationError.invalidAnnotationTarget(
-    String location,
-  ) : violationType = 'INVALID_TARGET',
-      super(
-        '@SolidState can only be applied to fields and getters',
-        location,
-      );
-
-  /// Factory for missing-annotation errors.
-  const ValidationError.missingAnnotation(String elementName, String? location)
-    : violationType = 'MISSING_ANNOTATION',
-      super(
-        'Expected reactive annotation not found on $elementName',
-        location,
-      );
-
-  /// Factory for invalid-type errors.
-  const ValidationError.invalidType(String typeName, String? location)
-    : violationType = 'INVALID_TYPE',
-      super('Type $typeName is not supported for reactive state', location);
-
   /// Code identifying the type of validation violation.
   final String violationType;
 

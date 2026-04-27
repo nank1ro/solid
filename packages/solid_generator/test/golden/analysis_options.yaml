@@ -24,3 +24,6 @@ analyzer:
     always_put_required_named_parameters_first: ignore
     invalid_annotation_target: ignore
     lines_longer_than_80_chars: ignore
+    # M1-14 setter fixture intentionally has no corresponding getter — the
+    # whole point is that `@SolidState` on a setter must be rejected.
+    avoid_setters_without_getters: ignore

@@ -11,6 +11,7 @@ import 'package:solid_generator/src/import_rewriter.dart';
 import 'package:solid_generator/src/plain_class_rewriter.dart';
 import 'package:solid_generator/src/state_class_rewriter.dart';
 import 'package:solid_generator/src/stateless_rewriter.dart';
+import 'package:solid_generator/src/target_validator.dart';
 import 'package:solid_generator/src/transformation_error.dart';
 
 /// Factory invoked by `build_runner` to create the Solid builder.
@@ -66,6 +67,10 @@ class _SolidBuilder implements Builder {
         '(offset ${diagnostic.offset})',
       );
     }
+
+    // SPEC §3.1 invalid-target guard. Must run before
+    // `_collectAnnotatedClasses`, which only walks `FieldDeclaration`s.
+    validateSolidStateTargets(parsed.unit);
 
     final annotatedClasses = _collectAnnotatedClasses(parsed.unit, source);
     if (annotatedClasses.every((c) => c.fields.isEmpty)) {
