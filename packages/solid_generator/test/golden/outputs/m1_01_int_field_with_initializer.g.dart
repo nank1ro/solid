@@ -3,7 +3,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
 
 class Counter extends StatefulWidget {
-  const Counter({super.key});
+  Counter({super.key});
 
   @override
   State<Counter> createState() => _CounterState();

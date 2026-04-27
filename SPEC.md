@@ -517,6 +517,10 @@ If an outer widget and an inner widget both contain tracked reads, only the inne
 
 The class is rewritten as a `StatefulWidget` + `State<X>` pair. All reactive fields, getters, and generated `SignalBuilder`-wrapped build output live on the State. The public widget keeps its original constructor and key forwarding.
 
+Non-`@SolidState` fields are partitioned by their relationship to the class's generative constructors (unnamed and named): a field stays on the public widget class iff its name appears either as a `this.X` parameter or as the LHS of an initializer-list assignment (`: field = expr`) on **any** generative constructor of the class. Every other non-`@SolidState` field — inline-initialized, `late`, or otherwise unbound to a constructor — moves to the State class verbatim. Widget-config fields (the `this.X` props) retain their normal Flutter semantics: the State reads them via `widget.X`. Factory constructors do not contribute to the binding set (they construct an instance via their body and never bind a `this.X` parameter).
+
+Every constructor on the original class — unnamed, named, and factory — is preserved verbatim on the rewritten public widget class.
+
 Source:
 
 ```dart
@@ -561,7 +565,7 @@ class _CounterState extends State<Counter> {
 }
 ```
 
-The public constructor gains `const` where safe (all fields final and literal).
+The generator does not add or remove `const` on any constructor. After the class split moves every mutable `@SolidState` field off the widget, the rewritten widget is typically `const`-eligible per Dart's own rules — `dart fix --apply` adds `const` to the user's verbatim constructors as a post-processing step, in line with Section 9's delegation of lint-time fixes to dart fix. See Section 14 item 7.
 
 ### 8.2 StatefulWidget with `@SolidState` on its State
 
@@ -693,7 +697,7 @@ These were open questions during SPEC drafting and have been answered by the dev
 4. **Custom `initState` / `didUpdateWidget` overrides in an existing State class (Section 8.2)** — preserved untouched. If an existing `dispose()` is present, reactive disposals are merged into its body.
 5. **User-facing packages** — two packages. `package:solid_annotations` (runtime dep) hosts the annotation classes (`@SolidState` today; `@SolidEffect`/`@SolidQuery`/`@SolidEnvironment` in later milestones). `package:solid_generator` (dev_dep) hosts the build_runner builder. There is no `package:solid` umbrella. Consumers add `solid_annotations` + `flutter_solidart` as runtime deps and `solid_generator` + `build_runner` as dev_deps, then import annotations and `flutter_solidart` primitives directly.
 6. **Shadowing rule (Section 5.5)** — handled by type resolution. Because Section 5.1 is type-driven, a shadowed local of a non-`SignalBase` type is never rewritten. A dedicated shadowing test case is required in M1.
-7. **`const` on the public widget constructor (Section 8.1)** — added when all fields and default values are `const`-compatible.
+7. **`const` on the public widget constructor (Section 8.1)** — not added by the generator. Constructors round-trip verbatim from source. After the class split removes mutable `@SolidState` fields from the widget, the rewritten widget is usually const-eligible by Dart's own rules; `dart fix --apply` is the trusted lint pass that adds `const` (and removes unused imports — Section 9). The generator never emits `const` on its own.
 
 ---
 
