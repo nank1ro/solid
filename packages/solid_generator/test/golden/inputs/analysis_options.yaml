@@ -1,0 +1,18 @@
+# Analysis config for golden INPUT fixtures only.
+#
+# The shared parent at `../analysis_options.yaml` covers suppressions that
+# apply to both inputs and outputs (unused_import, must_be_immutable, etc.).
+# This file adds suppressions that are valid only for source/-equivalent
+# files and would be wrong on lib/-equivalent (output) files.
+include: ../analysis_options.yaml
+analyzer:
+  errors:
+    # Source files have a mutable `@SolidState` field on a `StatelessWidget`,
+    # so the class can never be const. The lint correctly does not fire here
+    # (the field's mutability blocks const), but if a future input fixture
+    # ever changes shape so the lint does fire, suppress it: const is
+    # provably wrong for source. Outputs (post-class-split) deliberately do
+    # NOT inherit this — the generator emits ctors verbatim and `dart fix
+    # --apply` adds `const` to the rewritten widget at the consumer-app
+    # level. Suppressing this lint on outputs would defeat dart fix.
+    prefer_const_constructors_in_immutables: ignore

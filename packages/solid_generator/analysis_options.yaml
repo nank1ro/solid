@@ -1,0 +1,11 @@
+include: ../../analysis_options.yaml
+
+# Test golden outputs are intentionally pre-`dart fix --apply` builder output
+# (per SPEC §9, lint-time fixes are delegated to dart fix at the consumer-app
+# level — most notably const-add and unused-import-prune). These fixtures
+# exist to byte-compare against builder output, not to be linted as if they
+# were shippable lib code, so they're excluded from analysis at the package
+# level. Inputs are still analyzed under `test/golden/inputs/analysis_options.yaml`.
+analyzer:
+  exclude:
+    - test/golden/outputs/**
