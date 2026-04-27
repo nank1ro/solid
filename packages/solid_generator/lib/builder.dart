@@ -7,6 +7,7 @@ import 'package:dart_style/dart_style.dart';
 import 'package:solid_generator/src/annotation_reader.dart';
 import 'package:solid_generator/src/class_kind.dart';
 import 'package:solid_generator/src/field_model.dart';
+import 'package:solid_generator/src/getter_model.dart';
 import 'package:solid_generator/src/import_rewriter.dart';
 import 'package:solid_generator/src/plain_class_rewriter.dart';
 import 'package:solid_generator/src/reserved_annotation_validator.dart';
@@ -74,14 +75,15 @@ class _SolidBuilder implements Builder {
     // gets a fail-fast error instead of a silent passthrough.
     validateReservedAnnotations(parsed.unit);
     // SPEC §3.1 invalid-target guard. Must run before
-    // `_collectAnnotatedClasses`, which only walks `FieldDeclaration`s.
+    // `_collectAnnotatedClasses`; rejected targets (final / const / static
+    // fields, setters, top-level vars, methods, …) never reach the readers.
     validateSolidStateTargets(parsed.unit);
 
     final annotatedClasses = _collectAnnotatedClasses(parsed.unit, source);
-    if (annotatedClasses.every((c) => c.fields.isEmpty)) {
-      // Hint matched, but no `@SolidState` field resolved — the file likely
-      // contains a comment or string literal mentioning `@Solid…`. Reserved
-      // annotations are caught upstream.
+    if (annotatedClasses.every((c) => c.fields.isEmpty && c.getters.isEmpty)) {
+      // Hint matched, but no `@SolidState` field or getter resolved — the
+      // file likely contains a comment or string literal mentioning `@Solid…`.
+      // Reserved annotations are caught upstream.
       await buildStep.writeAsString(outputId, source);
       return;
     }
@@ -91,19 +93,27 @@ class _SolidBuilder implements Builder {
   }
 }
 
-/// One class declaration paired with the `@SolidState` fields it contains.
+/// One class declaration paired with the `@SolidState` fields and getters it
+/// contains.
 ///
-/// `fields` is empty when the class exists in the source but has no
+/// Both lists are empty when the class exists in the source but has no
 /// `@SolidState` annotations; such classes are passed through verbatim.
 class _AnnotatedClass {
-  _AnnotatedClass(this.decl, this.fields);
+  _AnnotatedClass(this.decl, this.fields, this.getters);
   final ClassDeclaration decl;
   final List<FieldModel> fields;
+  final List<GetterModel> getters;
 }
 
 /// Walks [unit] once and returns every class paired with its `@SolidState`
-/// fields. Replaces an earlier double-walk (presence check + collection) with
-/// a single traversal per file.
+/// fields and getters. Replaces an earlier double-walk (presence check +
+/// collection) with a single traversal per file.
+///
+/// Fields are read first so the getter body's reactive-name set already
+/// contains every field of the same class; a getter referencing a sibling
+/// `@SolidState` field gets its `.value` rewrite applied per SPEC §5.1.
+/// Getters then enter the name set in source order so a later getter can
+/// also reference an earlier annotated getter.
 List<_AnnotatedClass> _collectAnnotatedClasses(
   CompilationUnit unit,
   String source,
@@ -112,12 +122,26 @@ List<_AnnotatedClass> _collectAnnotatedClasses(
   for (final decl in unit.declarations) {
     if (decl is! ClassDeclaration) continue;
     final fields = <FieldModel>[];
+    final getters = <GetterModel>[];
+    final reactiveNames = <String>{};
     for (final member in decl.members) {
-      if (member is! FieldDeclaration) continue;
-      final model = readSolidStateField(member, source);
-      if (model != null) fields.add(model);
+      if (member is FieldDeclaration) {
+        final model = readSolidStateField(member, source);
+        if (model != null) {
+          fields.add(model);
+          reactiveNames.add(model.fieldName);
+        }
+        continue;
+      }
+      if (member is MethodDeclaration) {
+        final model = readSolidStateGetter(member, reactiveNames, source);
+        if (model != null) {
+          getters.add(model);
+          reactiveNames.add(model.getterName);
+        }
+      }
     }
-    result.add(_AnnotatedClass(decl, fields));
+    result.add(_AnnotatedClass(decl, fields, getters));
   }
   return result;
 }
@@ -134,13 +158,13 @@ String _renderOutput(
   String source,
 ) {
   final results = annotatedClasses.map((c) {
-    if (c.fields.isEmpty) {
+    if (c.fields.isEmpty && c.getters.isEmpty) {
       return (
         text: source.substring(c.decl.offset, c.decl.end),
         solidartNames: const <String>{},
       );
     }
-    return _rewriteClass(c.decl, c.fields, source);
+    return _rewriteClass(c.decl, c.fields, c.getters, source);
   }).toList();
 
   final imports = computeOutputImports(
@@ -160,16 +184,17 @@ String _renderOutput(
 RewriteResult _rewriteClass(
   ClassDeclaration decl,
   List<FieldModel> fields,
+  List<GetterModel> getters,
   String source,
 ) {
   final kind = classKindOf(decl);
   switch (kind) {
     case ClassKind.statelessWidget:
-      return rewriteStatelessWidget(decl, fields, source);
+      return rewriteStatelessWidget(decl, fields, getters, source);
     case ClassKind.plainClass:
-      return rewritePlainClass(decl, fields, source);
+      return rewritePlainClass(decl, fields, getters, source);
     case ClassKind.stateClass:
-      return rewriteStateClass(decl, fields, source);
+      return rewriteStateClass(decl, fields, getters, source);
     case ClassKind.statefulWidget:
       throw CodeGenerationError(
         'class-kind $kind is not supported yet '
