@@ -385,24 +385,32 @@ FloatingActionButton(
 // NOT wrapped in SignalBuilder
 ```
 
-### 6.4 Explicit opt-out via `untracked`
+### 6.4 Explicit opt-out via the `.untracked` extension getter
 
-`flutter_solidart` exports a top-level function `untracked<T>(T Function() fn)` that reads signals without creating a subscription. Solid exposes this function as-is and recognizes it during transformation: reads inside an `untracked(() => ...)` callback are untracked.
+To read a reactive field's current value without subscribing the enclosing widget subtree, append `.untracked` to the field reference at the call site.
+
+`solid_annotations` exports `extension UntrackedExtension<T> on T { T get untracked => this; }`, so the source typechecks before generation: `counter.untracked` has the same type as `counter` (an identity at runtime).
 
 Source:
 
 ```dart
-Text('Static snapshot: ${untracked(() => counter)}')
+Container(key: ValueKey(counter.untracked), child: const Text('hi'))
 ```
 
 Output:
 
 ```dart
-Text('Static snapshot: ${untracked(() => counter.value)}')
+Container(key: ValueKey(counter.untrackedValue), child: const Text('hi'))
 // NOT wrapped in SignalBuilder
 ```
 
-The generator recognizes `untracked` by resolved identifier (the top-level function from `package:flutter_solidart/flutter_solidart.dart`), not by name alone. A user-defined local `untracked` variable would not apply this rule.
+Rules:
+
+- The generator detects `<reactiveField>.untracked` as a `PrefixedIdentifier`, replaces the whole expression with `<reactiveField>.untrackedValue` (the runtime primitive on `ReadableSignal<T>`), and excludes the offset from the tracked-read set. No `SignalBuilder` wrap occurs at this position, regardless of structural context — even if the read sits inside an existing `SignalBuilder` from a sibling tracked read, `untrackedValue` bypasses `reactiveSystem.setCurrentSub` and never subscribes.
+- Inside string interpolations, only the long form `'${counter.untracked}'` expresses the untracked intent. The short form `'$counter.untracked'` parses as `${counter}` followed by a literal `.untracked` string suffix and rewrites as a normal tracked read of `counter`.
+- Detection is name-based on the prefix (the M3-05 type-resolution deferral); the existing shadowing guard (Section 5.5) suppresses the rewrite when a local variable shadows the field.
+
+**Migration from the v1 function-call form:** `untracked(() => ...)` is no longer supported. Writing it in source produces a build-time `CodeGenerationError` directing the user to the extension form. Replace each occurrence: `untracked(() => counter)` → `counter.untracked`.
 
 ### 6.5 Everything else is tracked
 
