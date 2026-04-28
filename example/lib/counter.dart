@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
 
 class CounterPage extends StatefulWidget {
-  CounterPage({super.key});
+  const CounterPage({super.key});
 
   @override
   State<CounterPage> createState() => _CounterPageState();
