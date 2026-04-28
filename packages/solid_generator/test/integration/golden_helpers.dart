@@ -36,6 +36,7 @@ const List<String> goldenNames = <String>[
   'm3_05_type_aware_no_double_append',
   'm3_06_string_interpolation_bare',
   'm3_08_builder_closure_tracked',
+  'm3_08b_block_body_builder_closure_tracked',
 ];
 
 /// Memoized golden directory resolution. Resolved relative to the package
