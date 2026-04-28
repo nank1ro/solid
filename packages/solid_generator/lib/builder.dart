@@ -6,6 +6,7 @@ import 'package:dart_style/dart_style.dart';
 
 import 'package:solid_generator/src/annotation_reader.dart';
 import 'package:solid_generator/src/class_kind.dart';
+import 'package:solid_generator/src/effect_model.dart';
 import 'package:solid_generator/src/field_model.dart';
 import 'package:solid_generator/src/getter_model.dart';
 import 'package:solid_generator/src/import_rewriter.dart';
@@ -70,9 +71,10 @@ class _SolidBuilder implements Builder {
       );
     }
 
-    // SPEC §3.2 + §13: reject reserved annotations (`@SolidEffect`,
-    // `@SolidQuery`, `@SolidEnvironment`) before any other pass so the user
-    // gets a fail-fast error instead of a silent passthrough.
+    // SPEC §3.2 + §13: reject reserved annotations (`@SolidQuery`,
+    // `@SolidEnvironment`) before any other pass so the user gets a fail-fast
+    // error instead of a silent passthrough. `@SolidEffect` shipped in M4 and
+    // is no longer reserved.
     validateReservedAnnotations(parsed.unit);
     // SPEC §3.1 invalid-target guard. Must run before
     // `_collectAnnotatedClasses`; rejected targets (final / const / static
@@ -80,10 +82,13 @@ class _SolidBuilder implements Builder {
     validateSolidStateTargets(parsed.unit);
 
     final annotatedClasses = _collectAnnotatedClasses(parsed.unit, source);
-    if (annotatedClasses.every((c) => c.fields.isEmpty && c.getters.isEmpty)) {
-      // Hint matched, but no `@SolidState` field or getter resolved — the
-      // file likely contains a comment or string literal mentioning `@Solid…`.
-      // Reserved annotations are caught upstream.
+    if (annotatedClasses.every(
+      (c) => c.fields.isEmpty && c.getters.isEmpty && c.effects.isEmpty,
+    )) {
+      // Hint matched, but no `@SolidState` field/getter or `@SolidEffect`
+      // method resolved — the file likely contains a comment or string
+      // literal mentioning `@Solid…`. Reserved annotations are caught
+      // upstream.
       await buildStep.writeAsString(outputId, source);
       return;
     }
@@ -93,27 +98,33 @@ class _SolidBuilder implements Builder {
   }
 }
 
-/// One class declaration paired with the `@SolidState` fields and getters it
-/// contains.
+/// One class declaration paired with the `@SolidState` fields and getters
+/// and `@SolidEffect` methods it contains.
 ///
-/// Both lists are empty when the class exists in the source but has no
-/// `@SolidState` annotations; such classes are passed through verbatim.
+/// All three lists are empty when the class exists in the source but has no
+/// reactive annotations; such classes are passed through verbatim.
 class _AnnotatedClass {
-  _AnnotatedClass(this.decl, this.fields, this.getters);
+  _AnnotatedClass({
+    required this.decl,
+    required this.fields,
+    required this.getters,
+    required this.effects,
+  });
   final ClassDeclaration decl;
   final List<FieldModel> fields;
   final List<GetterModel> getters;
+  final List<EffectModel> effects;
 }
 
 /// Walks [unit] once and returns every class paired with its `@SolidState`
-/// fields and getters. Replaces an earlier double-walk (presence check +
-/// collection) with a single traversal per file.
+/// fields and getters and `@SolidEffect` methods. Replaces an earlier
+/// double-walk (presence check + collection) with a single traversal per
+/// file.
 ///
-/// Fields are read first so the getter body's reactive-name set already
-/// contains every field of the same class; a getter referencing a sibling
-/// `@SolidState` field gets its `.value` rewrite applied per SPEC §5.1.
-/// Getters then enter the name set in source order so a later getter can
-/// also reference an earlier annotated getter.
+/// Fields are read first so a getter or effect body's reactive-name set
+/// already contains every field of the same class; getters then enter the
+/// name set in source order so a later getter or effect can reference an
+/// earlier annotated getter (SPEC §5.1).
 List<_AnnotatedClass> _collectAnnotatedClasses(
   CompilationUnit unit,
   String source,
@@ -123,6 +134,7 @@ List<_AnnotatedClass> _collectAnnotatedClasses(
     if (decl is! ClassDeclaration) continue;
     final fields = <FieldModel>[];
     final getters = <GetterModel>[];
+    final effects = <EffectModel>[];
     final reactiveNames = <String>{};
     for (final member in decl.members) {
       if (member is FieldDeclaration) {
@@ -134,14 +146,30 @@ List<_AnnotatedClass> _collectAnnotatedClasses(
         continue;
       }
       if (member is MethodDeclaration) {
-        final model = readSolidStateGetter(member, reactiveNames, source);
-        if (model != null) {
-          getters.add(model);
-          reactiveNames.add(model.getterName);
+        final getter = readSolidStateGetter(member, reactiveNames, source);
+        if (getter != null) {
+          getters.add(getter);
+          reactiveNames.add(getter.getterName);
+          continue;
+        }
+        // Effect names are intentionally NOT added to `reactiveNames`:
+        // `@SolidEffect` lowers to a `void`-returning `Effect` with no
+        // observable `.value`, so a sibling effect/getter referencing it
+        // must not get a `.value` rewrite.
+        final effect = readSolidEffectMethod(member, reactiveNames, source);
+        if (effect != null) {
+          effects.add(effect);
         }
       }
     }
-    result.add(_AnnotatedClass(decl, fields, getters));
+    result.add(
+      _AnnotatedClass(
+        decl: decl,
+        fields: fields,
+        getters: getters,
+        effects: effects,
+      ),
+    );
   }
   return result;
 }
@@ -158,13 +186,13 @@ String _renderOutput(
   String source,
 ) {
   final results = annotatedClasses.map((c) {
-    if (c.fields.isEmpty && c.getters.isEmpty) {
+    if (c.fields.isEmpty && c.getters.isEmpty && c.effects.isEmpty) {
       return (
         text: source.substring(c.decl.offset, c.decl.end),
         solidartNames: const <String>{},
       );
     }
-    return _rewriteClass(c.decl, c.fields, c.getters, source);
+    return _rewriteClass(c.decl, c.fields, c.getters, c.effects, source);
   }).toList();
 
   final imports = computeOutputImports(
@@ -185,16 +213,17 @@ RewriteResult _rewriteClass(
   ClassDeclaration decl,
   List<FieldModel> fields,
   List<GetterModel> getters,
+  List<EffectModel> effects,
   String source,
 ) {
   final kind = classKindOf(decl);
   switch (kind) {
     case ClassKind.statelessWidget:
-      return rewriteStatelessWidget(decl, fields, getters, source);
+      return rewriteStatelessWidget(decl, fields, getters, effects, source);
     case ClassKind.plainClass:
-      return rewritePlainClass(decl, fields, getters, source);
+      return rewritePlainClass(decl, fields, getters, effects, source);
     case ClassKind.stateClass:
-      return rewriteStateClass(decl, fields, getters, source);
+      return rewriteStateClass(decl, fields, getters, effects, source);
     case ClassKind.statefulWidget:
       throw CodeGenerationError(
         'class-kind $kind is not supported yet '

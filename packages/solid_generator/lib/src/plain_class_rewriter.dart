@@ -1,4 +1,5 @@
 import 'package:analyzer/dart/ast/ast.dart';
+import 'package:solid_generator/src/effect_model.dart';
 import 'package:solid_generator/src/field_model.dart';
 import 'package:solid_generator/src/getter_model.dart';
 import 'package:solid_generator/src/import_rewriter.dart';
@@ -27,12 +28,17 @@ RewriteResult rewritePlainClass(
   ClassDeclaration classDecl,
   List<FieldModel> solidFields,
   List<GetterModel> solidGetters,
+  List<EffectModel> solidEffects,
   String source,
 ) {
   final className = classDecl.name.lexeme;
   // M2-01 ships getter→Computed for `StatelessWidget` only; reject here so
   // M1-14's valid-target pass isn't silently undone.
   rejectIfGettersNotYetSupported(solidGetters, 'plain class', className);
+  // M4-01 ships method→Effect for `StatelessWidget` only; M4-08 lifts this
+  // guard for plain-class lowering. Reject here so the M4-04 valid-target
+  // pass isn't silently undone.
+  rejectIfEffectsNotYetSupported(solidEffects, 'plain class', className);
   _checkUnsupportedMembers(classDecl, solidFields, className);
 
   final signalFields = solidFields.map(emitSignalField).join('\n');

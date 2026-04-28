@@ -6,15 +6,19 @@ import 'package:solid_generator/src/transformation_error.dart';
 /// contract is deferred to a later SPEC revision (SPEC §3.2 + §13). Detecting
 /// any use causes the build to fail before transformation. The map value is
 /// the violation code stamped onto [ValidationError.violationType].
+///
+/// `SolidEffect` is no longer in this list as of M4-01: the annotation now
+/// lowers to `Effect(() { … })` per SPEC §4.7. Only the still-deferred
+/// `@SolidQuery` and `@SolidEnvironment` remain reserved; both ship in
+/// later milestones before v2 release (SPEC §13).
 const Map<String, String> _reservedAnnotations = {
-  'SolidEffect': 'RESERVED_ANNOTATION_SOLID_EFFECT',
   'SolidQuery': 'RESERVED_ANNOTATION_SOLID_QUERY',
   'SolidEnvironment': 'RESERVED_ANNOTATION_SOLID_ENVIRONMENT',
 };
 
-/// SPEC §3.2 + §13 build-time guard: reject any `@SolidEffect`,
-/// `@SolidQuery`, or `@SolidEnvironment` use with a clear error that names
-/// the annotation and quotes the SPEC §3.2 phrase verbatim.
+/// SPEC §3.2 + §13 build-time guard: reject any `@SolidQuery` or
+/// `@SolidEnvironment` use with a clear error that names the annotation and
+/// quotes the SPEC §3.2 phrase verbatim.
 ///
 /// Runs before transformation so users learn at build time that they're
 /// using a not-yet-implemented annotation, instead of debugging missing

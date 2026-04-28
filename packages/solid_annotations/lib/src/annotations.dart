@@ -16,12 +16,20 @@ class SolidState {
 }
 
 /// {@template SolidAnnotations.SolidEffect}
-/// Reserved. Full contract deferred to a later SPEC revision;
-/// see SPEC Section 3.2.
+/// Marks an instance method as a reactive side effect. See SPEC Section 3.4.
+///
+/// The annotated method must declare a `void` return type and take no
+/// parameters; its body must read at least one reactive declaration. The
+/// generator lowers it to a `late final <name> = Effect(() { … }, name: '…')`
+/// field that re-runs whenever any read reactive declaration changes.
 /// {@endtemplate}
+@Target({TargetKind.method})
 class SolidEffect {
   /// {@macro SolidAnnotations.SolidEffect}
-  const SolidEffect();
+  const SolidEffect({this.name});
+
+  /// Optional debug name; defaults to the annotated method's identifier.
+  final String? name;
 }
 
 /// {@template SolidAnnotations.SolidQuery}
