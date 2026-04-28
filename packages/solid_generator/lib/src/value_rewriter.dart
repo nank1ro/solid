@@ -58,9 +58,11 @@ bool _isOnPrefixedCallbackName(String name) {
 /// tracked-read offsets that downstream placement needs.
 ///
 /// [reactiveFields] is the name-set of `@SolidState` fields and getters
-/// declared on the enclosing class. The rewrite is name-based (see SPEC 5.4
-/// note in the orchestrator `rewriteBuildMethod`); M3-05 upgrades to
-/// type-driven resolution.
+/// declared on the enclosing class. The rewrite is name-based; the
+/// `m3_05_type_aware_no_double_append` golden locks in the no-double-append
+/// guarantee at the name-set boundary. Full SPEC §5.4 type-driven resolution
+/// (`buildStep.resolver.compilationUnitFor` + `staticType` subtype queries)
+/// is deferred — it is the architectural prerequisite for M3-09 (shadowing).
 ///
 /// [node] is typically the `build()` `MethodDeclaration` (the M1-05 path) or
 /// the body expression of a `@SolidState` getter (the M2-01 path). Both share
