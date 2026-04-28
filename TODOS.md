@@ -1077,7 +1077,7 @@ late final summary = Computed<String>(() {
 
 ---
 
-### TODO M3-05 — Type-aware no-double-append
+### DONE M3-05 — Type-aware no-double-append
 
 **Goal:** `controller.value` in source (where `controller` is a `TextEditingController`, NOT a Solid signal) is left untouched. No `controller.value.value` regression.
 
@@ -1097,7 +1097,7 @@ late final summary = Computed<String>(() {
 
 **Dependencies:** M1-05.
 
-**Status:** TODO
+**Status:** DONE
 
 ---
 
