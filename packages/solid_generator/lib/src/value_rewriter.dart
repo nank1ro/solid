@@ -24,8 +24,8 @@ class ValueEdit {
 ///
 /// A tracked read is one that must cause its enclosing widget subtree to
 /// subscribe (Section 6.5). Writes (Section 6.0) never appear here; reads
-/// inside user-interaction callbacks, `Key`-family constructors, or
-/// `untracked(...)` calls (Section 6.2 / 6.3 / 6.4) are excluded.
+/// inside user-interaction callbacks or `untracked(...)` calls
+/// (Section 6.2 / 6.4) are excluded.
 class ValueRewriteResult {
   /// Creates a result holding [edits] and their [trackedReadOffsets].
   const ValueRewriteResult(this.edits, this.trackedReadOffsets);
@@ -53,19 +53,6 @@ bool _isOnPrefixedCallbackName(String name) {
   final third = name.codeUnitAt(2);
   return third >= 0x41 && third <= 0x5A; // 'A'..'Z'
 }
-
-/// Names of `Key`-family constructors enumerated by SPEC Section 6.3. A
-/// read inside an `InstanceCreationExpression` of one of these classes
-/// (passed as the `key:` argument to a widget) is untracked.
-const Set<String> _keyConstructors = {
-  'Key',
-  'ValueKey',
-  'ObjectKey',
-  'UniqueKey',
-  'GlobalKey',
-  'GlobalObjectKey',
-  'PageStorageKey',
-};
 
 /// Walks [node] and returns every offset-based value edit plus the
 /// tracked-read offsets that downstream placement needs.
@@ -155,14 +142,6 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
   void visitVariableDeclaration(VariableDeclaration node) {
     _scopeStack.last.add(node.name.lexeme);
     super.visitVariableDeclaration(node);
-  }
-
-  @override
-  void visitInstanceCreationExpression(InstanceCreationExpression node) {
-    final untracked = _isKeyUntracked(node);
-    if (untracked) _untrackedDepth++;
-    super.visitInstanceCreationExpression(node);
-    if (untracked) _untrackedDepth--;
   }
 
   @override
@@ -268,20 +247,4 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
     if (parent is! NamedExpression) return false;
     return _isOnPrefixedCallbackName(parent.name.label.name);
   }
-
-  /// True if [node] is a `Key`-family constructor passed as the `key:`
-  /// argument of a widget (SPEC 6.3).
-  bool _isKeyUntracked(InstanceCreationExpression node) {
-    final ctorName = node.constructorName.type.qualifiedName;
-    if (!_keyConstructors.contains(ctorName)) return false;
-    final parent = node.parent;
-    if (parent is! NamedExpression) return false;
-    return parent.name.label.name == 'key';
-  }
-}
-
-extension on NamedType {
-  /// The bare class name of a type annotation, ignoring any import prefix
-  /// (e.g. `foo.ValueKey` → `ValueKey`).
-  String get qualifiedName => name.lexeme;
 }

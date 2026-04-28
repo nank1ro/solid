@@ -32,6 +32,7 @@ const List<String> goldenNames = <String>[
   'm2_04_dispose_order',
   'm3_01_text_arg_gets_value',
   'm3_02_onpressed_untracked',
+  'm3_03_value_key_tracked',
 ];
 
 /// Memoized golden directory resolution. Resolved relative to the package

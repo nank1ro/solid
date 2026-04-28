@@ -36,7 +36,7 @@ class SourceEdit {
 ///      receive `.value` (single textual occurrence per SPEC rule).
 ///   4. SPEC Section 7.2 — tracked reads cause their smallest enclosing
 ///      widget expression to be wrapped in `SignalBuilder`. Untracked-
-///      context rules from Section 6.2 / 6.3 / 6.4 suppress tracking.
+///      context rules from Section 6.2 / 6.4 suppress tracking.
 ///
 /// [reactiveFields] is the set of field names declared `@SolidState` on the
 /// enclosing class. The match is name-based; SPEC 5.4's type-driven rule

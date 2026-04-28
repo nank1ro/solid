@@ -385,29 +385,6 @@ FloatingActionButton(
 // NOT wrapped in SignalBuilder
 ```
 
-### 6.3 Reads inside Key constructor arguments
-
-A read is untracked when the identifier appears inside an `InstanceCreationExpression` whose constructor is `ValueKey`, `Key`, `ObjectKey`, `UniqueKey`, `GlobalKey`, `GlobalObjectKey`, or `PageStorageKey`, and that expression is passed to the `key:` parameter of a widget.
-
-Source:
-
-```dart
-Container(
-  key: ValueKey(counter),
-  child: const Text('hi'),
-)
-```
-
-Output:
-
-```dart
-Container(
-  key: ValueKey(counter.value),
-  child: const Text('hi'),
-)
-// NOT wrapped in SignalBuilder
-```
-
 ### 6.4 Explicit opt-out via `untracked`
 
 `flutter_solidart` exports a top-level function `untracked<T>(T Function() fn)` that reads signals without creating a subscription. Solid exposes this function as-is and recognizes it during transformation: reads inside an `untracked(() => ...)` callback are untracked.
@@ -429,7 +406,7 @@ The generator recognizes `untracked` by resolved identifier (the top-level funct
 
 ### 6.5 Everything else is tracked
 
-If a read is not in one of the contexts defined in Sections 6.2, 6.3, or 6.4, it is tracked. The containing widget subtree must be wrapped in `SignalBuilder` (Section 7).
+If a read is not in one of the contexts defined in Sections 6.2 or 6.4, it is tracked. The containing widget subtree must be wrapped in `SignalBuilder` (Section 7).
 
 ### 6.6 Nested cases
 
@@ -712,7 +689,7 @@ Any change that alters user-observable behavior must be covered by a golden test
 This SPEC addresses the following real user-reported issues from the v1 repo:
 
 - **#3** — `@SolidEnvironment` inside an existing `State<X>` was not transformed; the class-kind handling in Section 8.2 makes this impossible to regress.
-- **#4** — untracked reads (`ValueKey`, `onPressed`) were wrapped in `SignalBuilder`, breaking compilation; Section 6 defines the untracked-context rules.
+- **#4** — untracked reads (`onPressed`) were wrapped in `SignalBuilder`, breaking compilation; Section 6 defines the untracked-context rules.
 - **#6** — `Text(text)` did not receive `.value` because the rewriter missed bare identifier reads; Section 5.1 defines the rewrite rule exhaustively.
 - **#8** — generated `main.dart` used `SolidartConfig` without importing `flutter_solidart`; Section 9 defines the import-addition rule.
 - **#9** — hot reload required a double-save; Section 12 defines the two supported workflows: manual `r` after build_runner emits, or `dashmon` to bridge filesystem changes to Flutter's stdin automatically.
