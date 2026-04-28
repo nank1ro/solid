@@ -1,5 +1,6 @@
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/dart/ast/visitor.dart';
+import 'package:solid_generator/src/transformation_error.dart';
 
 /// A single value-level edit emitted by [collectValueEdits].
 ///
@@ -24,8 +25,8 @@ class ValueEdit {
 ///
 /// A tracked read is one that must cause its enclosing widget subtree to
 /// subscribe (Section 6.5). Writes (Section 6.0) never appear here; reads
-/// inside user-interaction callbacks or `untracked(...)` calls
-/// (Section 6.2 / 6.4) are excluded.
+/// inside user-interaction callbacks (Section 6.2) or `<field>.untracked`
+/// reads (Section 6.4) are excluded.
 class ValueRewriteResult {
   /// Creates a result holding [edits] and their [trackedReadOffsets].
   const ValueRewriteResult(this.edits, this.trackedReadOffsets);
@@ -95,6 +96,16 @@ String applyEditsToRange(String text, List<ValueEdit> edits, int baseOffset) {
   return result;
 }
 
+/// Name of the marker getter exposed by `UntrackedExtension` in
+/// `solid_annotations` (SPEC §6.4). Must stay in sync with the extension
+/// declaration in `packages/solid_annotations/lib/src/annotations.dart`.
+const String _untrackedGetterName = 'untracked';
+
+/// Name of the runtime opt-out getter on `ReadableSignal<T>` from
+/// `flutter_solidart`. Reading via this getter never subscribes the
+/// surrounding reactive context.
+const String _untrackedValueGetterName = 'untrackedValue';
+
 /// AST visitor that accumulates [ValueEdit]s for reactive-field identifiers.
 ///
 /// Scope tracking is intentionally minimal in M1-05: a local variable whose
@@ -112,11 +123,16 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
   final List<Set<String>> _scopeStack = [<String>{}];
 
   /// Depth of untracked contexts; >0 means every read visited here is
-  /// treated as untracked.
+  /// treated as untracked. Nested `on*` callbacks (Section 6.2) accumulate.
   int _untrackedDepth = 0;
 
   bool _isShadowed(String name) =>
       _scopeStack.any((frame) => frame.contains(name));
+
+  /// True if [name] is a reactive field reference that the rewriter should
+  /// rewrite at this site — known reactive name AND not shadowed by a local.
+  bool _isTrackedField(String name) =>
+      _reactiveFields.contains(name) && !_isShadowed(name);
 
   @override
   void visitBlock(Block node) {
@@ -148,21 +164,49 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
 
   @override
   void visitMethodInvocation(MethodInvocation node) {
-    final isUntrackedFn =
-        node.target == null && node.methodName.name == 'untracked';
-    if (isUntrackedFn) _untrackedDepth++;
+    // SPEC §6.4: the v1 `untracked(() => ...)` function-call form is no
+    // longer supported. The canonical opt-out marker is `<field>.untracked`
+    // (handled in [visitPrefixedIdentifier]).
+    if (node.target == null && node.methodName.name == _untrackedGetterName) {
+      throw const CodeGenerationError(
+        'untracked(() => ...) is no longer supported (SPEC §6.4). '
+            'Use the extension getter at the call site instead, e.g. '
+            '`counter.untracked`.',
+        null,
+        'untracked() function-call form',
+      );
+    }
     super.visitMethodInvocation(node);
-    if (isUntrackedFn) _untrackedDepth--;
+  }
+
+  @override
+  void visitPrefixedIdentifier(PrefixedIdentifier node) {
+    // SPEC §6.4: rewrite `<reactiveField>.untracked` to
+    // `<field>.untrackedValue` (the runtime primitive on `ReadableSignal<T>`).
+    // The offset is intentionally NOT added to trackedReadOffsets and
+    // `_untrackedDepth` is intentionally not consulted — an `.untracked` read
+    // must never subscribe, regardless of surrounding context.
+    if (node.identifier.name == _untrackedGetterName &&
+        _isTrackedField(node.prefix.name)) {
+      edits.add(
+        ValueEdit(
+          node.offset,
+          node.end,
+          '${node.prefix.name}.$_untrackedValueGetterName',
+        ),
+      );
+      // Skip super: descending would let visitSimpleIdentifier append `.value`
+      // to the prefix, corrupting the replacement just emitted.
+      return;
+    }
+    super.visitPrefixedIdentifier(node);
   }
 
   @override
   void visitInterpolationExpression(InterpolationExpression node) {
     final expr = node.expression;
     final isShortForm = node.leftBracket.lexeme == r'$';
-    if (isShortForm &&
-        expr is SimpleIdentifier &&
-        _reactiveFields.contains(expr.name) &&
-        !_isShadowed(expr.name)) {
+    if (isShortForm && expr is SimpleIdentifier && _isTrackedField(expr.name)) {
       // Expand `$name` → `${name.value}` as a single edit. Do not descend
       // — the inner SimpleIdentifier is already handled by this rewrite.
       edits.add(
@@ -181,8 +225,7 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
   @override
   void visitSimpleIdentifier(SimpleIdentifier node) {
     final name = node.name;
-    if (!_reactiveFields.contains(name)) return;
-    if (_isShadowed(name)) return;
+    if (!_isTrackedField(name)) return;
     if (_isAccessedValueProperty(node)) return;
     if (!_isBareReferenceToField(node)) return;
 

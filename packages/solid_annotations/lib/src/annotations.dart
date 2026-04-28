@@ -41,3 +41,16 @@ class SolidEnvironment {
   /// {@macro SolidAnnotations.SolidEnvironment}
   const SolidEnvironment();
 }
+
+/// {@template SolidAnnotations.UntrackedExtension}
+/// Marks a reactive field read as untracked at the call site (SPEC §6.4).
+///
+/// When `solid_generator` sees `<field>.untracked` for a `@SolidState` field,
+/// it rewrites the expression to `<field>.untrackedValue` and excludes the
+/// read from `SignalBuilder` placement. The extension is identity at runtime;
+/// applied to a non-reactive expression it is a no-op.
+/// {@endtemplate}
+extension UntrackedExtension<T> on T {
+  /// {@macro SolidAnnotations.UntrackedExtension}
+  T get untracked => this;
+}

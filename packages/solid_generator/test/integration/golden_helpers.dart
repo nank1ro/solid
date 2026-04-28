@@ -40,6 +40,7 @@ const List<String> goldenNames = <String>[
   'm3_09_shadowing',
   'm3_10_existing_signalbuilder',
   'm3_11_nested_tracked_reads',
+  'm3_12_untracked_extension',
 ];
 
 /// Memoized golden directory resolution. Resolved relative to the package

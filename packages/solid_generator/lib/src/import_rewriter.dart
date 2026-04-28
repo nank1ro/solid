@@ -2,7 +2,7 @@
 ///
 /// See SPEC Section 9 — added to the output whenever any reactive primitive
 /// (`Signal`, `Computed`, `Effect`, `Resource`, `SignalBuilder`,
-/// `SolidartConfig`, `untracked`) appears in the generated code.
+/// `SolidartConfig`) appears in the generated code.
 const String flutterSolidartUri =
     'package:flutter_solidart/flutter_solidart.dart';
 
@@ -19,7 +19,6 @@ const Set<String> solidartNames = {
   'Resource',
   'SignalBuilder',
   'SolidartConfig',
-  'untracked',
 };
 
 /// One annotated class's contribution to the generated output.
