@@ -1053,7 +1053,7 @@ late final summary = Computed<String>(() {
 
 **Dependencies:** M1-05.
 
-**Status:** TODO
+**Status:** DONE
 
 ---
 
@@ -1073,7 +1073,7 @@ late final summary = Computed<String>(() {
 
 **Dependencies:** M1-10.
 
-**Status:** TODO
+**Status:** DONE
 
 ---
 
