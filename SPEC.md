@@ -288,15 +288,15 @@ Output:
 
 ```dart
 final counter = Signal<int>(0, name: 'counter');
-late final logCounter = Effect((_) {
+late final logCounter = Effect(() {
   print('Counter changed: ${counter.value}');
 }, name: 'logCounter');
 ```
 
 Rules:
 
-- The method's body — expression body or block body — is wrapped in a `(_) { … }` function expression. Section 5.1 type-driven `.value` rewriting is applied verbatim inside the body, identical to a `Computed` body (Sections 4.5–4.6).
-- The `Effect` callback receives one positional parameter (the upstream `flutter_solidart` `Effect` API surfaces a `DisposeEffect` callback at this position). The generator names the parameter `_` because the v2 generator does not surface self-disposal to user code; users who want self-disposal write the `Effect` by hand.
+- The method's body — expression body or block body — is wrapped in a `() { … }` function expression with no parameters. Section 5.1 type-driven `.value` rewriting is applied verbatim inside the body, identical to a `Computed` body (Sections 4.5–4.6).
+- The `Effect` callback takes zero parameters per the upstream `flutter_solidart` API: `Effect(() { … })`. Users who want self-disposal capture the value returned by `Effect(...)` (a disposer) by hand outside the annotation flow; the generator does not surface that surface area.
 - The resulting field is always declared `late final`, parallel to `Computed` (Section 4.5): the initializer reads other reactive instance fields, so its evaluation must defer until `this` is in scope.
 - Method-name → `name:` argument, unless `@SolidEffect(name: '…')` overrides — symmetric with the `@SolidState` rule (Sections 4.1, 4.4).
 - The cross-cutting rules in Sections 5.1, 5.2, 5.4, 5.5, 6.0, 6.2, 6.4, and 9 apply uniformly inside `Effect` bodies. The body is reactive code in the same sense as a `Computed` or a `build` body, so the type-driven `.value` rewrite, string-interpolation rewrite, no-double-append guard, shadowing handling, untracked-context detection, `.untracked` opt-out, and import-rewrite rules are reused without amendment. No new SPEC rule is required for `Effect` bodies.

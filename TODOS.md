@@ -1281,7 +1281,7 @@ Widget build(BuildContext context) {
 
 ### TODO M4-01 — Golden: simple `@SolidEffect` method with one Signal dep
 
-**Goal:** `@SolidEffect() void logCounter() { print('Counter changed: $counter'); }` on a `StatelessWidget` (next to `@SolidState() int counter = 0;`) becomes `late final logCounter = Effect((_) { print('Counter changed: ${counter.value}'); }, name: 'logCounter');` on the synthesized State class. Establishes the M4 lowering pipeline: `EffectModel`, `readSolidEffectMethod`, `emitEffectField`, and the non-getter `MethodDeclaration` branch in `_collectAnnotatedClasses`.
+**Goal:** `@SolidEffect() void logCounter() { print('Counter changed: $counter'); }` on a `StatelessWidget` (next to `@SolidState() int counter = 0;`) becomes `late final logCounter = Effect(() { print('Counter changed: ${counter.value}'); }, name: 'logCounter');` on the synthesized State class. Establishes the M4 lowering pipeline: `EffectModel`, `readSolidEffectMethod`, `emitEffectField`, and the non-getter `MethodDeclaration` branch in `_collectAnnotatedClasses`.
 
 **SPEC references:** Section 3.4, Section 4.7, Section 5.1 (identifier rewrite), Section 5.2 (string interpolation), Section 9 (import — `Effect` already on canonical list), Section 10 (dispose order).
 
@@ -1296,7 +1296,7 @@ Widget build(BuildContext context) {
 
 - `packages/solid_annotations/lib/src/annotations.dart` — replace the `SolidEffect` placeholder with `@Target({TargetKind.method}) class SolidEffect { const SolidEffect({this.name}); final String? name; }`.
 - `packages/solid_generator/lib/src/annotation_reader.dart` — add `EffectModel? readSolidEffectMethod(MethodDeclaration decl, Set<String> reactiveFieldNames, String source)`; reuse `findSolidStateAnnotation` + `extractNameArgument` patterns (consider factoring a shared `findSolidAnnotation(String className, …)` helper if it tightens the code).
-- `packages/solid_generator/lib/src/signal_emitter.dart` — add `String emitEffectField(EffectModel e)` returning the `late final … = Effect((_) { … }, name: '…');` line. Extend `emitDispose`'s argument-list semantics so Effects join Signals/Computeds in the unified ordered name list.
+- `packages/solid_generator/lib/src/signal_emitter.dart` — add `String emitEffectField(EffectModel e)` returning the `late final … = Effect(() { … }, name: '…');` line (zero-param callback per SPEC §4.7). Extend `emitDispose`'s argument-list semantics so Effects join Signals/Computeds in the unified ordered name list.
 - `packages/solid_generator/lib/builder.dart` — extend `_AnnotatedClass` to carry `final List<EffectModel> effects;`; extend `_collectAnnotatedClasses` to walk `MethodDeclaration` members where `!member.isGetter && !member.isSetter`; pass `effects` through `_rewriteClass` to all three rewriters.
 - `packages/solid_generator/lib/src/stateless_rewriter.dart` — accept `solidEffects`; interleave Signal/Computed/Effect fields in source order; pass merged disposable-name list to `emitDispose`.
 - `packages/solid_generator/lib/src/state_class_rewriter.dart`, `packages/solid_generator/lib/src/plain_class_rewriter.dart` — for now, reject `@SolidEffect` with a `CodeGenerationError("@SolidEffect on State<X>/plain class will land in M4-08")` until M4-08 ships them.
@@ -1339,7 +1339,7 @@ class Counter extends StatefulWidget {
 
 class _CounterState extends State<Counter> {
   final counter = Signal<int>(0, name: 'counter');
-  late final logCounter = Effect((_) {
+  late final logCounter = Effect(() {
     print('Counter changed: ${counter.value}');
   }, name: 'logCounter');
 
@@ -1355,7 +1355,7 @@ class _CounterState extends State<Counter> {
 }
 ```
 
-**Acceptance:** `dart test --name=m4_01` passes; golden analyzes clean; dispose body calls `logCounter.dispose()` BEFORE `counter.dispose()`; the upstream `Effect` constructor signature accepted by `flutter_solidart` matches what the golden emits (verify against the package source at impl time — adjust the `(_) { … }` parameter name if the upstream API uses something else).
+**Acceptance:** `dart test --name=m4_01` passes; golden analyzes clean; dispose body calls `logCounter.dispose()` BEFORE `counter.dispose()`; the upstream `Effect` constructor signature accepted by `flutter_solidart` matches what the golden emits (zero-param callback `() { … }` per SPEC §4.7 — verify the disposer-vs-`.dispose()` semantics against the package source at impl time and adjust the `dispose()` body if the upstream returns a function rather than an object).
 
 **Dependencies:** M2-01 (body-rewrite pipeline + `MethodDeclaration` collection path), M2-01b (block-body precedent).
 

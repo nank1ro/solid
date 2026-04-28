@@ -6,7 +6,7 @@
 
 ## Purpose
 
-M4 adds `@SolidEffect` on methods: a side-effecting function whose body reads one or more reactive declarations and re-runs whenever those declarations change. The method becomes a `late final Effect((_) { … }, name: '<n>')` field, with identifier rewrites applied per SPEC Section 5.1. Disposal joins the existing reverse-declaration order. This is the smallest infrastructural delta of the three reserved annotations: the body-rewrite pipeline and the `MethodDeclaration` collection path were both made future-proof in M2.
+M4 adds `@SolidEffect` on methods: a side-effecting function whose body reads one or more reactive declarations and re-runs whenever those declarations change. The method becomes a `late final Effect(() { … }, name: '<n>')` field (zero-param callback per the upstream `flutter_solidart` API), with identifier rewrites applied per SPEC Section 5.1. Disposal joins the existing reverse-declaration order. This is the smallest infrastructural delta of the three reserved annotations: the body-rewrite pipeline and the `MethodDeclaration` collection path were both made future-proof in M2.
 
 A developer after M4 can:
 
@@ -17,7 +17,7 @@ A developer after M4 can:
 
 ## TODO sequence
 
-- **M4-01** — Golden: simple `@SolidEffect` method with one Signal dep on `StatelessWidget`. Mirror of M2-01 for getters. Establishes the `EffectModel` model file, `readSolidEffectMethod` reader, `emitEffectField` emitter, the `MethodDeclaration` non-getter discrimination in `_collectAnnotatedClasses`, and the `late final ... = Effect((_) => ..., name: '<n>')` shape. Expression-body form first.
+- **M4-01** — Golden: simple `@SolidEffect` method with one Signal dep on `StatelessWidget`. Mirror of M2-01 for getters. Establishes the `EffectModel` model file, `readSolidEffectMethod` reader, `emitEffectField` emitter, the `MethodDeclaration` non-getter discrimination in `_collectAnnotatedClasses`, and the `late final ... = Effect(() { ...; }, name: '<n>')` shape (zero-param callback). Expression-body form first.
 - **M4-02** — Golden: `@SolidEffect` co-exists with `@SolidState` field + `@SolidState` getter on the same class. Validates that the unified dispose ordering across all three lowered shapes (Signal/Computed/Effect) is correct under the existing reverse-declaration rule.
 - **M4-03** — Golden: `@SolidEffect` block-body with multi-statement and shadowing. Validates that Sections 5.1 and 5.5 rules apply inside Effect bodies same as Computed bodies (parallel to M2-01b).
 - **M4-04** — Rejection: invalid `@SolidEffect` targets. Parametric test mirroring M1-14: getter, setter, static method, top-level function, parameterized method, non-void return, abstract method.
