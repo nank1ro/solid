@@ -1032,21 +1032,24 @@ late final summary = Computed<String>(() {
 
 ---
 
-### TODO M3-03 — Golden: ValueKey(counter) is untracked
+### TODO M3-03 — Golden: ValueKey(counter) is tracked
 
-**Goal:** A read inside `ValueKey(counter)` gets `.value` but does NOT wrap the enclosing widget in `SignalBuilder`.
+**Goal:** A read inside `ValueKey(counter)` gets `.value` AND wraps the enclosing widget in `SignalBuilder` — the new default after dropping the v1-era SPEC 6.3 auto-untracking enumeration. Users opt out per-read via the `.untracked` extension once M3-12 lands.
 
-**SPEC references:** Section 6.3.
+**SPEC references:** Section 6.5 (everything else is tracked).
 
 **Files to create:**
 
-- `packages/solid_generator/test/golden/inputs/m3_03_value_key_untracked.dart`
-- `packages/solid_generator/test/golden/outputs/m3_03_value_key_untracked.g.dart`
-- entry in `golden_test.dart`
+- `packages/solid_generator/test/golden/inputs/m3_03_value_key_tracked.dart`
+- `packages/solid_generator/test/golden/outputs/m3_03_value_key_tracked.g.dart`
+- entry in `golden_helpers.dart` `goldenNames`
 
-**Expected implementation change:** The untracked-context detector adds Key constructor names (Section 6.3) to its enumerated list. Reads inside these `InstanceCreationExpression`s get `.value` but do not trigger wrapping.
+**Expected implementation change:** Two deletions and one placement fix.
 
-**Acceptance:** `dart test --name=m3_03` passes; output `Container(key: ValueKey(counter.value), child: ...)` is NOT wrapped.
+1. Remove SPEC Section 6.3 entirely; strip `_keyConstructors`, `_isKeyUntracked`, and the `visitInstanceCreationExpression` hook from `value_rewriter.dart`.
+2. Patch `placement_visitor.dart` `_WidgetCollector` to skip constructor expressions used as the value of a `key:` named argument — Keys are not Widgets and cannot host a `SignalBuilder` wrapper. (SPEC 6.3 had been hiding this latent placement bug by untracking the read entirely. The KISS pivot makes the bug visible, so it ships its fix here.)
+
+**Acceptance:** `dart test --name=m3_03` passes; output `SignalBuilder` wraps the enclosing `Container`, with `ValueKey(counter.value)` inside as the Key.
 
 **Dependencies:** M1-05.
 
@@ -1122,23 +1125,13 @@ late final summary = Computed<String>(() {
 
 ### TODO M3-07 — Golden: explicit `untracked(() => ...)` opt-out
 
-**Goal:** `Text('snapshot: ${untracked(() => counter)}')` keeps `.value` on `counter` (per Section 5.1) but does NOT wrap the enclosing `Text` in `SignalBuilder`.
+**Superseded by M3-12** (`.untracked` extension replaces the function-call form). Keep this entry as a roadmap stub so cross-references resolve; do not ship.
 
-**SPEC references:** Section 6.4.
+**Goal (historical):** `Text('snapshot: ${untracked(() => counter)}')` keeps `.value` on `counter` (per Section 5.1) but does NOT wrap the enclosing `Text` in `SignalBuilder`.
 
-**Files to create:**
+**SPEC references:** Section 6.4 (subject to rewrite under M3-12).
 
-- `packages/solid_generator/test/golden/inputs/m3_07_untracked_opt_out.dart`
-- `packages/solid_generator/test/golden/outputs/m3_07_untracked_opt_out.g.dart`
-- entry in `golden_test.dart`
-
-**Expected implementation change:** The untracked-context detector recognizes calls to the top-level `untracked` function from `package:flutter_solidart/flutter_solidart.dart` by resolved identifier (not name alone). Reads inside the closure passed to `untracked` are untracked.
-
-**Acceptance:** `dart test --name=m3_07` passes; the golden output does NOT wrap the enclosing `Text` in `SignalBuilder`.
-
-**Dependencies:** M1-05.
-
-**Status:** TODO
+**Status:** OBSOLETE — see M3-12.
 
 ---
 
@@ -1249,5 +1242,35 @@ Widget build(BuildContext context) {
 **Acceptance:** `dart test --name=m3_11` passes; the golden has zero `SignalBuilder` wrappers around the outer Column.
 
 **Dependencies:** M1-05.
+
+**Status:** TODO
+
+---
+
+### TODO M3-12 — `.untracked` extension replaces `untracked()` opt-out
+
+**Goal:** Replace `untracked(() => counter)` with `counter.untracked` as the single, canonical opt-out marker for read tracking. Supersedes M3-07.
+
+**Why:** KISS — one mechanism, no closure boilerplate, reads naturally at the call site. `Container(key: ValueKey(counter.untracked))` is the migration story for users who actually want the v1-era SPEC 6.3 auto-untracking behavior that M3-03 dropped.
+
+**SPEC references:** Section 6.4 (full rewrite).
+
+**Files to modify / create:**
+
+- `packages/solid_annotations/lib/solid_annotations.dart` — add `extension Untracked<T> on T { T get untracked => this; }` (or scoped equivalent — design to be finalized in this TODO).
+- `packages/solid_generator/lib/src/value_rewriter.dart` — detect `.untracked` `PropertyAccess` on a reactive field; emit the untracked-read primitive (e.g., `Signal.peek()`) and exclude the offset from `trackedReadOffsets`. Remove the existing `untracked()` function-call special-case in `visitMethodInvocation`.
+- `SPEC.md` Section 6.4 — rewrite around the extension form.
+- New goldens: `m3_12_untracked_extension` input/output pair.
+
+**Open questions to resolve in this TODO:**
+
+- Exact untracked-read primitive name on `flutter_solidart`'s Signal API (`peek()`, `untracked` getter, etc.) — verify against the package source.
+- Extension scope: on `T`, on a marker mixin, or on a sentinel? Tradeoff is API-surface pollution vs source-typecheck friction.
+- Migration policy for users on `untracked(() => ...)` — silent drop of generator special-casing, or a generator warning?
+
+**Acceptance:** `dart test --name=m3_12` passes; `Text('${counter.untracked}')` produces an untracked-read output (no `SignalBuilder` wrap).
+
+**Dependencies:** M1-05.
+**Supersedes:** M3-07.
 
 **Status:** TODO

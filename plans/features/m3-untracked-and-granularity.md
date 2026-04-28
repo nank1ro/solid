@@ -1,7 +1,7 @@
 # M3 — Untracked reads + fine-grained `SignalBuilder` placement
 
-**TODOS.md items:** M3-01 → M3-11
-**SPEC sections:** 5.1, 5.2, 5.4, 5.5, 6.0, 6.2, 6.3, 6.4, 6.5, 6.6, 7.1–7.5, 16 (#4, #6)
+**TODOS.md items:** M3-01 → M3-12 (M3-07 superseded by M3-12)
+**SPEC sections:** 5.1, 5.2, 5.4, 5.5, 6.0, 6.2, 6.4, 6.5, 6.6, 7.1–7.5, 16 (#4, #6)
 **Reviewer rubric:** `plans/features/reviewer-rubric.md`
 
 ## Purpose
@@ -11,7 +11,7 @@ M3 hardens the rewriter against the v1 bugs that SPEC Section 16 enumerates: unt
 A developer after M3 can trust the generator in these scenarios:
 
 - `Text(counter)` rebuilds only `Text`.
-- `ValueKey(counter)` doesn't wrap the enclosing widget.
+- `ValueKey(counter)` wraps the enclosing widget like any other tracked read; users opt out per-read via the `.untracked` extension (M3-12).
 - `onPressed: () => counter++` never subscribes.
 - `controller.value` (a `TextEditingController`) is left alone.
 - `'$counter'` becomes `'${counter.value}'`.
@@ -24,23 +24,23 @@ A developer after M3 can trust the generator in these scenarios:
 
 - **M3-01** — `Text(counter)` inside `build` (fix for issue #6). Regression fence; core logic is in M1-05.
 - **M3-02** — `onPressed: () => counter++` (fix for issue #4). Regression fence; core logic is in M1-05.
-- **M3-03** — `ValueKey(counter)` untracked. Adds Section 6.3 Key-constructor list.
+- **M3-03** — `ValueKey(counter)` is tracked by default (drops the SPEC 6.3 auto-untracking enumeration that v1 carried). The opt-out story is M3-12's `.untracked` extension.
 - **M3-05** — type-aware no-double-append. Validates Section 5.4. Includes a `TextEditingController.value` case.
 - **M3-06** — string interpolation regression fence.
-- **M3-07** — explicit `untracked(() => ...)` opt-out (Section 6.4). Recognition by resolved identifier, not by name alone.
+- **M3-07** — explicit `untracked(() => ...)` opt-out (Section 6.4). **Superseded by M3-12** (extension form replaces the function form).
 - **M3-08** — Builder-style closures stay tracked (Section 6.6).
 - **M3-09** — shadowing (Section 5.5). Depends on M3-05 + M3-08 because it exercises both rules simultaneously.
 - **M3-10** — already-inside-SignalBuilder (Section 7.3). Hand-written `SignalBuilder` in source must not be double-wrapped.
 - **M3-11** — nested tracked reads (Section 7.5). Outer + inner both tracked; only inner wraps.
+- **M3-12** — `.untracked` extension replaces the `untracked()` function-call form (Section 6.4 rewrite). Single canonical opt-out marker for read tracking.
 - **M3-04** — sibling isolation widget test (Section 7.4). Ships last because it validates the whole M3 pipeline against a real widget tree.
 
 ## Cross-cutting concerns
 
-- **Untracked-context detector.** One AST visitor recognizes four contexts:
+- **Untracked-context detector.** One AST visitor recognizes three contexts:
   1. user-interaction callbacks (Section 6.2 — enumerated parameter-name list).
-  2. Key constructors (Section 6.3 — `ValueKey`, `Key`, `ObjectKey`, `UniqueKey`, `GlobalKey`, `GlobalObjectKey`, `PageStorageKey`).
-  3. closures passed to the top-level `untracked<T>` function from `flutter_solidart` (Section 6.4).
-  4. writes (Section 6.0 — the assignment's LHS is always untracked; the RHS is a normal read per Section 5.3).
+  2. closures passed to the top-level `untracked<T>` function from `flutter_solidart` (Section 6.4). Slated for replacement by the `.untracked` extension in M3-12.
+  3. writes (Section 6.0 — the assignment's LHS is always untracked; the RHS is a normal read per Section 5.3).
 - **Builder closure non-rule.** SPEC Section 6.6 is the explicit non-rule: `builder:`, `itemBuilder:`, etc. are NOT in the Section 6.2 list. The visitor must NOT treat them as untracked. M3-08 is the regression test.
 - **Sibling isolation.** M3-04 is a widget test, not a golden. Introduces a second `BuildTracker`-instrumented widget in the counter example; asserts both Text widgets each rebuild only when their respective signal changes.
 - **Type-driven rule is the single source of truth for `.value`.** The cases in M3-05, M3-06, M3-09 all reduce to SPEC Section 5.1 — if the identifier's resolved static type is `SignalBase<T>` or subtype, rewrite; otherwise leave alone. No special-case code per scenario; the test matrix validates generality.

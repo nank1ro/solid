@@ -13,7 +13,9 @@ import 'package:analyzer/dart/ast/visitor.dart';
 ///    an UpperCamelCase identifier (the `Text(...)` style used without
 ///    `const` or `new`; the analyzer only upgrades these to
 ///    `InstanceCreationExpression` during resolution, which we defer to
-///    M3-05 per SPEC 5.4).
+///    M3-05 per SPEC 5.4). Constructor expressions used as the value of a
+///    `key:` named argument are filtered out — Keys are not Widgets and
+///    cannot host a `SignalBuilder` wrapper (see `_isAtKeyPosition`).
 /// 2. For each tracked-read offset T (from `value_rewriter`), pick the
 ///    smallest (deepest) widget expression whose source range contains T —
 ///    SPEC Section 7.2's minimum-subtree rule.
@@ -101,13 +103,15 @@ class _WidgetCollector extends RecursiveAstVisitor<void> {
   void visitInstanceCreationExpression(InstanceCreationExpression node) {
     // Post-order: descend first so deeper widgets are appended first.
     super.visitInstanceCreationExpression(node);
+    if (_isAtKeyPosition(node)) return;
     widgets.add(node);
   }
 
   @override
   void visitMethodInvocation(MethodInvocation node) {
     super.visitMethodInvocation(node);
-    if (_looksLikeWidgetCtor(node)) widgets.add(node);
+    if (!_looksLikeWidgetCtor(node) || _isAtKeyPosition(node)) return;
+    widgets.add(node);
   }
 }
 
@@ -121,4 +125,13 @@ bool _looksLikeWidgetCtor(MethodInvocation node) {
   if (name.isEmpty) return false;
   final first = name.codeUnitAt(0);
   return first >= 0x41 && first <= 0x5A; // 'A'..'Z'
+}
+
+/// Syntactic stand-in for "this expression's static type is `Widget`": skips
+/// constructor calls that sit at `key:` argument position, since `Key` is not
+/// a `Widget` and cannot host a `SignalBuilder` wrap. The general non-Widget-
+/// argument case (e.g. `EdgeInsets`) waits for the type-driven pivot in M3-05.
+bool _isAtKeyPosition(Expression expr) {
+  final parent = expr.parent;
+  return parent is NamedExpression && parent.name.label.name == 'key';
 }
