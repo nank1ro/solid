@@ -1,7 +1,7 @@
 # Solid — Product Specification (v2)
 
 **Status:** DRAFT — under review
-**Scope of this SPEC:** defines the user-facing contract for `@SolidState` (the first implementation milestone, M1). The other annotations shipped before v2 release — `@SolidEffect`, `@SolidQuery`, `@SolidEnvironment` — are reserved names only; their full contract lives in a future SPEC revision.
+**Scope of this SPEC:** defines the user-facing contract for `@SolidState` and `@SolidEffect` (M1 and M4 milestones). The remaining annotations shipped before v2 release — `@SolidQuery`, `@SolidEnvironment` — are reserved names only; their full contract lives in a future SPEC revision.
 
 This document is the single source of truth for what Solid does. Reviewer agents cite this document by section number when judging an implementation. It contains no file names, no class names, no AST details — only what the developer sees and the guarantees they get.
 
@@ -30,7 +30,7 @@ Rules:
 
 - **Input path**: any `.dart` file under `source/` at any depth.
 - **Output path**: same relative path under `lib/`. No suffix change. `source/foo/bar.dart` becomes `lib/foo/bar.dart`.
-- **Transformation vs verbatim copy.** Solid reads every `.dart` file under `source/`. If a file contains at least one `@Solid*` annotation (`@SolidState` today; `@SolidEffect`, `@SolidQuery`, `@SolidEnvironment` in later milestones), Solid transforms it. Otherwise the file is copied verbatim to the mirrored path under `lib/`. Non-`.dart` files (assets, configs, etc.) are always copied verbatim. The key is annotation presence, not file extension.
+- **Transformation vs verbatim copy.** Solid reads every `.dart` file under `source/`. If a file contains at least one `@Solid*` annotation (`@SolidState` and `@SolidEffect` today; `@SolidQuery`, `@SolidEnvironment` in later milestones), Solid transforms it. Otherwise the file is copied verbatim to the mirrored path under `lib/`. Non-`.dart` files (assets, configs, etc.) are always copied verbatim. The key is annotation presence, not file extension.
 - **Both are committed to git.** Source is the review artifact for intent. Lib is the review artifact for correctness — every PR that changes `source/` must include the regenerated `lib/` diff so reviewers catch generator regressions.
 - **Solid emits no `.g.dart` files of its own.** Third-party generators (freezed, json_serializable, drift) may emit `.g.dart` or `.freezed.dart` files under `source/`; Solid copies those verbatim to the mirrored path under `lib/`.
 - **The example app's `main.dart`** lives in `lib/` (or `source/` if itself annotated) and imports from `lib/` using normal Flutter imports (`import 'counter.dart';`).
@@ -41,7 +41,7 @@ Rules:
 
 ## 3. Annotations
 
-> **Milestones vs v2.** The v2 public release ships the full annotation set: `@SolidState`, `@SolidEffect`, `@SolidQuery`, `@SolidEnvironment`. Implementation is split into internal milestones. M1 implements `@SolidState` only. Later milestones add the remaining annotations before v2 ships. The user-facing API of every annotation is fixed in this SPEC; no source-code change is required when a later milestone lands.
+> **Milestones vs v2.** The v2 public release ships the full annotation set: `@SolidState`, `@SolidEffect`, `@SolidQuery`, `@SolidEnvironment`. Implementation is split into internal milestones. M1 implements `@SolidState`; M4 adds `@SolidEffect`. Later milestones add `@SolidQuery` and `@SolidEnvironment` before v2 ships. The user-facing API of every annotation is fixed in this SPEC; no source-code change is required when a later milestone lands.
 
 ### 3.1 M1 scope: `@SolidState`
 
@@ -78,9 +78,8 @@ int counter = 0;
 
 ### 3.2 Later milestones (shipped before v2 release)
 
-The following annotations are part of the v2 public release but land in milestones after M1. Until each one ships, the generator must fail with a clear error that names the annotation and says "not yet implemented; scheduled for a later v2 milestone." Their names are reserved here; the full user-facing contract (parameters, valid targets, transformation rules) will be specified in a future SPEC revision before each lands.
+The following annotations are part of the v2 public release but land in milestones after the SPEC's currently-specified set (`@SolidState` in M1, `@SolidEffect` in M4). Until each one ships, the generator must fail with a clear error that names the annotation and says "not yet implemented; scheduled for a later v2 milestone." Their names are reserved here; the full user-facing contract (parameters, valid targets, transformation rules) will be specified in a future SPEC revision before each lands.
 
-- `@SolidEffect` — reactive side effect (method)
 - `@SolidQuery` — async reactive source (method)
 - `@SolidEnvironment` — dependency injection (field)
 
@@ -92,6 +91,48 @@ Solid will never:
 - Ship its own reactive runtime.
 - Use Dart Macros, Dart augmentations, or part-file patterns.
 - Split one source file into multiple lib files. Each `source/*.dart` produces exactly one `lib/*.dart` at the mirrored path.
+
+### 3.4 M4 scope: `@SolidEffect`
+
+`@SolidEffect` declares a reactive side effect on a class. It attaches to an instance method whose body reads one or more reactive declarations and runs them as a side effect whenever those declarations change.
+
+```dart
+@SolidState()
+int counter = 0;
+
+@SolidEffect()
+void logCounter() {
+  print('Counter changed: $counter');
+}
+```
+
+Optional `name:` parameter overrides the auto-derived debug name:
+
+```dart
+@SolidEffect(name: 'counterLogger')
+void logCounter() {
+  print('Counter changed: $counter');
+}
+```
+
+#### Valid target
+
+- Instance method declared with a `void` return type, with **no parameters** and **no return value**. The body may be expression-bodied (`=> ...`) or block-bodied (`{ ... }`); both forms work uniformly with the body-rewrite pipeline (Section 4.7).
+
+#### Invalid targets (the generator must reject with a clear error)
+
+- Method with one or more parameters (the lowered `Effect` callback signature is fixed; user-supplied parameters cannot be threaded through).
+- Method with a non-`void` return type (an Effect produces side effects, not values; for a value-producing reactive expression use `@SolidState` on a getter — Section 3.1).
+- `static` method (class-level, not instance — out of scope, parallel to `@SolidState`).
+- `abstract` or `external` method (no body to lower).
+- Getter (use `@SolidState` on a getter for a `Computed`).
+- Setter.
+- Top-level function.
+- Field.
+
+#### Reactive-deps requirement
+
+The method body MUST read at least one reactive declaration — any identifier whose resolved static type is `SignalBase<T>` or a subtype. An `Effect` with zero reactive dependencies is rejected at build time: *"effect `<name>` has no reactive dependencies; use a regular method or call it once explicitly instead of `@SolidEffect`."* This mirrors Section 4.5's rejection rule for zero-dep `Computed`.
 
 ---
 
@@ -228,6 +269,37 @@ late final summary = Computed<String>(() {
 ```
 
 The block is copied verbatim into a function expression with reactive-read rewriting applied.
+
+### 4.7 `@SolidEffect` on method → `Effect`
+
+Input:
+
+```dart
+@SolidState()
+int counter = 0;
+
+@SolidEffect()
+void logCounter() {
+  print('Counter changed: $counter');
+}
+```
+
+Output:
+
+```dart
+final counter = Signal<int>(0, name: 'counter');
+late final logCounter = Effect(() {
+  print('Counter changed: ${counter.value}');
+}, name: 'logCounter');
+```
+
+Rules:
+
+- The method's body — expression body or block body — is wrapped in a `() { … }` function expression with no parameters. Section 5.1 type-driven `.value` rewriting is applied verbatim inside the body, identical to a `Computed` body (Sections 4.5–4.6).
+- The `Effect` callback takes zero parameters per the upstream `flutter_solidart` API: `Effect(() { … })`. Users who want self-disposal capture the value returned by `Effect(...)` (a disposer) by hand outside the annotation flow; the generator does not surface that surface area.
+- The resulting field is always declared `late final`, parallel to `Computed` (Section 4.5): the initializer reads other reactive instance fields, so its evaluation must defer until `this` is in scope.
+- Method-name → `name:` argument, unless `@SolidEffect(name: '…')` overrides — symmetric with the `@SolidState` rule (Sections 4.1, 4.4).
+- The cross-cutting rules in Sections 5.1, 5.2, 5.4, 5.5, 6.0, 6.2, 6.4, and 9 apply uniformly inside `Effect` bodies. The body is reactive code in the same sense as a `Computed` or a `build` body, so the type-driven `.value` rewrite, string-interpolation rewrite, no-double-append guard, shadowing handling, untracked-context detection, `.untracked` opt-out, and import-rewrite rules are reused without amendment. No new SPEC rule is required for `Effect` bodies.
 
 ---
 
@@ -603,11 +675,11 @@ This is the fix for issue #8.
 
 ## 10. `dispose()` Contract
 
-Every generated `Signal` and `Computed` must be disposed when its owning class is disposed. The merging algorithm below applies identically to every class kind; the per-kind sections (8.1–8.3) describe how the algorithm is triggered.
+Every generated `Signal`, `Computed`, and `Effect` must be disposed when its owning class is disposed. The merging algorithm below applies identically to every class kind; the per-kind sections (8.1–8.3) describe how the algorithm is triggered.
 
 Algorithm: if the target class already has a `dispose()` body, prepend one `xxx.dispose()` call per reactive declaration to the top of the body and leave the rest untouched; if no `dispose()` exists, synthesize one. Emit `super.dispose()` at the end if and only if the class's supertype chain contains a `dispose()` method (e.g., `State<T>`, `ChangeNotifier`); the generator determines this via the analyzer's type resolution, not by name matching. For a plain class with no `dispose()` in the supertype chain, omit `super.dispose()`.
 
-Disposal order is **reverse declaration order**: dependents are disposed before their dependencies. Because a `Computed` must always be declared after the `Signal`s it reads (those `Signal`s are the `Computed`'s dependencies), reverse declaration order guarantees the `Computed` is disposed first and a `Signal` is never disposed while a live `Computed` still holds a subscription to it.
+Disposal order is **reverse declaration order**: dependents are disposed before their dependencies. Because a `Computed` must always be declared after the `Signal`s it reads, and an `Effect` must always be declared after the `Signal`s/`Computed`s it reads (those declarations are the dependents' dependencies), reverse declaration order guarantees a dependent (`Effect` or `Computed`) is disposed first and a dependency (`Signal` or `Computed`) is never disposed while a live subscriber still holds a subscription to it.
 
 ---
 
@@ -655,11 +727,10 @@ With Option A the developer saves `source/`, waits for build_runner to emit, the
 
 ---
 
-## 13. Not in M1 (shipped before v2 release)
+## 13. Not yet shipped (deferred until later milestones, before v2 release)
 
-These features are part of the v2 public release but land in milestones after M1. An M1 build that encounters any of them in source code must fail with a clear error naming the unsupported feature and referencing this section.
+These features are part of the v2 public release but land in milestones after the SPEC's currently-specified set (`@SolidState` in M1, `@SolidEffect` in M4). A build that encounters any of them in source code must fail with a clear error naming the unsupported feature and referencing this section.
 
-- `@SolidEffect`
 - `@SolidQuery` (Future and Stream forms; `.when`, `.maybeWhen`, `.refresh`, `.isRefreshing`; debounce; useRefreshing)
 - `@SolidEnvironment`
 - `SolidProvider` / `InheritedSolidProvider` / `.environment()` widget extension / `context.read` / `context.watch`
@@ -680,7 +751,7 @@ These were open questions during SPEC drafting and have been answered by the dev
 2. **Compound-assignment operator list in Section 5.3** — complete.
 3. **`@SolidState` on `final` fields** — rejected with a clear error (wrapping a never-reassigned value in a `Signal` is pointless).
 4. **Custom `initState` / `didUpdateWidget` overrides in an existing State class (Section 8.2)** — preserved untouched. If an existing `dispose()` is present, reactive disposals are merged into its body.
-5. **User-facing packages** — two packages. `package:solid_annotations` (runtime dep) hosts the annotation classes (`@SolidState` today; `@SolidEffect`/`@SolidQuery`/`@SolidEnvironment` in later milestones). `package:solid_generator` (dev_dep) hosts the build_runner builder. There is no `package:solid` umbrella. Consumers add `solid_annotations` + `flutter_solidart` as runtime deps and `solid_generator` + `build_runner` as dev_deps, then import annotations and `flutter_solidart` primitives directly.
+5. **User-facing packages** — two packages. `package:solid_annotations` (runtime dep) hosts the annotation classes (`@SolidState` and `@SolidEffect` today; `@SolidQuery`/`@SolidEnvironment` in later milestones). `package:solid_generator` (dev_dep) hosts the build_runner builder. There is no `package:solid` umbrella. Consumers add `solid_annotations` + `flutter_solidart` as runtime deps and `solid_generator` + `build_runner` as dev_deps, then import annotations and `flutter_solidart` primitives directly.
 6. **Shadowing rule (Section 5.5)** — handled by type resolution. Because Section 5.1 is type-driven, a shadowed local of a non-`SignalBase` type is never rewritten. A dedicated shadowing test case is required in M1.
 7. **`const` on the public widget constructor (Section 8.1)** — not added by the generator. Constructors round-trip verbatim from source. After the class split removes mutable `@SolidState` fields from the widget, the rewritten widget is usually const-eligible by Dart's own rules; `dart fix --apply` is the trusted lint pass that adds `const` (and removes unused imports — Section 9). The generator never emits `const` on its own.
 
@@ -697,8 +768,8 @@ Any change that alters user-observable behavior must be covered by a golden test
 This SPEC addresses the following real user-reported issues from the v1 repo:
 
 - **#3** — `@SolidEnvironment` inside an existing `State<X>` was not transformed; the class-kind handling in Section 8.2 makes this impossible to regress.
-- **#4** — untracked reads (`onPressed`) were wrapped in `SignalBuilder`, breaking compilation; Section 6 defines the untracked-context rules.
-- **#6** — `Text(text)` did not receive `.value` because the rewriter missed bare identifier reads; Section 5.1 defines the rewrite rule exhaustively.
+- **#4** — untracked reads (`onPressed`) were wrapped in `SignalBuilder`, breaking compilation; Section 6 defines the untracked-context rules. *(resolved in M3)*
+- **#6** — `Text(text)` did not receive `.value` because the rewriter missed bare identifier reads; Section 5.1 defines the rewrite rule exhaustively. *(resolved in M3)*
 - **#8** — generated `main.dart` used `SolidartConfig` without importing `flutter_solidart`; Section 9 defines the import-addition rule.
 - **#9** — hot reload required a double-save; Section 12 defines the two supported workflows: manual `r` after build_runner emits, or `dashmon` to bridge filesystem changes to Flutter's stdin automatically.
 
