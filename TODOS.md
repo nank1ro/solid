@@ -1274,3 +1274,267 @@ Widget build(BuildContext context) {
 **Supersedes:** M3-07.
 
 **Status:** DONE
+
+---
+
+## M4 — `@SolidEffect`
+
+### TODO M4-01 — Golden: simple `@SolidEffect` method with one Signal dep
+
+**Goal:** `@SolidEffect() void logCounter() { print('Counter changed: $counter'); }` on a `StatelessWidget` (next to `@SolidState() int counter = 0;`) becomes `late final logCounter = Effect((_) { print('Counter changed: ${counter.value}'); }, name: 'logCounter');` on the synthesized State class. Establishes the M4 lowering pipeline: `EffectModel`, `readSolidEffectMethod`, `emitEffectField`, and the non-getter `MethodDeclaration` branch in `_collectAnnotatedClasses`.
+
+**SPEC references:** Section 3.4, Section 4.7, Section 5.1 (identifier rewrite), Section 5.2 (string interpolation), Section 9 (import — `Effect` already on canonical list), Section 10 (dispose order).
+
+**Files to create:**
+
+- `packages/solid_generator/test/golden/inputs/m4_01_simple_effect_with_deps.dart`
+- `packages/solid_generator/test/golden/outputs/m4_01_simple_effect_with_deps.g.dart`
+- entry in `packages/solid_generator/test/integration/golden_helpers.dart` `goldenNames`
+- `packages/solid_generator/lib/src/effect_model.dart` — new model file, parallel to `getter_model.dart`. Carries `methodName`, `bodyText` (already with `.value` rewrites applied), and `annotationName`.
+
+**Files to modify:**
+
+- `packages/solid_annotations/lib/src/annotations.dart` — replace the `SolidEffect` placeholder with `@Target({TargetKind.method}) class SolidEffect { const SolidEffect({this.name}); final String? name; }`.
+- `packages/solid_generator/lib/src/annotation_reader.dart` — add `EffectModel? readSolidEffectMethod(MethodDeclaration decl, Set<String> reactiveFieldNames, String source)`; reuse `findSolidStateAnnotation` + `extractNameArgument` patterns (consider factoring a shared `findSolidAnnotation(String className, …)` helper if it tightens the code).
+- `packages/solid_generator/lib/src/signal_emitter.dart` — add `String emitEffectField(EffectModel e)` returning the `late final … = Effect((_) { … }, name: '…');` line. Extend `emitDispose`'s argument-list semantics so Effects join Signals/Computeds in the unified ordered name list.
+- `packages/solid_generator/lib/builder.dart` — extend `_AnnotatedClass` to carry `final List<EffectModel> effects;`; extend `_collectAnnotatedClasses` to walk `MethodDeclaration` members where `!member.isGetter && !member.isSetter`; pass `effects` through `_rewriteClass` to all three rewriters.
+- `packages/solid_generator/lib/src/stateless_rewriter.dart` — accept `solidEffects`; interleave Signal/Computed/Effect fields in source order; pass merged disposable-name list to `emitDispose`.
+- `packages/solid_generator/lib/src/state_class_rewriter.dart`, `packages/solid_generator/lib/src/plain_class_rewriter.dart` — for now, reject `@SolidEffect` with a `CodeGenerationError("@SolidEffect on State<X>/plain class will land in M4-08")` until M4-08 ships them.
+
+**Expected input content:**
+
+```dart
+import 'package:solid_annotations/solid_annotations.dart';
+import 'package:flutter/widgets.dart';
+
+class Counter extends StatelessWidget {
+  Counter({super.key});
+
+  @SolidState()
+  int counter = 0;
+
+  @SolidEffect()
+  void logCounter() {
+    print('Counter changed: $counter');
+  }
+
+  @override
+  Widget build(BuildContext context) => const Placeholder();
+}
+```
+
+**Expected output content:**
+
+```dart
+import 'package:solid_annotations/solid_annotations.dart';
+import 'package:flutter/widgets.dart';
+import 'package:flutter_solidart/flutter_solidart.dart';
+
+class Counter extends StatefulWidget {
+  Counter({super.key});
+
+  @override
+  State<Counter> createState() => _CounterState();
+}
+
+class _CounterState extends State<Counter> {
+  final counter = Signal<int>(0, name: 'counter');
+  late final logCounter = Effect((_) {
+    print('Counter changed: ${counter.value}');
+  }, name: 'logCounter');
+
+  @override
+  void dispose() {
+    logCounter.dispose();
+    counter.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => const Placeholder();
+}
+```
+
+**Acceptance:** `dart test --name=m4_01` passes; golden analyzes clean; dispose body calls `logCounter.dispose()` BEFORE `counter.dispose()`; the upstream `Effect` constructor signature accepted by `flutter_solidart` matches what the golden emits (verify against the package source at impl time — adjust the `(_) { … }` parameter name if the upstream API uses something else).
+
+**Dependencies:** M2-01 (body-rewrite pipeline + `MethodDeclaration` collection path), M2-01b (block-body precedent).
+
+**Status:** TODO
+
+---
+
+### TODO M4-02 — Golden: `@SolidEffect` co-exists with `@SolidState` field + getter
+
+**Goal:** A class with all three annotated shapes — `@SolidState()` field, `@SolidState()` getter, `@SolidEffect()` method — produces a State class with Signal + Computed + Effect interleaved in source order, and a `dispose()` body in reverse-declaration order. Validates the unified ordered-name list under all three lowered shapes.
+
+**SPEC references:** Section 4.1, Section 4.5, Section 4.7, Section 10.
+
+**Files to create:**
+
+- `packages/solid_generator/test/golden/inputs/m4_02_effect_with_signal_and_computed.dart`
+- `packages/solid_generator/test/golden/outputs/m4_02_effect_with_signal_and_computed.g.dart`
+- entry in `golden_helpers.dart` `goldenNames`
+
+**Expected input content:** A `StatelessWidget` with (in source order) `@SolidState() int counter = 0;`, `@SolidState() int get doubleCounter => counter * 2;`, `@SolidEffect() void logBoth() { print('$counter / $doubleCounter'); }`.
+
+**Expected output content:** State class declares `counter` (Signal), then `doubleCounter` (late final Computed), then `logBoth` (late final Effect) — all in source order. `dispose()` body calls `logBoth.dispose()`, then `doubleCounter.dispose()`, then `counter.dispose()`, then `super.dispose()` — reverse declaration order per SPEC Section 10.
+
+**Expected implementation change:** None beyond M4-01 + M2-01 — this is a regression fence on the unified ordering rule, validating that the M4-01-extended `emitDispose` argument list correctly interleaves all three shapes.
+
+**Acceptance:** `dart test --name=m4_02` passes; golden's `dispose()` body has Effect → Computed → Signal → super order verbatim.
+
+**Dependencies:** M4-01.
+
+**Status:** TODO
+
+---
+
+### TODO M4-03 — Golden: `@SolidEffect` block-body with multi-statement and shadowing
+
+**Goal:** A `@SolidEffect` method with a block body that contains multiple statements and a local variable that shadows a reactive-field name produces an Effect whose body preserves the block verbatim with reactive reads rewritten and shadowed locals untouched. Validates that Sections 5.1 and 5.5 apply uniformly inside Effect bodies.
+
+**SPEC references:** Section 4.7, Section 5.1, Section 5.5.
+
+**Files to create:**
+
+- `packages/solid_generator/test/golden/inputs/m4_03_effect_block_body_shadowing.dart`
+- `packages/solid_generator/test/golden/outputs/m4_03_effect_block_body_shadowing.g.dart`
+- entry in `golden_helpers.dart` `goldenNames`
+
+**Expected input content:** Class with `@SolidState() int counter = 0;` plus `@SolidEffect() void logCounter() { final counter = 'shadowed'; final c = counter; print(c); print('field: $counter'); }`. The local `counter` shadows the field for the first two statements but the third statement re-references the local — and there's NO outer field read inside the block (the third statement is inside the same scope).
+
+**Expected output content:** The Effect body has the local declarations preserved; the local `counter` reads stay as `counter` (no `.value`); there are no outer reactive reads at all (so the body does not subscribe to anything). This means the Effect would have ZERO reactive deps — therefore this case must instead exercise mixed shadowing: the outer scope reads `counter` (rewritten to `counter.value`) BEFORE the inner shadow scope rebinds it (stays as `counter`). Concretely: `void logCounter() { print('outer: $counter'); { final counter = 'shadowed'; print('inner: $counter'); } }`.
+
+**Expected implementation change:** None beyond M4-01 + M2-01b — this is a regression fence on the shadowing rule applied to Effect bodies.
+
+**Acceptance:** `dart test --name=m4_03` passes; golden analyzes clean; outer `$counter` becomes `${counter.value}`; inner `$counter` stays as `$counter`; the Effect has at least one reactive dep (the outer read), so M4-05's zero-dep rejection does not fire.
+
+**Dependencies:** M4-01.
+
+**Status:** TODO
+
+---
+
+### TODO M4-04 — Rejection: invalid `@SolidEffect` targets
+
+**Goal:** The generator rejects `@SolidEffect` on every invalid target enumerated in SPEC Section 3.4 with a clear, per-case error message that identifies the offending declaration. Mirror of M1-14.
+
+**SPEC references:** Section 3.4 "Invalid targets".
+
+**Files to create:**
+
+- `packages/solid_generator/test/rejections/m4_04_invalid_effect_targets_test.dart` — parametric test over the seven cases below. Each case is a minimal source snippet that places `@SolidEffect` on the invalid target; each asserts the builder raises an error whose message contains the SPEC description of the case.
+- One input file per case under `packages/solid_generator/test/golden/inputs/`:
+  - `m4_04_parameterized.dart` — `@SolidEffect() void doThing(int x) {}`
+  - `m4_04_non_void_return.dart` — `@SolidEffect() int compute() => 0;`
+  - `m4_04_static.dart` — `@SolidEffect() static void doThing() {}`
+  - `m4_04_abstract.dart` — `@SolidEffect() void doThing();` on an abstract class member.
+  - `m4_04_getter.dart` — `@SolidEffect() int get x => 0;`
+  - `m4_04_setter.dart` — `@SolidEffect() set x(int v) {}`
+  - `m4_04_top_level.dart` — top-level `@SolidEffect() void doThing() {}`
+  - `m4_04_field.dart` — `@SolidEffect() int counter = 0;` (field, not method)
+
+**Expected implementation change:** Extend `target_validator.dart` with a parallel `validateSolidEffectTargets` (or a unified validator that branches on which annotation is present). The check runs before transformation. Any invalid target produces a `ValidationError` with a SPEC-quoted message that names the target kind and the enclosing class + member identifier.
+
+**Acceptance:** The parametric test passes; every case produces a distinct error message that contains the SPEC description of the invalid-target category from Section 3.4.
+
+**Dependencies:** M4-01.
+
+**Status:** TODO
+
+---
+
+### TODO M4-05 — Rejection: zero reactive deps in Effect body
+
+**Goal:** `@SolidEffect() void doThing() { print('no signals here'); }` must be rejected at build time with the SPEC-defined error: `"effect 'doThing' has no reactive dependencies"`. An Effect with no deps is a one-shot function call; the user should call it explicitly instead. Mirror of M2-02.
+
+**SPEC references:** Section 3.4 "Reactive-deps requirement", Section 4.7.
+
+**Files to create:**
+
+- `packages/solid_generator/test/golden/inputs/m4_05_effect_no_deps_rejected.dart` — class with `@SolidEffect() void doThing() { print('hello'); }` and no `@SolidState` fields.
+- `packages/solid_generator/test/rejections/m4_05_effect_no_deps_test.dart` — asserts the builder raises an error containing `"effect 'doThing' has no reactive dependencies"`.
+
+**Expected implementation change:** After visiting an Effect body, check whether any identifier resolved to `SignalBase<T>`. If none, emit the SPEC-defined error. Reuses the same pattern as M2-02's zero-dep Computed check; the only difference is the error message wording (`"effect"` vs `"getter"`).
+
+**Acceptance:** Rejection test passes; error message text matches SPEC Section 3.4 quote exactly.
+
+**Dependencies:** M4-01.
+
+**Status:** TODO
+
+---
+
+### TODO M4-06 — Migration: remove `@SolidEffect` from reserved-annotation list
+
+**Goal:** Once M4-01 through M4-05 are green and `@SolidEffect` is fully transformed, the reserved-annotation rejection must stop firing on it. Remove `'SolidEffect'` from `_reservedAnnotations` and migrate the M1-15 `m1_15_effect` case to a golden (or delete it if M4-01 already covers the equivalent shape).
+
+**SPEC references:** Section 3.2 (reserved-annotation list, post-M4 trim — already trimmed in the M4 design seed PR), Section 13 (deferred features).
+
+**Files to modify:**
+
+- `packages/solid_generator/lib/src/reserved_annotation_validator.dart` — remove `'SolidEffect'` from the `_reservedAnnotations` map at lines 9-13.
+- `packages/solid_generator/test/rejections/m1_15_non_m1_annotations_test.dart` — delete the `m1_15_effect` case at lines 8-13 (or whatever the current line range is after M4-01 lands).
+- `packages/solid_generator/test/golden/inputs/m1_15_effect.dart` — delete (no longer a rejection input).
+
+**Expected implementation change:** A one-line trim in the validator; a small test deletion; an input-file deletion. No new code paths.
+
+**Acceptance:** `dart test packages/solid_generator/` passes; the remaining `m1_15_query` and `m1_15_environment` rejection cases still fire; M4-01 through M4-05 all still pass.
+
+**Dependencies:** M4-01, M4-02, M4-03, M4-04, M4-05.
+
+**Status:** TODO
+
+---
+
+### TODO M4-07 — Widget test: Effect fires on each tap
+
+**Goal:** With an `@SolidEffect` method that increments a separate counter (or appends to a list-typed Signal), tapping the FAB three times causes the Effect body to run three times. The test reads the recorded values and asserts the count.
+
+**SPEC references:** Section 4.7, Section 10 (Effect disposal on tear-down).
+
+**Files to create:**
+
+- `example/test/effect_widget_test.dart` — `testWidgets` test that:
+  1. Pumps a widget with `@SolidState() int counter = 0;`, `@SolidState() List<int> history = [];`, and `@SolidEffect() void recordHistory() { history.value = [...history.value, counter]; }`. (Or a simpler shape using a non-Solid `List` field that the Effect mutates and the test inspects via a `GlobalKey`.)
+  2. Taps the FAB three times.
+  3. Asserts the Effect body ran three times by checking the recorded history.
+
+**Expected implementation change:** None in the generator. The test exercises the runtime contract (Effect fires on dep change) end-to-end through the M4-01 lowered output.
+
+**Acceptance:** `flutter test example/` passes; the recorded history has exactly three entries after three taps; on Navigator pop, the Effect's `dispose()` is invoked (assert via a `signal.onDispose` hook on a wrapper Signal, parallel to M1-11).
+
+**Dependencies:** M4-01, M4-06 (Effect must no longer be reserved).
+
+**Status:** TODO
+
+---
+
+### TODO M4-08 — Golden: `@SolidEffect` on existing `State<X>` class
+
+**Goal:** A `StatefulWidget` whose existing `State<X>` subclass hosts `@SolidEffect` methods is transformed in-place, not re-wrapped. Custom `initState` / `didUpdateWidget` overrides are preserved untouched; if an existing `dispose()` body is present, Effect disposals are prepended and the rest of the body is left alone. Mirror of M1-07. Removes the `state_class_rewriter.dart` / `plain_class_rewriter.dart` guards that M4-01 added.
+
+**SPEC references:** Section 4.7, Section 8.2, Section 8.3, Section 10.
+
+**Files to create:**
+
+- `packages/solid_generator/test/golden/inputs/m4_08_effect_on_state_class.dart`
+- `packages/solid_generator/test/golden/outputs/m4_08_effect_on_state_class.g.dart`
+- `packages/solid_generator/test/golden/inputs/m4_08_effect_on_plain_class.dart`
+- `packages/solid_generator/test/golden/outputs/m4_08_effect_on_plain_class.g.dart`
+- entries in `golden_helpers.dart` `goldenNames`
+
+**Files to modify:**
+
+- `packages/solid_generator/lib/src/state_class_rewriter.dart` — remove the M4-01 reject guard; route Effects through the same in-place lowering used by Signals/Computeds.
+- `packages/solid_generator/lib/src/plain_class_rewriter.dart` — same.
+
+**Expected implementation change:** Both rewriters interleave Effect emission with Signal/Computed emission per source order, and append Effect dispose calls to the unified ordered name list. The merge-into-existing-`dispose()` logic from M1-07 already handles the prepend-then-keep-existing-body shape.
+
+**Acceptance:** `dart test --name=m4_08` passes; both goldens analyze clean; `initState` and `didUpdateWidget` bodies are byte-identical between input and output; the existing `dispose()` body has Effect/Computed/Signal disposal calls prepended in reverse-declaration order with nothing else added or removed.
+
+**Dependencies:** M4-01, M1-07.
+
+**Status:** TODO
+
+---
