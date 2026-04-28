@@ -1,10 +1,11 @@
 import 'package:analyzer/dart/ast/ast.dart';
+import 'package:solid_generator/src/effect_model.dart';
 import 'package:solid_generator/src/field_model.dart';
 import 'package:solid_generator/src/getter_model.dart';
 import 'package:solid_generator/src/transformation_error.dart';
 import 'package:solid_generator/src/value_rewriter.dart';
 
-/// Name of the annotation class this reader looks for.
+/// Name of the `@SolidState` annotation class.
 ///
 /// Matching is textual on the unresolved AST (see SPEC Section 5.4 — type
 /// resolution is required for `.value` rewriting, but annotation detection is
@@ -15,13 +16,17 @@ import 'package:solid_generator/src/value_rewriter.dart';
 /// rejections) can match the same identifier on non-field declarations.
 const String solidStateName = 'SolidState';
 
+/// Name of the `@SolidEffect` annotation class. Same matching contract as
+/// [solidStateName] (textual on unresolved AST).
+const String solidEffectName = 'SolidEffect';
+
 /// Reads a `@SolidState(...)` annotation on [decl] and returns a [FieldModel].
 ///
 /// Returns `null` if [decl] carries no `@SolidState` annotation. The raw
 /// [source] is passed in so each string member of the returned [FieldModel]
 /// can be extracted verbatim via `source.substring(offset, end)`.
 FieldModel? readSolidStateField(FieldDeclaration decl, String source) {
-  final annotation = findSolidStateAnnotation(decl.metadata);
+  final annotation = findAnnotationByName(solidStateName, decl.metadata);
   if (annotation == null) return null;
 
   final varList = decl.fields;
@@ -64,7 +69,7 @@ GetterModel? readSolidStateGetter(
   String source,
 ) {
   if (!decl.isGetter || decl.isStatic) return null;
-  final annotation = findSolidStateAnnotation(decl.metadata);
+  final annotation = findAnnotationByName(solidStateName, decl.metadata);
   if (annotation == null) return null;
 
   final returnType = decl.returnType;
@@ -74,32 +79,18 @@ GetterModel? readSolidStateGetter(
 
   final body = decl.body;
   final getterName = decl.name.lexeme;
-  final String bodyText;
-  final bool isBlockBody;
-  if (body is ExpressionFunctionBody) {
-    bodyText = _rewriteGetterBody(
-      body.expression,
-      reactiveFields,
-      source,
-      getterName,
-    );
-    isBlockBody = false;
-  } else if (body is BlockFunctionBody) {
-    bodyText = _rewriteGetterBody(
-      body.block,
-      reactiveFields,
-      source,
-      getterName,
-    );
-    isBlockBody = true;
-  } else {
-    throw CodeGenerationError(
-      '@SolidState getter must have an expression body (=> ...) or a '
-      'block body ({ ... }); abstract and native bodies are not supported',
-      null,
-      getterName,
-    );
-  }
+  final (bodyText, isBlockBody) = _readReactiveBody(
+    body,
+    reactiveFields,
+    source,
+    memberName: getterName,
+    emptyDepsError:
+        "getter '$getterName' has no reactive dependencies; "
+        'use `final` or a plain getter instead of `@SolidState`',
+    unsupportedBodyError:
+        '@SolidState getter must have an expression body (=> ...) or a '
+        'block body ({ ... }); abstract and native bodies are not supported',
+  );
 
   return GetterModel(
     getterName: getterName,
@@ -110,46 +101,104 @@ GetterModel? readSolidStateGetter(
   );
 }
 
-/// Returns the source range covered by [node], with SPEC §5.1 reactive-read
-/// rewrites applied to every identifier in [reactiveFields]. Used for both
-/// the expression-body (`Expression`) and block-body (`Block`) getter
-/// shapes; the resulting text is spliced into the `Computed<T>(() ...)`
-/// closure by the emitter. `trackedReadOffsets` are intentionally ignored —
-/// SignalBuilder placement is a `build()` concern, not a `Computed` body
-/// concern.
+/// Returns the rewritten body text and whether it came from a block body.
+/// Shared between `readSolidStateGetter` and `readSolidEffectMethod`: both
+/// readers discriminate `ExpressionFunctionBody` vs `BlockFunctionBody`, run
+/// the SPEC §5.1 `.value` rewrite, and reject zero-deps and abstract/native
+/// bodies. Only the error wording differs (SPEC §4.5 vs §3.4) — pass it in.
 ///
-/// Throws [CodeGenerationError] for SPEC §4.5: a `Computed` with zero
-/// reactive dependencies would never invalidate, so an empty edit set is
-/// surfaced as a build error instead of a useless `Computed`.
-String _rewriteGetterBody(
-  AstNode node,
+/// `trackedReadOffsets` are intentionally ignored — SignalBuilder placement
+/// is a `build()` concern, not a `Computed`/`Effect` body concern.
+(String bodyText, bool isBlockBody) _readReactiveBody(
+  FunctionBody body,
   Set<String> reactiveFields,
-  String source,
-  String getterName,
-) {
+  String source, {
+  required String memberName,
+  required String emptyDepsError,
+  required String unsupportedBodyError,
+}) {
+  final AstNode node;
+  final bool isBlockBody;
+  if (body is ExpressionFunctionBody) {
+    node = body.expression;
+    isBlockBody = false;
+  } else if (body is BlockFunctionBody) {
+    node = body.block;
+    isBlockBody = true;
+  } else {
+    throw CodeGenerationError(unsupportedBodyError, null, memberName);
+  }
   final result = collectValueEdits(node, reactiveFields, source);
   if (result.edits.isEmpty) {
-    throw CodeGenerationError(
-      "getter '$getterName' has no reactive dependencies; "
-      'use `final` or a plain getter instead of `@SolidState`',
-      null,
-      getterName,
-    );
+    throw CodeGenerationError(emptyDepsError, null, memberName);
   }
-  return applyEditsToRange(
+  final bodyText = applyEditsToRange(
     source.substring(node.offset, node.end),
     result.edits,
     node.offset,
   );
+  return (bodyText, isBlockBody);
 }
 
-/// Returns the first `@SolidState(...)` annotation in [metadata], or `null`.
+/// Reads a `@SolidEffect(...)` annotation on the method [decl] and returns an
+/// [EffectModel]. Returns `null` when [decl] is not an `@SolidEffect`-bearing
+/// instance method; getters, setters, and static methods are filtered out
+/// here defensively (the M4-04 target validator rejects them with a clearer
+/// error before this reader runs).
 ///
-/// Package-public so the target validator (SPEC §3.1 rejections) can reuse
-/// the same matcher on `MethodDeclaration` and `FunctionDeclaration` metadata.
-Annotation? findSolidStateAnnotation(NodeList<Annotation> metadata) {
+/// The method body is rewritten in place per SPEC §5.1: any reference to a
+/// name in [reactiveFields] receives `.value`. Both expression-body
+/// (`void m() => <expr>;`) and block-body (`void m() { ... }`) shapes are
+/// supported per SPEC §4.7. Other body kinds (abstract / native) are
+/// rejected with a [CodeGenerationError].
+///
+/// SPEC §3.4 reactive-deps requirement: an Effect with zero reactive
+/// dependencies is rejected with the SPEC-defined message
+/// `"effect '<name>' has no reactive dependencies"`. M4-05 pins this
+/// behavior with a dedicated rejection test.
+EffectModel? readSolidEffectMethod(
+  MethodDeclaration decl,
+  Set<String> reactiveFields,
+  String source,
+) {
+  if (decl.isGetter || decl.isSetter || decl.isStatic) return null;
+  final annotation = findAnnotationByName(solidEffectName, decl.metadata);
+  if (annotation == null) return null;
+
+  final methodName = decl.name.lexeme;
+  final (bodyText, isBlockBody) = _readReactiveBody(
+    decl.body,
+    reactiveFields,
+    source,
+    memberName: methodName,
+    emptyDepsError:
+        "effect '$methodName' has no reactive dependencies; "
+        'use a regular method or call it once explicitly instead of '
+        '`@SolidEffect`',
+    unsupportedBodyError:
+        '@SolidEffect method must have an expression body (=> ...) or a '
+        'block body ({ ... }); abstract and native bodies are not supported',
+  );
+
+  return EffectModel(
+    methodName: methodName,
+    bodyText: bodyText,
+    isBlockBody: isBlockBody,
+    annotationName: extractNameArgument(annotation),
+  );
+}
+
+/// Returns the first `@<className>(...)` annotation in [metadata], or `null`.
+///
+/// Package-public so the target validator (SPEC §3.1 / §3.4 rejections) can
+/// reuse the same matcher on every declaration kind. Use the [solidStateName]
+/// or [solidEffectName] constants for [className] rather than bare strings.
+Annotation? findAnnotationByName(
+  String className,
+  NodeList<Annotation> metadata,
+) {
   for (final ann in metadata) {
-    if (ann.name.name == solidStateName) return ann;
+    if (ann.name.name == className) return ann;
   }
   return null;
 }

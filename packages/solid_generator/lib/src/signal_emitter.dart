@@ -1,3 +1,4 @@
+import 'package:solid_generator/src/effect_model.dart';
 import 'package:solid_generator/src/field_model.dart';
 import 'package:solid_generator/src/getter_model.dart';
 
@@ -54,14 +55,30 @@ String emitComputedField(GetterModel g) {
   return '  late final ${g.getterName} = $ctor;';
 }
 
+/// Emits one `late final <name> = Effect(<closure>, name: '<debug>');` line
+/// per SPEC §4.7. Mirrors [emitComputedField] (same closure shape, same
+/// `late final` rationale, same body-text contract); the only differences
+/// are the absent type parameter and the `Effect` ctor.
+///
+/// `Effect(...)` takes a zero-param `void Function()` callback per the
+/// upstream `flutter_solidart` API and returns an `Effect` object whose
+/// `.dispose()` joins the unified disposal list emitted by [emitDispose].
+String emitEffectField(EffectModel e) {
+  final debugName = e.annotationName ?? e.methodName;
+  final closure = e.isBlockBody ? '() ${e.bodyText}' : '() => ${e.bodyText}';
+  final ctor = "Effect($closure, name: '$debugName')";
+  return '  late final ${e.methodName} = $ctor;';
+}
+
 /// Emits a `dispose()` method disposing every name in
 /// [disposeNamesInDeclarationOrder] in **reverse declaration order** (SPEC
 /// §10).
 ///
 /// The list is the unified, source-ordered sequence of every reactive
-/// declaration (Signal field + Computed getter) on the owning class.
-/// Reverse-iterating it puts dependents (a `Computed` declared after the
-/// `Signal`s it reads) ahead of their dependencies in the dispose body.
+/// declaration (Signal field + Computed getter + Effect method) on the owning
+/// class. Reverse-iterating it puts dependents (an `Effect` or `Computed`
+/// declared after the `Signal`s it reads) ahead of their dependencies in the
+/// dispose body.
 ///
 /// [inheritsDispose] is `true` when the owning class's supertype chain
 /// contains a `dispose()` method (e.g. `State<T>`, `ChangeNotifier`); the

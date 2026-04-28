@@ -1359,7 +1359,9 @@ class _CounterState extends State<Counter> {
 
 **Dependencies:** M2-01 (body-rewrite pipeline + `MethodDeclaration` collection path), M2-01b (block-body precedent).
 
-**Status:** TODO
+**Implementation note:** M4-01 also pulled in M4-06's three substeps because `validateReservedAnnotations` runs before the lowering pipeline — without removing `'SolidEffect'` from `_reservedAnnotations` and migrating the `m1_15_effect` rejection case in the same PR, the M4-01 golden could never go green. The bootstrap deviation is documented inline in `reserved_annotation_validator.dart` and in the M4-06 entry below. Zero-deps Effect rejection (SPEC §3.4 / TODOS M4-05) also landed here in `_rewriteEffectBody` so M4-05 is purely a regression-test PR.
+
+**Status:** DONE
 
 ---
 
@@ -1483,7 +1485,9 @@ class _CounterState extends State<Counter> {
 
 **Dependencies:** M4-01, M4-02, M4-03, M4-04, M4-05.
 
-**Status:** TODO
+**Implementation note:** All three substeps were pulled into M4-01 because `validateReservedAnnotations` (`builder.dart`) runs before `_collectAnnotatedClasses`; without trimming the reserved list and migrating the `m1_15_effect` case in the same PR, the M4-01 golden test could never go green. The dependency arrow above is therefore retroactive — M4-06 shipped *with* M4-01.
+
+**Status:** DONE
 
 ---
 

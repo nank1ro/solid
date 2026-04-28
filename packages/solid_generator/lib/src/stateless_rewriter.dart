@@ -1,15 +1,17 @@
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:solid_generator/src/build_rewriter.dart';
+import 'package:solid_generator/src/effect_model.dart';
 import 'package:solid_generator/src/field_model.dart';
 import 'package:solid_generator/src/getter_model.dart';
 import 'package:solid_generator/src/import_rewriter.dart';
 import 'package:solid_generator/src/signal_emitter.dart';
 import 'package:solid_generator/src/transformation_error.dart';
 
-/// Rewrites a `StatelessWidget` class containing `@SolidState` fields and/or
-/// `@SolidState` getters as a `StatefulWidget` + `State<X>` pair. See SPEC
-/// §8.1 for the full field-partition and constructor-preservation contract;
-/// SPEC §4.5 for the getter→`Computed` lowering.
+/// Rewrites a `StatelessWidget` class containing `@SolidState` fields,
+/// `@SolidState` getters, and/or `@SolidEffect` methods as a
+/// `StatefulWidget` + `State<X>` pair. See SPEC §8.1 for the full
+/// field-partition and constructor-preservation contract; SPEC §4.5 for the
+/// getter→`Computed` lowering; SPEC §4.7 for the method→`Effect` lowering.
 ///
 /// The emitted string is syntactically valid Dart but is not guaranteed to be
 /// pretty-printed — run through `DartFormatter` before writing.
@@ -17,6 +19,7 @@ RewriteResult rewriteStatelessWidget(
   ClassDeclaration classDecl,
   List<FieldModel> solidFields,
   List<GetterModel> solidGetters,
+  List<EffectModel> solidEffects,
   String source,
 ) {
   final className = classDecl.name.lexeme;
@@ -45,6 +48,7 @@ RewriteResult rewriteStatelessWidget(
     classDecl,
     solidFields,
     solidGetters,
+    solidEffects,
   );
 
   final widgetClass = _emitWidgetClass(
@@ -64,6 +68,7 @@ RewriteResult rewriteStatelessWidget(
 
   final solidartNames = <String>{'Signal', 'SignalBuilder'};
   if (solidGetters.isNotEmpty) solidartNames.add('Computed');
+  if (solidEffects.isNotEmpty) solidartNames.add('Effect');
 
   return (
     text: '$widgetClass\n\n$stateClass\n',
@@ -72,20 +77,22 @@ RewriteResult rewriteStatelessWidget(
 }
 
 /// Returns the source-ordered emission of every reactive declaration on
-/// [classDecl] (Signal field + Computed getter) as a single 2-space-indented
-/// block, plus the declaration-order list of dispose names that pairs with
-/// it. Source order — not field-then-getter — is the contract a `Computed`
-/// depends on: it must reference fields declared before it, so the emitted
-/// `late final` Computed must appear after the `Signal`s it reads in the
-/// rewritten State class.
+/// [classDecl] (Signal field + Computed getter + Effect method) as a single
+/// 2-space-indented block, plus the declaration-order list of dispose names
+/// that pairs with it. Source order is the contract that `Computed` and
+/// `Effect` depend on: each must reference declarations defined before it,
+/// so the emitted `late final` lines must appear after the declarations they
+/// read in the rewritten State class.
 ({String fieldsText, List<String> disposeNamesInDeclarationOrder})
 _emitReactiveBlock(
   ClassDeclaration classDecl,
   List<FieldModel> solidFields,
   List<GetterModel> solidGetters,
+  List<EffectModel> solidEffects,
 ) {
   final fieldByName = {for (final f in solidFields) f.fieldName: f};
   final getterByName = {for (final g in solidGetters) g.getterName: g};
+  final effectByName = {for (final e in solidEffects) e.methodName: e};
   final lines = <String>[];
   final disposeNames = <String>[];
 
@@ -99,12 +106,20 @@ _emitReactiveBlock(
       }
       continue;
     }
-    if (member is MethodDeclaration && member.isGetter) {
+    if (member is MethodDeclaration) {
       final name = member.name.lexeme;
-      final g = getterByName[name];
-      if (g != null) {
-        lines.add(emitComputedField(g));
-        disposeNames.add(g.getterName);
+      if (member.isGetter) {
+        final g = getterByName[name];
+        if (g != null) {
+          lines.add(emitComputedField(g));
+          disposeNames.add(g.getterName);
+        }
+      } else if (!member.isSetter) {
+        final e = effectByName[name];
+        if (e != null) {
+          lines.add(emitEffectField(e));
+          disposeNames.add(e.methodName);
+        }
       }
     }
   }

@@ -1,5 +1,6 @@
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:solid_generator/src/build_rewriter.dart';
+import 'package:solid_generator/src/effect_model.dart';
 import 'package:solid_generator/src/field_model.dart';
 import 'package:solid_generator/src/getter_model.dart';
 import 'package:solid_generator/src/import_rewriter.dart';
@@ -26,6 +27,7 @@ RewriteResult rewriteStateClass(
   ClassDeclaration classDecl,
   List<FieldModel> solidFields,
   List<GetterModel> solidGetters,
+  List<EffectModel> solidEffects,
   String source,
 ) {
   final className = classDecl.name.lexeme;
@@ -35,6 +37,14 @@ RewriteResult rewriteStateClass(
   // pass isn't silently undone here.
   rejectIfGettersNotYetSupported(
     solidGetters,
+    'existing State<X> subclass',
+    className,
+  );
+  // M4-01 ships method→Effect for `StatelessWidget` only; M4-08 lifts this
+  // guard for in-place State<X> lowering. Reject here so the M4-04 valid-
+  // target pass isn't silently undone.
+  rejectIfEffectsNotYetSupported(
+    solidEffects,
     'existing State<X> subclass',
     className,
   );

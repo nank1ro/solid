@@ -42,7 +42,7 @@ Never _reject(String kind, String location) {
 /// `static`. Instance non-final non-const non-static fields fall through
 /// silently — they are the canonical SPEC 3.1 valid target.
 void _validateField(FieldDeclaration field, String className) {
-  if (findSolidStateAnnotation(field.metadata) == null) return;
+  if (findAnnotationByName(solidStateName, field.metadata) == null) return;
   final varList = field.fields;
   final fieldName = varList.variables.first.name.lexeme;
   final location = '$className.$fieldName';
@@ -57,7 +57,7 @@ void _validateField(FieldDeclaration field, String className) {
 /// Instance getters fall through — they are valid SPEC 3.1 targets and M2
 /// will emit `Computed`.
 void _validateMethod(MethodDeclaration method, String className) {
-  if (findSolidStateAnnotation(method.metadata) == null) return;
+  if (findAnnotationByName(solidStateName, method.metadata) == null) return;
   final location = '$className.${method.name.lexeme}';
   if (method.isSetter) _reject('setter', location);
   if (method.isGetter && method.isStatic) _reject('static getter', location);
@@ -70,11 +70,11 @@ void _validateMethod(MethodDeclaration method, String className) {
 /// reusing the SETTER / METHOD codes).
 void _validateTopLevel(CompilationUnitMember decl) {
   if (decl is TopLevelVariableDeclaration &&
-      findSolidStateAnnotation(decl.metadata) != null) {
+      findAnnotationByName(solidStateName, decl.metadata) != null) {
     _reject('top-level variable', decl.variables.variables.first.name.lexeme);
   }
   if (decl is FunctionDeclaration &&
-      findSolidStateAnnotation(decl.metadata) != null) {
+      findAnnotationByName(solidStateName, decl.metadata) != null) {
     final name = decl.name.lexeme;
     if (decl.isGetter) _reject('top-level getter', name);
     if (decl.isSetter) _reject('setter', name);

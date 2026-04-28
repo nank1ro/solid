@@ -1,17 +1,12 @@
 // Rejection suite for M1-15: reserved annotations from SPEC §3.2 + §13.
-// Each case asserts that placing `@SolidEffect`, `@SolidQuery`, or
-// `@SolidEnvironment` anywhere in a source file produces a build-time error
-// quoting the SPEC §3.2 phrase verbatim.
+// Each case asserts that placing `@SolidQuery` or `@SolidEnvironment`
+// anywhere in a source file produces a build-time error quoting the SPEC
+// §3.2 phrase verbatim. `@SolidEffect` shipped in M4 and is no longer
+// reserved (M4-06 / pulled-into-M4-01).
 
 import '../integration/golden_helpers.dart';
 
 const List<({String name, String errorContains})> _cases = [
-  (
-    name: 'm1_15_effect',
-    errorContains:
-        '@SolidEffect is not yet implemented; '
-        'scheduled for a later v2 milestone',
-  ),
   (
     name: 'm1_15_query',
     errorContains:
