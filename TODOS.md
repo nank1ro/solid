@@ -1101,7 +1101,7 @@ late final summary = Computed<String>(() {
 
 ---
 
-### TODO M3-06 — Golden: string interpolation
+### DONE M3-06 — Golden: string interpolation
 
 **Goal:** `'$counter'` becomes `'${counter.value}'`.
 
@@ -1119,7 +1119,7 @@ late final summary = Computed<String>(() {
 
 **Dependencies:** M1-05.
 
-**Status:** TODO
+**Status:** DONE
 
 ---
 
