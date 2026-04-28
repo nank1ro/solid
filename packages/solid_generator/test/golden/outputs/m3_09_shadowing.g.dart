@@ -22,8 +22,8 @@ class _ShadowProbeState extends State<ShadowProbe> {
   Widget build(BuildContext context) {
     return Builder(
       builder: (context) {
-        final counter = 'local';
-        return Text(counter);
+        const counter = 'local';
+        return const Text(counter);
       },
     );
   }
