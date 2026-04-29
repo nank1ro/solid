@@ -1555,26 +1555,26 @@ class _CounterState extends State<Counter> {
 
 ## M5 — `@SolidQuery`
 
-### TODO M5-01 — Golden: simple `@SolidQuery` Future-method on `StatelessWidget`
+### TODO M5-01 — Golden: simple `@SolidQuery` Future-method on `StatelessWidget` (default lazy)
 
-**Goal:** `@SolidQuery() Future<int> fetchCount() async => 7;` on a `StatelessWidget` becomes `late final fetchCount = Resource<int>(() async => 7, name: 'fetchCount');` on the synthesized State class. Establishes the M5 lowering pipeline: `QueryModel`, `readSolidQueryMethod`, `emitResourceField` (Future branch only), and the non-getter `MethodDeclaration` branch in `_collectAnnotatedClasses` keyed on `Future<T>` return type. Also performs the M4-06-style migration: removes `'SolidQuery'` from `_reservedAnnotations` and migrates the `m1_15_query` rejection case to a positive golden (pulled-into-M5-01 like M4-06 was pulled-into-M4-01, because `validateReservedAnnotations` runs before `_collectAnnotatedClasses`).
+**Goal:** `@SolidQuery() Future<int> fetchCount() async => 7;` on a `StatelessWidget` becomes `late final fetchCount = Resource<int>(() async => 7, name: 'fetchCount');` on the synthesized State class — `late final` only, NOT materialized in `initState()`. SPEC §4.8 "lazy by default": the field stays uninitialized until first consumer read (typically a `SignalBuilder`-wrapped `.state.when(...)` chain in `build`). Establishes the M5 lowering pipeline: `QueryModel`, `readSolidQueryMethod`, `emitResourceField` (Future branch only), and the non-getter `MethodDeclaration` branch in `_collectAnnotatedClasses` keyed on `Future<T>` return type. Also performs the M4-06-style migration: removes `'SolidQuery'` from `_reservedAnnotations` and migrates the `m1_15_query` rejection case to a positive golden (pulled-into-M5-01 like M4-06 was pulled-into-M4-01, because `validateReservedAnnotations` runs before `_collectAnnotatedClasses`).
 
-**SPEC references:** Section 3.5, Section 4.8, Section 5.1 (identifier rewrite, `.state` accessor for Resource), Section 9 (import — `Resource` already on canonical list), Section 10 (dispose order).
+**SPEC references:** Section 3.5, Section 4.8 (lazy-by-default rule), Section 5.1 (identifier rewrite, `.state` accessor for Resource), Section 9 (import — `Resource` already on canonical list), Section 10 (dispose order).
 
 **Files to create:**
 
 - `packages/solid_generator/test/golden/inputs/m5_01_simple_query_with_future.dart`
 - `packages/solid_generator/test/golden/outputs/m5_01_simple_query_with_future.g.dart`
 - entry in `packages/solid_generator/test/integration/golden_helpers.dart` `goldenNames`
-- `packages/solid_generator/lib/src/query_model.dart` — new model file, parallel to `effect_model.dart`. Carries `methodName`, `bodyText` (already with `.value` / `.state` rewrites applied), `innerTypeText` (the `T` peeled from `Future<T>`), `isStream` (false in M5-01; reserved for M5-02), and `annotationName`.
+- `packages/solid_generator/lib/src/query_model.dart` — new model file, parallel to `effect_model.dart`. Carries `methodName`, `bodyText` (already with `.value` / `.state` rewrites applied), `innerTypeText` (the `T` peeled from `Future<T>`), `isStream` (false in M5-01; reserved for M5-02), `lazy` (defaults to `true`; the `lazy: false` opt-in lands in M5-10), and `annotationName`.
 
 **Files to modify:**
 
-- `packages/solid_annotations/lib/src/annotations.dart` — replace the `SolidQuery` placeholder with `@Target({TargetKind.method}) class SolidQuery { const SolidQuery({this.name}); final String? name; }`.
-- `packages/solid_generator/lib/src/annotation_reader.dart` — add `QueryModel? readSolidQueryMethod(MethodDeclaration decl, Set<String> reactiveFieldNames, String source)`; reuse `findSolidStateAnnotation` / `extractNameArgument` patterns. Peel `Future<T>` from `decl.returnType` to produce `innerTypeText`. Critically, this reader does NOT call the zero-deps check — a query body with no reactive reads is valid (SPEC §3.5 "No reactive-deps requirement").
-- `packages/solid_generator/lib/src/signal_emitter.dart` — add `String emitResourceField(QueryModel q)` returning the `late final … = Resource<T>(() async => …, name: '…');` line for the Future form. Extend `emitDispose`'s argument-list semantics so Resources join Signals/Computeds/Effects in the unified ordered name list. Extend `emitInitState(materializedNames)` to accept query names alongside effect names.
+- `packages/solid_annotations/lib/src/annotations.dart` — replace the `SolidQuery` placeholder with `@Target({TargetKind.method}) class SolidQuery { const SolidQuery({this.name, this.lazy = true}); final String? name; final bool lazy; }`. The `lazy:` parameter is parsed in M5-01 but only the default `lazy: true` is exercised here; the eager-start opt-in lands in M5-10.
+- `packages/solid_generator/lib/src/annotation_reader.dart` — add `QueryModel? readSolidQueryMethod(MethodDeclaration decl, Set<String> reactiveFieldNames, String source)`; reuse `findSolidStateAnnotation` / `extractNameArgument` patterns. Peel `Future<T>` from `decl.returnType` to produce `innerTypeText`. Extract the `lazy:` argument (default `true`). Critically, this reader does NOT call the zero-deps check — a query body with no reactive reads is valid (SPEC §3.5 "No reactive-deps requirement").
+- `packages/solid_generator/lib/src/signal_emitter.dart` — add `String emitResourceField(QueryModel q)` returning the `late final … = Resource<T>(() async => …, name: '…');` line for the Future form. When `q.lazy` is `false`, the emit includes `lazy: false` after the fetcher (M5-10 wires this branch; M5-01 just plumbs the `lazy` flag through). Extend `emitDispose`'s argument-list semantics so Resources join Signals/Computeds/Effects in the unified ordered name list.
 - `packages/solid_generator/lib/builder.dart` — extend `_AnnotatedClass` to carry `final List<QueryModel> queries;`; extend `_collectAnnotatedClasses` to walk `MethodDeclaration` members where `!member.isGetter && !member.isSetter && carriesSolidQuery && returnType is Future<T>`. The discrimination order matters: `@SolidEffect` (void return) and `@SolidQuery` (Future return) are mutually exclusive on the same method; the validator (M5-05) enforces this via SPEC §3.4 "non-`void` return rejected" and SPEC §3.5 "non-`Future`/`Stream` return rejected".
-- `packages/solid_generator/lib/src/stateless_rewriter.dart` — accept `solidQueries`; interleave Signal/Computed/Effect/Resource fields in source order; pass merged disposable-name list to `emitDispose`; pass merged materialized-name list (effects + queries) to `emitInitState`.
+- `packages/solid_generator/lib/src/stateless_rewriter.dart` — accept `solidQueries`; interleave Signal/Computed/Effect/Resource fields in source order; pass merged disposable-name list to `emitDispose`. Default `@SolidQuery()` (lazy:true) queries are NOT added to the materialization-name list passed to `emitInitState` (only Effects are; M5-10 will extend this with eager queries).
 - `packages/solid_generator/lib/src/state_class_rewriter.dart`, `packages/solid_generator/lib/src/plain_class_rewriter.dart` — for now, reject `@SolidQuery` with a `CodeGenerationError("@SolidQuery on State<X>/plain class will land in M5-08/M5-09")` until those TODOs ship them.
 - `packages/solid_generator/lib/src/reserved_annotation_validator.dart` — remove `'SolidQuery'` from the `_reservedAnnotations` map.
 - `packages/solid_generator/test/rejections/m1_15_non_m1_annotations_test.dart` — delete the `m1_15_query` case.
@@ -1615,12 +1615,6 @@ class _UserScreenState extends State<UserScreen> {
   late final fetchCount = Resource<int>(() async => 7, name: 'fetchCount');
 
   @override
-  void initState() {
-    super.initState();
-    fetchCount;
-  }
-
-  @override
   void dispose() {
     fetchCount.dispose();
     super.dispose();
@@ -1631,7 +1625,7 @@ class _UserScreenState extends State<UserScreen> {
 }
 ```
 
-**Acceptance:** `dart test --name=m5_01` passes; golden analyzes clean; `initState()` materializes `fetchCount` via bare-identifier read; `dispose()` calls `fetchCount.dispose()` before `super.dispose()`; `m1_15_query` rejection test no longer runs (case deleted); `dart analyze packages/solid_generator/test/golden/outputs/m5_01_*.g.dart` reports zero issues.
+**Acceptance:** `dart test --name=m5_01` passes; golden analyzes clean; the State class has NO `initState()` override (default-lazy queries are not materialized — SPEC §4.8); `dispose()` calls `fetchCount.dispose()` before `super.dispose()` (the dispose-time access triggers the late-final initializer harmlessly: the Resource is constructed with `lazy: true` and immediately disposed, fetcher never fires); `m1_15_query` rejection test no longer runs (case deleted); `dart analyze packages/solid_generator/test/golden/outputs/m5_01_*.g.dart` reports zero issues.
 
 **Dependencies:** M4-01 (body-rewrite pipeline + non-getter `MethodDeclaration` collection path), M4-06 (reserved-list trim pattern).
 
@@ -1705,11 +1699,11 @@ class TickerScreen extends StatelessWidget {
 
 **Expected input content:** A `StatelessWidget` with (in source order) `@SolidState() int counter = 0;`, `@SolidState() int get doubleCounter => counter * 2;`, `@SolidEffect() void logBoth() { print('$counter / $doubleCounter'); }`, `@SolidQuery() Future<int> fetchSnapshot() async => counter + doubleCounter;`.
 
-**Expected output content:** State class declares `counter` (Signal), then `doubleCounter` (late final Computed), then `logBoth` (late final Effect), then `fetchSnapshot` (late final Resource) — all in source order. `initState()` materializes both `logBoth` and `fetchSnapshot` (in source order, after `super.initState();`). `dispose()` body calls `fetchSnapshot.dispose()`, then `logBoth.dispose()`, then `doubleCounter.dispose()`, then `counter.dispose()`, then `super.dispose()` — reverse declaration order per SPEC Section 10.
+**Expected output content:** State class declares `counter` (Signal), then `doubleCounter` (late final Computed), then `logBoth` (late final Effect), then `fetchSnapshot` (late final Resource) — all in source order. `initState()` materializes ONLY `logBoth` (the Effect) after `super.initState();` — the default-lazy `fetchSnapshot` Resource is NOT materialized (SPEC §4.8 lazy-by-default). `dispose()` body calls `fetchSnapshot.dispose()`, then `logBoth.dispose()`, then `doubleCounter.dispose()`, then `counter.dispose()`, then `super.dispose()` — reverse declaration order per SPEC Section 10. (The dispose-time access on `fetchSnapshot` runs the late-final initializer, which constructs the lazy Resource and immediately disposes it; fetcher never fires.)
 
-**Expected implementation change:** None beyond M5-01 + M4-02 — this is a regression fence on the unified ordering rule, validating that the M5-01-extended `emitDispose` argument list and `emitInitState` materialization list correctly interleave all four shapes.
+**Expected implementation change:** None beyond M5-01 + M4-02 — this is a regression fence on the unified dispose-ordering rule across all four shapes AND a regression fence proving Effects (always materialized) and default-lazy Resources (NOT materialized) coexist correctly in the same class.
 
-**Acceptance:** `dart test --name=m5_03` passes; golden's `dispose()` body has Resource → Effect → Computed → Signal → super order verbatim; `initState()` materializes both Effect and Resource in declaration order.
+**Acceptance:** `dart test --name=m5_03` passes; golden's `dispose()` body has Resource → Effect → Computed → Signal → super order verbatim; `initState()` body has only `super.initState();` then `logBoth;` (no `fetchSnapshot;`).
 
 **Dependencies:** M5-01, M4-02.
 
@@ -1847,11 +1841,11 @@ class UserScreen extends StatelessWidget {
 
 ---
 
-### TODO M5-08 — Golden: `@SolidQuery` on existing `State<X>` class
+### TODO M5-08 — Golden: `@SolidQuery` on existing `State<X>` class (default lazy)
 
-**Goal:** A `StatefulWidget` whose existing `State<X>` subclass hosts `@SolidQuery` methods is transformed in-place, not re-wrapped. Custom `initState` / `didUpdateWidget` overrides are preserved untouched (with materialization reads spliced into existing `initState` after `super.initState()`); if an existing `dispose()` body is present, Resource disposals are prepended and the rest of the body is left alone. Mirror of M4-08's State-class path. Removes the `state_class_rewriter.dart` reject guard that M5-01 added.
+**Goal:** A `StatefulWidget` whose existing `State<X>` subclass hosts `@SolidQuery()` methods (default lazy:true) is transformed in-place, not re-wrapped. Custom `initState` / `didUpdateWidget` overrides are preserved untouched and **not** modified — default-lazy Resources are not spliced into `initState` (SPEC §14 item 4). If an existing `dispose()` body is present, Resource disposals are prepended and the rest of the body is left alone. Mirror of M4-08's State-class path, minus the materialization-splice (which only applies to eager queries from M5-10). Removes the `state_class_rewriter.dart` reject guard that M5-01 added.
 
-**SPEC references:** Section 4.8, Section 8.2, Section 10, Section 14 item 4.
+**SPEC references:** Section 4.8 (lazy-by-default), Section 8.2, Section 10, Section 14 item 4.
 
 **Files to create:**
 
@@ -1861,11 +1855,11 @@ class UserScreen extends StatelessWidget {
 
 **Files to modify:**
 
-- `packages/solid_generator/lib/src/state_class_rewriter.dart` — remove the M5-01 reject guard; route Resources through the same in-place lowering used by Signals/Computeds/Effects. Extend the `solidartNames` set with `'Resource'` when at least one query is present so the import-rewriter adds `package:flutter_solidart/flutter_solidart.dart`. Extend the existing `_mergeInitState` / `_mergeDispose` helpers to handle Resource names alongside Effect names (the unified ordered-name list and the materialization-read splicing).
+- `packages/solid_generator/lib/src/state_class_rewriter.dart` — remove the M5-01 reject guard; route Resources through the same in-place lowering used by Signals/Computeds/Effects for the dispose-name list and import set. Extend the `solidartNames` set with `'Resource'` when at least one query is present so the import-rewriter adds `package:flutter_solidart/flutter_solidart.dart`. The existing `_mergeDispose` helper handles Resource names alongside Effect names in the unified dispose ordered list. **No changes** to `_mergeInitState` here — default-lazy queries don't enter the materialization-name list. (M5-10 extends `_mergeInitState` for eager queries.)
 
-**Expected implementation change:** Both helpers (`_mergeInitState`, `_mergeDispose`) extend their input-name list to include query names interleaved with effect names by source-declaration order. The merge-into-existing-`initState` / `dispose` logic from M4-08 already handles the splice-after-super-call and prepend-then-keep-existing-body shapes.
+**Expected implementation change:** `_mergeDispose` extends its input-name list to include query names interleaved with effect names by source-declaration order. The merge-into-existing-`dispose` logic from M4-08 already handles the prepend-then-keep-existing-body shape. `_mergeInitState` is untouched.
 
-**Acceptance:** `dart test --name=m5_08` passes; golden analyzes clean; existing `initState` body has Resource materialization reads spliced after `super.initState();`; existing `dispose` body has `Resource.dispose()` calls prepended in reverse-declaration order with nothing else added or removed.
+**Acceptance:** `dart test --name=m5_08` passes; golden analyzes clean; existing `initState` body is byte-identical between input and output (no Resource materialization reads spliced); existing `dispose` body has `Resource.dispose()` calls prepended in reverse-declaration order with nothing else added or removed.
 
 **Dependencies:** M5-01, M4-08.
 
@@ -1873,11 +1867,11 @@ class UserScreen extends StatelessWidget {
 
 ---
 
-### TODO M5-09 — Golden: `@SolidQuery` on plain class
+### TODO M5-09 — Golden: `@SolidQuery` on plain class (default lazy)
 
-**Goal:** A plain class (no Widget superclass) hosting `@SolidQuery` methods is transformed in-place with a synthesized constructor that materializes Resource fields (parallel to Effects in M4-08). Mirror of M4-08's plain-class path. Removes the `plain_class_rewriter.dart` reject guard that M5-01 added. Extends synthesized-constructor materialization to include Resource fields per SPEC §8.3.
+**Goal:** A plain class (no Widget superclass) hosting `@SolidQuery()` methods (default lazy:true) is transformed in-place. Disposal is added to the synthesized (or merged) `dispose()` body in reverse-declaration order. The synthesized-constructor materialization from M4-08 (Effects only) is **not** extended for default-lazy queries — they materialize on first consumer read. Mirror of M4-08's plain-class path, minus the constructor-materialization extension (which only applies to eager queries from M5-10). Removes the `plain_class_rewriter.dart` reject guard that M5-01 added.
 
-**SPEC references:** Section 4.8, Section 8.3, Section 10.
+**SPEC references:** Section 4.8 (lazy-by-default), Section 8.3, Section 10.
 
 **Files to create:**
 
@@ -1887,14 +1881,46 @@ class UserScreen extends StatelessWidget {
 
 **Files to modify:**
 
-- `packages/solid_generator/lib/src/plain_class_rewriter.dart` — remove the M5-01 reject guard; route Resources through the same in-place lowering used by Signals/Computeds/Effects. Extend the `solidartNames` set with `'Resource'`. Extend the synthesized-constructor builder to materialize Resource fields alongside Effect fields. Extend the unified ordered-name list in `dispose` to include Resources.
-- `packages/solid_generator/lib/src/signal_emitter.dart` — extend `emitConstructor(className, materializedNames)` to accept query names alongside effect names (parallel to the M5-08 `emitInitState` extension).
+- `packages/solid_generator/lib/src/plain_class_rewriter.dart` — remove the M5-01 reject guard; route Resources through the same in-place lowering used by Signals/Computeds/Effects for the dispose-name list and import set. Extend the `solidartNames` set with `'Resource'`. Extend the unified ordered-name list in `dispose` to include Resources. **No changes** to `emitConstructor` plumbing for default-lazy queries — they don't enter the materialization-name list. (M5-10 extends `emitConstructor` for eager queries.)
 
-**Expected implementation change:** Extends `emitConstructor` and the plain-class rewriter's name-list collection to include queries. The user-defined-constructor rejection from M4-08 still applies: a plain class with both a user-defined constructor and `@SolidQuery` (or `@SolidEffect`) is still rejected with a `CodeGenerationError`.
+**Expected implementation change:** The plain-class rewriter extends its dispose-name collection to include queries interleaved with effects/computeds/signals by source-declaration order. `emitConstructor`'s materialized-name list is untouched. The user-defined-constructor rejection from M4-08 still applies when Effects are present; for plain classes that have ONLY default-lazy queries (no Effects), a user-defined constructor is permitted (no synthesized constructor is needed; the user's constructor co-exists with the late-final lazy queries).
 
-**Acceptance:** `dart test --name=m5_09` passes; golden analyzes clean; synthesized constructor materializes Resource fields via bare-identifier reads in declaration order; `dispose()` body has Resource disposals in reverse declaration order before `super.dispose()` (or no `super.dispose()` if the plain class has no `dispose()` in supertype chain — analyzer-driven, per SPEC §10).
+**Acceptance:** `dart test --name=m5_09` passes; golden analyzes clean; the synthesized constructor (if present, due to existing Effects on the same class) does NOT have query-materialization reads; `dispose()` body has Resource disposals in reverse declaration order before `super.dispose()` (or no `super.dispose()` if the plain class has no `dispose()` in supertype chain — analyzer-driven, per SPEC §10).
 
 **Dependencies:** M5-01, M4-08.
+
+**Status:** TODO
+
+---
+
+### TODO M5-10 — `@SolidQuery(lazy: false)` eager-start opt-in
+
+**Goal:** When the user writes `@SolidQuery(lazy: false)`, the generator emits `Resource<T>(..., lazy: false, name: '…')` AND adds the query's name to the materialization-name list passed to `emitInitState` (State class) or `emitConstructor` (plain class). The eager `Resource` field is materialized at mount / construction time so the upstream `Resource.lazy: false` constructor fires the fetcher immediately. Default `@SolidQuery()` (lazy:true) remains uninstrumented per M5-01. Mirror of M4-06's materialization-helper extension, but driven by an annotation-parameter opt-in rather than annotation presence.
+
+**SPEC references:** Section 3.5 (`lazy:` parameter), Section 4.8 (eager-start opt-in rule), Section 8.3 (plain-class constructor materialization for eager queries), Section 14 item 4 (initState carve-out).
+
+**Files to create:**
+
+- `packages/solid_generator/test/golden/inputs/m5_10_eager_query_on_stateless.dart` — `StatelessWidget` with `@SolidQuery(lazy: false) Future<int> fetchCount() async => 7;`.
+- `packages/solid_generator/test/golden/outputs/m5_10_eager_query_on_stateless.g.dart` — synthesized State class with `late final fetchCount = Resource<int>(() async => 7, lazy: false, name: 'fetchCount');` AND `initState() { super.initState(); fetchCount; }`.
+- `packages/solid_generator/test/golden/inputs/m5_10_eager_query_on_state_class.dart` — `State<X>` host with hand-written `initState` containing user code; eager query gets spliced after `super.initState();`.
+- `packages/solid_generator/test/golden/outputs/m5_10_eager_query_on_state_class.g.dart` — paired output.
+- `packages/solid_generator/test/golden/inputs/m5_10_eager_query_on_plain_class.dart` — plain class with `@SolidQuery(lazy: false)`; synthesized constructor materializes the eager query.
+- `packages/solid_generator/test/golden/outputs/m5_10_eager_query_on_plain_class.g.dart` — paired output.
+- entries in `golden_helpers.dart` `goldenNames`.
+
+**Files to modify:**
+
+- `packages/solid_generator/lib/src/signal_emitter.dart` — `emitResourceField` emits `Resource<T>(fetcher, lazy: false, name: '…')` when `q.lazy` is false. Both `emitInitState(materializedNames)` and `emitConstructor(className, materializedNames)` accept an enriched name list that includes eager query names interleaved with effect names by source-declaration order.
+- `packages/solid_generator/lib/src/stateless_rewriter.dart` — when computing the materialized-name list for `emitInitState`, include `q.methodName` for every query where `!q.lazy`.
+- `packages/solid_generator/lib/src/state_class_rewriter.dart` — same extension to `_mergeInitState`'s splice-name list (eager queries spliced after `super.initState();` alongside effects, default-lazy queries skipped).
+- `packages/solid_generator/lib/src/plain_class_rewriter.dart` — same extension to `emitConstructor`'s splice-name list. The user-defined-constructor rejection now fires when EITHER Effects or eager queries are present (default-lazy queries alone do NOT trigger the rejection).
+
+**Expected implementation change:** A one-flag fork in `emitResourceField` (the `lazy: false` argument), plus a single-line per-rewriter filter (`q.lazy == false`) that selects which queries enter the materialization list. The unified ordered-name list interleaves eager queries with effects per source order; default-lazy queries are filtered out.
+
+**Acceptance:** `dart test --name=m5_10` passes; all three goldens (StatelessWidget / State / plain) emit `Resource<T>(fetcher, lazy: false, name: '…')` and a materialization read in the appropriate location (`initState()` for the first two, synthesized constructor for the third). Default `@SolidQuery()` queries on the same class (if mixed) do NOT enter the materialization list — verified by adding a mixed-laziness fixture if needed (or covered by extending one of the three goldens with a sibling default-lazy query).
+
+**Dependencies:** M5-01 (lazy parameter plumbed through `QueryModel`), M5-08 (state-class rewriter no longer rejects queries), M5-09 (plain-class rewriter no longer rejects queries).
 
 **Status:** TODO
 

@@ -154,6 +154,13 @@ Optional `name:` parameter overrides the auto-derived debug name:
 Future<User> fetchUser() async => api.getUser();
 ```
 
+Optional `lazy:` parameter (default `true`) controls when the fetcher first runs. With the default `lazy: true`, the fetcher fires when something first reads `<query>.state` (e.g., a `SignalBuilder`-wrapped `<query>.state.when(...)` chain in `build`). With `lazy: false`, the fetcher fires immediately at mount time (State class) or construction time (plain class) — see Section 4.8 for the materialization mechanism.
+
+```dart
+@SolidQuery(lazy: false)
+Future<User> fetchUser() async => api.getUser();
+```
+
 #### Valid target
 
 - Instance method with one of two return-type / body-keyword pairings:
@@ -408,7 +415,8 @@ Rules:
 - Future-returning methods lower to `Resource<T>(...)`; Stream-returning methods lower to `Resource<T>.stream(...)`. Type argument `T` is the inner type of the original `Future<T>` / `Stream<T>` return signature.
 - The resulting field is always declared `late final`, parallel to `Computed` (Section 4.5) and `Effect` (Section 4.7): the initializer may read other reactive instance fields, so its evaluation must defer until `this` is in scope.
 - Method-name → `name:` argument, unless `@SolidQuery(name: '…')` overrides — symmetric with the rules in Sections 4.1, 4.4, and 4.7.
-- The Section 4.7 `initState()` materialization (and Section 8.3 plain-class constructor materialization) extends to include `Resource` fields. A bare-identifier read of each Resource at mount time (or construction time on plain classes) forces the lazy `late final` initializer to run, registering the upstream `Resource` autorun before any user interaction. Without the forced read the `Resource` constructor (which defaults to `lazy: true`) never fires its fetcher.
+- **Lazy by default.** A `@SolidQuery` field stays uninitialized until first read. Reading `<query>.state` (typically inside a `build` / `Effect` / `Computed` body, wrapped in `SignalBuilder` per Section 7) triggers the `late final` initializer, which constructs the `Resource<T>` and fires the fetcher on first state access. A `Resource` has a natural consumer (the body that reads `<query>.state`) so it does NOT use the forced-materialization pattern that Section 4.7 / Section 8.3 apply to `Effect` (an `Effect` has no natural consumer and must be materialized at mount / construction).
+- **Eager start opt-in: `@SolidQuery(lazy: false)`.** When the user passes `lazy: false`, the generator emits `Resource<T>(..., lazy: false, name: '…')` so the upstream `Resource` constructor fires the fetcher immediately, AND extends the Section 4.7 / Section 8.3 forced-materialization list with the query's name. A bare-identifier read of the field at mount time (State class) or construction time (plain class) runs the `late final` initializer, which constructs the eager `Resource<T>`, which fires the fetcher synchronously. Default `@SolidQuery()` (`lazy: true`) emits no `lazy:` argument and is NOT materialized. Eagerness is per-field: a class may mix lazy and eager queries.
 
 ---
 
@@ -782,7 +790,7 @@ class Counter {
 
 If the developer has already declared a `dispose()` method, the generator merges: the generated disposal calls are prepended to the existing body, then `super.dispose()` is emitted if and only if the class's supertype chain contains a `dispose()` method (e.g., `State<T>`, `ChangeNotifier`). The generator determines this via the analyzer's type resolution, not by name matching. For a plain class with no `dispose()` in the supertype chain, `super.dispose()` is omitted.
 
-When the plain class has one or more `@SolidEffect` methods or `@SolidQuery` methods, the generator synthesizes a no-arg constructor whose body reads each Effect / Resource field by bare identifier in declaration order — analogue of the State class's `initState()` materialization (§4.7, §4.8). The synthesized constructor takes the place a widget lifecycle would otherwise serve, activating each `late final` Effect / Resource at construction time so its autorun fires once with the initial Signal values (or its fetcher fires once at construction) and subscribes to subsequent changes. Plain classes with a user-defined constructor and `@SolidEffect` or `@SolidQuery` are not supported in this milestone — the generator rejects with a `CodeGenerationError`.
+When the plain class has one or more `@SolidEffect` methods, or one or more `@SolidQuery(lazy: false)` methods, the generator synthesizes a no-arg constructor whose body reads each materialized field by bare identifier in declaration order — analogue of the State class's `initState()` materialization (§4.7, §4.8). The synthesized constructor takes the place a widget lifecycle would otherwise serve, activating each `late final` Effect (or eager `Resource`) at construction time so its autorun fires once with the initial Signal values (or its fetcher fires once at construction) and subscribes to subsequent changes. Default `@SolidQuery()` (`lazy: true`) queries are NOT materialized — they remain `late final` and initialize on first read by a consumer body. Plain classes with a user-defined constructor and `@SolidEffect` or `@SolidQuery(lazy: false)` are not supported in this milestone — the generator rejects with a `CodeGenerationError`.
 
 ### 8.4 StatelessWidget with zero `@SolidState` annotations
 
@@ -878,7 +886,7 @@ These were open questions during SPEC drafting and have been answered by the dev
 1. **Plain (non-Widget) classes with `@SolidState` fields** — supported per Section 8.3.
 2. **Compound-assignment operator list in Section 5.3** — complete.
 3. **`@SolidState` on `final` fields** — rejected with a clear error (wrapping a never-reassigned value in a `Signal` is pointless).
-4. **Custom `initState` / `didUpdateWidget` overrides in an existing State class (Section 8.2)** — preserved untouched, with one carve-out: when one or more `@SolidEffect` or `@SolidQuery` methods exist on the class, materialization reads (`<effectName>;` / `<queryName>;`) are spliced into the existing `initState` body immediately after the `super.initState();` call (or after the opening brace if no super call is detected as the first statement). If an existing `dispose()` is present, reactive disposals are merged into its body.
+4. **Custom `initState` / `didUpdateWidget` overrides in an existing State class (Section 8.2)** — preserved untouched, with one carve-out: when one or more `@SolidEffect` methods or `@SolidQuery(lazy: false)` methods exist on the class, materialization reads (`<effectName>;` / `<queryName>;`) are spliced into the existing `initState` body immediately after the `super.initState();` call (or after the opening brace if no super call is detected as the first statement). Default `@SolidQuery()` (`lazy: true`) queries are NOT spliced — they materialize on first consumer read. If an existing `dispose()` is present, reactive disposals are merged into its body (this part applies to all `Signal` / `Computed` / `Effect` / `Resource` declarations regardless of laziness).
 5. **User-facing packages** — two packages. `package:solid_annotations` (runtime dep) hosts the annotation classes (`@SolidState`, `@SolidEffect`, and `@SolidQuery` today; `@SolidEnvironment` in a later milestone). `package:solid_generator` (dev_dep) hosts the build_runner builder. There is no `package:solid` umbrella. Consumers add `solid_annotations` + `flutter_solidart` as runtime deps and `solid_generator` + `build_runner` as dev_deps, then import annotations and `flutter_solidart` primitives directly.
 6. **Shadowing rule (Section 5.5)** — handled by type resolution. Because Section 5.1 is type-driven, a shadowed local of a non-`SignalBase` type is never rewritten. A dedicated shadowing test case is required in M1.
 7. **`const` on the public widget constructor (Section 8.1)** — not added by the generator. Constructors round-trip verbatim from source. After the class split removes mutable `@SolidState` fields from the widget, the rewritten widget is usually const-eligible by Dart's own rules; `dart fix --apply` is the trusted lint pass that adds `const` (and removes unused imports — Section 9). The generator never emits `const` on its own.
