@@ -2,6 +2,7 @@ import 'package:analyzer/dart/ast/ast.dart';
 import 'package:solid_generator/src/effect_model.dart';
 import 'package:solid_generator/src/field_model.dart';
 import 'package:solid_generator/src/getter_model.dart';
+import 'package:solid_generator/src/query_model.dart';
 import 'package:solid_generator/src/transformation_error.dart';
 import 'package:solid_generator/src/value_rewriter.dart';
 
@@ -19,6 +20,10 @@ const String solidStateName = 'SolidState';
 /// Name of the `@SolidEffect` annotation class. Same matching contract as
 /// [solidStateName] (textual on unresolved AST).
 const String solidEffectName = 'SolidEffect';
+
+/// Name of the `@SolidQuery` annotation class. Same matching contract as
+/// [solidStateName] (textual on unresolved AST).
+const String solidQueryName = 'SolidQuery';
 
 /// Reads a `@SolidState(...)` annotation on [decl] and returns a [FieldModel].
 ///
@@ -102,19 +107,22 @@ GetterModel? readSolidStateGetter(
 }
 
 /// Returns the rewritten body text and whether it came from a block body.
-/// Shared between `readSolidStateGetter` and `readSolidEffectMethod`: both
-/// readers discriminate `ExpressionFunctionBody` vs `BlockFunctionBody`, run
-/// the SPEC §5.1 `.value` rewrite, and reject zero-deps and abstract/native
-/// bodies. Only the error wording differs (SPEC §4.5 vs §3.4) — pass it in.
+/// Shared between `readSolidStateGetter`, `readSolidEffectMethod`, and
+/// `readSolidQueryMethod`: all three discriminate `ExpressionFunctionBody`
+/// vs `BlockFunctionBody`, run the SPEC §5.1 `.value` rewrite, and reject
+/// abstract/native bodies. The zero-deps check (SPEC §4.5 / §3.4) fires
+/// only when [emptyDepsError] is non-null; queries pass `null` because
+/// SPEC §3.5 explicitly waives the reactive-deps requirement. Error wording
+/// differs per caller (SPEC §4.5 vs §3.4 vs §3.5) — pass it in.
 ///
 /// `trackedReadOffsets` are intentionally ignored — SignalBuilder placement
-/// is a `build()` concern, not a `Computed`/`Effect` body concern.
+/// is a `build()` concern, not a `Computed`/`Effect`/`Resource` body concern.
 (String bodyText, bool isBlockBody) _readReactiveBody(
   FunctionBody body,
   Set<String> reactiveFields,
   String source, {
   required String memberName,
-  required String emptyDepsError,
+  required String? emptyDepsError,
   required String unsupportedBodyError,
 }) {
   final AstNode node;
@@ -129,7 +137,7 @@ GetterModel? readSolidStateGetter(
     throw CodeGenerationError(unsupportedBodyError, null, memberName);
   }
   final result = collectValueEdits(node, reactiveFields, source);
-  if (result.edits.isEmpty) {
+  if (emptyDepsError != null && result.edits.isEmpty) {
     throw CodeGenerationError(emptyDepsError, null, memberName);
   }
   final bodyText = applyEditsToRange(
@@ -184,6 +192,64 @@ EffectModel? readSolidEffectMethod(
     methodName: methodName,
     bodyText: bodyText,
     isBlockBody: isBlockBody,
+    annotationName: extractNameArgument(annotation),
+  );
+}
+
+/// Reads a `@SolidQuery(...)` annotation on the method [decl] and returns a
+/// [QueryModel]. Returns `null` when [decl] is not an `@SolidQuery`-bearing
+/// instance method whose return type is `Future<T>` (Stream form not yet
+/// implemented). Getters, setters, and static methods are filtered out here
+/// defensively; the target validator rejects them with a clearer error
+/// before this reader runs.
+///
+/// The method body is rewritten in place per SPEC §5.1: any reference to a
+/// name in [reactiveFields] receives `.value`. Both expression-body
+/// (`Future<T> m() async => …;`) and block-body (`Future<T> m() async {…}`)
+/// shapes are supported per SPEC §3.5 / §4.8. Other body kinds (abstract /
+/// native) are rejected with a [CodeGenerationError].
+///
+/// Unlike [readSolidEffectMethod] / [readSolidStateGetter], this reader does
+/// NOT enforce a reactive-deps requirement — a query body MAY have zero
+/// reactive reads (SPEC §3.5 "No reactive-deps requirement").
+QueryModel? readSolidQueryMethod(
+  MethodDeclaration decl,
+  Set<String> reactiveFields,
+  String source,
+) {
+  if (decl.isGetter || decl.isSetter || decl.isStatic) return null;
+  final annotation = findAnnotationByName(solidQueryName, decl.metadata);
+  if (annotation == null) return null;
+  // Only `Future<T>` return types are handled here; non-`Future`/non-`Stream`
+  // returns are rejected by the target validator and fall through as `null`.
+  final returnType = decl.returnType;
+  if (returnType is! NamedType || returnType.name.lexeme != 'Future') {
+    return null;
+  }
+  final typeArg = returnType.typeArguments?.arguments.firstOrNull;
+  final innerTypeText = typeArg == null
+      ? ''
+      : source.substring(typeArg.offset, typeArg.end);
+
+  final methodName = decl.name.lexeme;
+  // emptyDepsError: null — SPEC §3.5 waives the reactive-deps requirement.
+  final (bodyText, isBlockBody) = _readReactiveBody(
+    decl.body,
+    reactiveFields,
+    source,
+    memberName: methodName,
+    emptyDepsError: null,
+    unsupportedBodyError:
+        '@SolidQuery method must have an expression body (=> ...) or a '
+        'block body ({ ... }); abstract and native bodies are not supported',
+  );
+
+  return QueryModel(
+    methodName: methodName,
+    bodyText: bodyText,
+    isBlockBody: isBlockBody,
+    isAsyncBody: decl.body.keyword?.lexeme == 'async',
+    innerTypeText: innerTypeText,
     annotationName: extractNameArgument(annotation),
   );
 }

@@ -33,12 +33,35 @@ class SolidEffect {
 }
 
 /// {@template SolidAnnotations.SolidQuery}
-/// Reserved. Full contract deferred to a later SPEC revision;
-/// see SPEC Section 3.2.
+/// Marks an instance method as an async reactive source. See SPEC Section 3.5.
+///
+/// The annotated method must declare a `Future<T>` return type with an `async`
+/// body, or a `Stream<T>` return type whose body either returns a pre-existing
+/// `Stream<T>` or yields with `async*`. The method must take no parameters.
+/// The generator lowers it to a `late final <name> = Resource<T>(…, name: '…')`
+/// (or `Resource<T>.stream(…)`) field whose state any reader of the call site
+/// auto-subscribes to. Source-side `<name>()`, `<name>().when(…)`,
+/// `<name>().maybeWhen(…)`, `<name>().isRefreshing`, and `<name>.refresh()`
+/// chains survive byte-identical in lowered output.
 /// {@endtemplate}
+@Target({TargetKind.method})
 class SolidQuery {
   /// {@macro SolidAnnotations.SolidQuery}
-  const SolidQuery();
+  const SolidQuery({this.name, this.debounce, this.useRefreshing = true});
+
+  /// Optional debug name; defaults to the annotated method's identifier.
+  final String? name;
+
+  /// Optional delay applied to auto-refreshes triggered by upstream reactive
+  /// changes — useful for typeahead-style queries where rapid keystrokes
+  /// should coalesce into a single fetch. Maps to the upstream
+  /// `Resource.debounceDelay:` argument when non-null.
+  final Duration? debounce;
+
+  /// When `true` (the upstream default), an auto-refresh keeps the previous
+  /// `ready` / `error` state and exposes `isRefreshing == true` while the new
+  /// value resolves. When `false`, every refresh re-enters `loading`.
+  final bool useRefreshing;
 }
 
 /// {@template SolidAnnotations.SolidEnvironment}

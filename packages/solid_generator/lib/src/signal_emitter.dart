@@ -1,6 +1,7 @@
 import 'package:solid_generator/src/effect_model.dart';
 import 'package:solid_generator/src/field_model.dart';
 import 'package:solid_generator/src/getter_model.dart';
+import 'package:solid_generator/src/query_model.dart';
 
 /// Shared signal-emission helpers used by every class-kind rewriter.
 
@@ -68,6 +69,33 @@ String emitEffectField(EffectModel e) {
   final closure = e.isBlockBody ? '() ${e.bodyText}' : '() => ${e.bodyText}';
   final ctor = "Effect($closure, name: '$debugName')";
   return '  late final ${e.methodName} = $ctor;';
+}
+
+/// Emits one `late final <name> = Resource<T>(<closure>, name: '<debug>');`
+/// line per SPEC §4.8. Mirrors [emitEffectField]'s closure-shape contract —
+/// same `late final` rationale, same body-text contract — but adds:
+///
+/// * a type argument `Resource<T>` peeled from the source `Future<T>` /
+///   `Stream<T>` return type (carried on [QueryModel.innerTypeText]),
+/// * an `async ` keyword spliced into the closure signature when
+///   [QueryModel.isAsyncBody] is true (Future-form queries require `async`;
+///   plain-bodied Stream queries leave the keyword empty), and
+/// * a public field name (no underscore prefix) — SPEC §4.8 rule 1 specifies
+///   a single emitted declaration per query.
+///
+/// The Resource field always joins the unified ordered dispose list managed
+/// by [emitDispose] (SPEC §4.8 rule 11). Resources are NEVER materialized in
+/// `initState()` / the synthesized constructor — the lazy `late final`
+/// initializer fires on first read at the first reactive call site
+/// (SPEC §4.8 rule 10 / §14 item 4).
+String emitResourceField(QueryModel q) {
+  final debugName = q.annotationName ?? q.methodName;
+  final asyncKw = q.isAsyncBody ? 'async ' : '';
+  final closure = q.isBlockBody
+      ? '() $asyncKw${q.bodyText}'
+      : '() $asyncKw=> ${q.bodyText}';
+  final ctor = "Resource<${q.innerTypeText}>($closure, name: '$debugName')";
+  return '  late final ${q.methodName} = $ctor;';
 }
 
 /// Emits a `dispose()` method disposing every name in

@@ -11,6 +11,7 @@ import 'package:solid_generator/src/field_model.dart';
 import 'package:solid_generator/src/getter_model.dart';
 import 'package:solid_generator/src/import_rewriter.dart';
 import 'package:solid_generator/src/plain_class_rewriter.dart';
+import 'package:solid_generator/src/query_model.dart';
 import 'package:solid_generator/src/reserved_annotation_validator.dart';
 import 'package:solid_generator/src/state_class_rewriter.dart';
 import 'package:solid_generator/src/stateless_rewriter.dart';
@@ -88,12 +89,16 @@ class _SolidBuilder implements Builder {
 
     final annotatedClasses = _collectAnnotatedClasses(parsed.unit, source);
     if (annotatedClasses.every(
-      (c) => c.fields.isEmpty && c.getters.isEmpty && c.effects.isEmpty,
+      (c) =>
+          c.fields.isEmpty &&
+          c.getters.isEmpty &&
+          c.effects.isEmpty &&
+          c.queries.isEmpty,
     )) {
-      // Hint matched, but no `@SolidState` field/getter or `@SolidEffect`
-      // method resolved — the file likely contains a comment or string
-      // literal mentioning `@Solid…`. Reserved annotations are caught
-      // upstream.
+      // Hint matched, but no `@SolidState` field/getter, `@SolidEffect`
+      // method, or `@SolidQuery` method resolved — the file likely contains
+      // a comment or string literal mentioning `@Solid…`. Reserved
+      // annotations are caught upstream.
       await buildStep.writeAsString(outputId, source);
       return;
     }
@@ -103,33 +108,35 @@ class _SolidBuilder implements Builder {
   }
 }
 
-/// One class declaration paired with the `@SolidState` fields and getters
-/// and `@SolidEffect` methods it contains.
+/// One class declaration paired with the `@SolidState` fields and getters,
+/// `@SolidEffect` methods, and `@SolidQuery` methods it contains.
 ///
-/// All three lists are empty when the class exists in the source but has no
-/// reactive annotations; such classes are passed through verbatim.
+/// Every annotation list is empty when the class exists in the source but
+/// has no reactive annotations; such classes are passed through verbatim.
 class _AnnotatedClass {
   _AnnotatedClass({
     required this.decl,
     required this.fields,
     required this.getters,
     required this.effects,
+    required this.queries,
   });
   final ClassDeclaration decl;
   final List<FieldModel> fields;
   final List<GetterModel> getters;
   final List<EffectModel> effects;
+  final List<QueryModel> queries;
 }
 
 /// Walks [unit] once and returns every class paired with its `@SolidState`
-/// fields and getters and `@SolidEffect` methods. Replaces an earlier
-/// double-walk (presence check + collection) with a single traversal per
-/// file.
+/// fields and getters, `@SolidEffect` methods, and `@SolidQuery` methods.
+/// Replaces an earlier double-walk (presence check + collection) with a
+/// single traversal per file.
 ///
-/// Fields are read first so a getter or effect body's reactive-name set
-/// already contains every field of the same class; getters then enter the
-/// name set in source order so a later getter or effect can reference an
-/// earlier annotated getter (SPEC §5.1).
+/// Fields are read first so a getter, effect, or query body's reactive-name
+/// set already contains every field of the same class; getters then enter
+/// the name set in source order so a later getter, effect, or query can
+/// reference an earlier annotated getter (SPEC §5.1).
 List<_AnnotatedClass> _collectAnnotatedClasses(
   CompilationUnit unit,
   String source,
@@ -140,6 +147,7 @@ List<_AnnotatedClass> _collectAnnotatedClasses(
     final fields = <FieldModel>[];
     final getters = <GetterModel>[];
     final effects = <EffectModel>[];
+    final queries = <QueryModel>[];
     final reactiveNames = <String>{};
     for (final member in decl.members) {
       if (member is FieldDeclaration) {
@@ -157,13 +165,19 @@ List<_AnnotatedClass> _collectAnnotatedClasses(
           reactiveNames.add(getter.getterName);
           continue;
         }
-        // Effect names are intentionally NOT added to `reactiveNames`:
-        // `@SolidEffect` lowers to a `void`-returning `Effect` with no
-        // observable `.value`, so a sibling effect/getter referencing it
-        // must not get a `.value` rewrite.
+        // Effect / query names are intentionally NOT added to
+        // `reactiveNames`: `@SolidEffect` lowers to a `void`-returning
+        // `Effect` with no observable `.value`, and `@SolidQuery` lowers to
+        // a `Resource<T>` field whose call sites are byte-identical (no
+        // `.value` rewrite) — see SPEC §4.8 rule 2 / §5.1.
         final effect = readSolidEffectMethod(member, reactiveNames, source);
         if (effect != null) {
           effects.add(effect);
+          continue;
+        }
+        final query = readSolidQueryMethod(member, reactiveNames, source);
+        if (query != null) {
+          queries.add(query);
         }
       }
     }
@@ -173,6 +187,7 @@ List<_AnnotatedClass> _collectAnnotatedClasses(
         fields: fields,
         getters: getters,
         effects: effects,
+        queries: queries,
       ),
     );
   }
@@ -191,13 +206,23 @@ String _renderOutput(
   String source,
 ) {
   final results = annotatedClasses.map((c) {
-    if (c.fields.isEmpty && c.getters.isEmpty && c.effects.isEmpty) {
+    if (c.fields.isEmpty &&
+        c.getters.isEmpty &&
+        c.effects.isEmpty &&
+        c.queries.isEmpty) {
       return (
         text: source.substring(c.decl.offset, c.decl.end),
         solidartNames: const <String>{},
       );
     }
-    return _rewriteClass(c.decl, c.fields, c.getters, c.effects, source);
+    return _rewriteClass(
+      c.decl,
+      c.fields,
+      c.getters,
+      c.effects,
+      c.queries,
+      source,
+    );
   }).toList();
 
   final imports = computeOutputImports(
@@ -214,27 +239,47 @@ String _renderOutput(
 }
 
 /// Dispatches on [decl]'s class kind to the matching rewriter.
+///
+/// `@SolidQuery` only lowers on `StatelessWidget` in M5-01. The plain-class
+/// and `State<X>` paths land in M5-08 / M5-09; until then, any query on
+/// those class kinds is rejected at the dispatch boundary so the rewriters
+/// stay query-unaware (their signatures don't change in this PR).
 RewriteResult _rewriteClass(
   ClassDeclaration decl,
   List<FieldModel> fields,
   List<GetterModel> getters,
   List<EffectModel> effects,
+  List<QueryModel> queries,
   String source,
 ) {
   final kind = classKindOf(decl);
+  final className = decl.name.lexeme;
   switch (kind) {
     case ClassKind.statelessWidget:
-      return rewriteStatelessWidget(decl, fields, getters, effects, source);
+      return rewriteStatelessWidget(
+        decl,
+        fields,
+        getters,
+        effects,
+        queries,
+        source,
+      );
     case ClassKind.plainClass:
+      rejectIfQueriesNotYetSupported(queries, 'plain class', className);
       return rewritePlainClass(decl, fields, getters, effects, source);
     case ClassKind.stateClass:
+      rejectIfQueriesNotYetSupported(
+        queries,
+        'existing State<X> subclass',
+        className,
+      );
       return rewriteStateClass(decl, fields, getters, effects, source);
     case ClassKind.statefulWidget:
       throw CodeGenerationError(
         'class-kind $kind is not supported yet '
         '(scheduled for a later M1 TODO)',
         null,
-        decl.name.lexeme,
+        className,
       );
   }
 }

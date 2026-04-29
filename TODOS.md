@@ -1555,7 +1555,7 @@ class _CounterState extends State<Counter> {
 
 ## M5 — `@SolidQuery`
 
-### TODO M5-01 — Golden: simple `@SolidQuery` Future-method on `StatelessWidget` (no upstream signals)
+### DONE M5-01 — Golden: simple `@SolidQuery` Future-method on `StatelessWidget` (no upstream signals)
 
 **Goal:** `@SolidQuery() Future<String> fetchData() async => 'fetched';` on a `StatelessWidget` becomes a single `late final fetchData = Resource<String>(...)` field — no underscore prefix, no thin-accessor wrapper. The user's source-side `fetchData()` calls and `fetchData.refresh()` tear-offs are byte-identical in lowered output: at runtime, `fetchData()` invokes the upstream `Resource<T>.call() => state;` operator (returning `ResourceState<T>` for `.when` chains), and `fetchData.refresh()` resolves to the upstream `Resource<T>.refresh()` direct method. No body rewrite mutates the call sites. Establishes the M5 lowering pipeline: `QueryModel`, `readSolidQueryMethod`, `emitResourceField` (Future branch only, no auto-tracking), the non-getter `MethodDeclaration` branch in `_collectAnnotatedClasses` keyed on `Future<T>` return type, and a SignalBuilder-placement detection rule that records `<queryName>()` call offsets in the tracked-read set (so the enclosing widget subtree gets wrapped). Also performs the M4-06-style migration: removes `'SolidQuery'` from `_reservedAnnotations` and migrates the `m1_15_query` rejection case to a positive golden. Adds the source-time stub extensions to `solid_annotations`.
 
@@ -1644,7 +1644,7 @@ class _GreeterState extends State<Greeter> {
 
 **Implementation note:** Like M4-01, M5-01 also pulls in the M4-06-style migration (remove from `_reservedAnnotations`, migrate `m1_15_query`) because the reserved-annotation guard runs before lowering — without removing `'SolidQuery'` and migrating the rejection case in the same PR, the M5-01 golden could never go green. Document this inline in `reserved_annotation_validator.dart` similar to the M4-01 comment. The new `flutter` dep on `solid_annotations` is unavoidable: SPEC §3.5 "Source-time typechecking" requires the source-side stubs to return `Widget`. `flutter_solidart` is NOT added as a `solid_annotations` dep because the user's source layer does not name `Resource<T>`. The M0-02 "no runtime deps" rule is therefore amended in M5-01 (only `flutter`). The SignalBuilder-placement detection (visitor records `<queryName>()` offsets in `trackedReadOffsets`) is registered in M5-01 even though M5-01's golden has no call sites to exercise it (the build body is `const Placeholder()`); the detection is exercised end-to-end in M5-04's golden where SignalBuilder wraps the `fetchData().when(...)` chain.
 
-**Status:** TODO
+**Status:** DONE
 
 ---
 
