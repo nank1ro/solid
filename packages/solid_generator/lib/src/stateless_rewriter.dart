@@ -4,14 +4,16 @@ import 'package:solid_generator/src/effect_model.dart';
 import 'package:solid_generator/src/field_model.dart';
 import 'package:solid_generator/src/getter_model.dart';
 import 'package:solid_generator/src/import_rewriter.dart';
+import 'package:solid_generator/src/query_model.dart';
 import 'package:solid_generator/src/signal_emitter.dart';
 import 'package:solid_generator/src/transformation_error.dart';
 
 /// Rewrites a `StatelessWidget` class containing `@SolidState` fields,
-/// `@SolidState` getters, and/or `@SolidEffect` methods as a
-/// `StatefulWidget` + `State<X>` pair. See SPEC §8.1 for the full
-/// field-partition and constructor-preservation contract; SPEC §4.5 for the
-/// getter→`Computed` lowering; SPEC §4.7 for the method→`Effect` lowering.
+/// `@SolidState` getters, `@SolidEffect` methods, and/or `@SolidQuery`
+/// methods as a `StatefulWidget` + `State<X>` pair. See SPEC §8.1 for the
+/// full field-partition and constructor-preservation contract; SPEC §4.5 for
+/// the getter→`Computed` lowering; SPEC §4.7 for the method→`Effect`
+/// lowering; SPEC §4.8 for the method→`Resource` lowering.
 ///
 /// The emitted string is syntactically valid Dart but is not guaranteed to be
 /// pretty-printed — run through `DartFormatter` before writing.
@@ -20,6 +22,7 @@ RewriteResult rewriteStatelessWidget(
   List<FieldModel> solidFields,
   List<GetterModel> solidGetters,
   List<EffectModel> solidEffects,
+  List<QueryModel> solidQueries,
   String source,
 ) {
   final className = classDecl.name.lexeme;
@@ -28,6 +31,12 @@ RewriteResult rewriteStatelessWidget(
     ...solidFields.map((f) => f.fieldName),
     ...solidGetters.map((g) => g.getterName),
   };
+  // SPEC §4.8 rule 3: query call expressions in `build` are tracked reads.
+  // Names are kept separate from `reactiveNames` so the `.value` rewrite
+  // (SPEC §5.1) does not fire on `<queryName>` identifiers.
+  final queryNames = solidQueries.isEmpty
+      ? const <String>{}
+      : {for (final q in solidQueries) q.methodName};
 
   final members = _splitMembers(classDecl);
   final widgetBoundNames = _collectWidgetBoundNames(members.ctors);
@@ -42,6 +51,7 @@ RewriteResult rewriteStatelessWidget(
     members.buildMethod,
     reactiveNames,
     source,
+    queryNames: queryNames,
   );
 
   final reactiveBlock = _emitReactiveBlock(
@@ -49,6 +59,7 @@ RewriteResult rewriteStatelessWidget(
     solidFields,
     solidGetters,
     solidEffects,
+    solidQueries,
   );
 
   final widgetClass = _emitWidgetClass(
@@ -71,6 +82,7 @@ RewriteResult rewriteStatelessWidget(
   final solidartNames = <String>{'Signal', 'SignalBuilder'};
   if (solidGetters.isNotEmpty) solidartNames.add('Computed');
   if (solidEffects.isNotEmpty) solidartNames.add('Effect');
+  if (solidQueries.isNotEmpty) solidartNames.add('Resource');
 
   return (
     text: '$widgetClass\n\n$stateClass\n',
@@ -79,17 +91,20 @@ RewriteResult rewriteStatelessWidget(
 }
 
 /// Returns the source-ordered emission of every reactive declaration on
-/// [classDecl] (Signal field + Computed getter + Effect method) as a single
-/// 2-space-indented block, plus the declaration-order list of dispose names
-/// that pairs with it. Source order is the contract that `Computed` and
-/// `Effect` depend on: each must reference declarations defined before it,
-/// so the emitted `late final` lines must appear after the declarations they
-/// read in the rewritten State class.
+/// [classDecl] (Signal field + Computed getter + Effect method + Resource
+/// query) as a single 2-space-indented block, plus the declaration-order
+/// list of dispose names that pairs with it. Source order is the contract
+/// that `Computed`, `Effect`, and the future M5-10 query-source-Computed
+/// depend on: each must reference declarations defined before it, so the
+/// emitted `late final` lines must appear after the declarations they read
+/// in the rewritten State class.
 ///
 /// `effectNamesInDeclarationOrder` is the Effect-only subset of
-/// `disposeNamesInDeclarationOrder`, pulled out so the rewriter can synthesize
-/// `initState()` that materializes each `late final` Effect field at mount
-/// time (SPEC §4.7).
+/// `disposeNamesInDeclarationOrder`, pulled out so the rewriter can
+/// synthesize `initState()` that materializes each `late final` Effect field
+/// at mount time (SPEC §4.7). Queries are intentionally NOT in this list —
+/// per SPEC §4.8 rule 10 / §14 item 4, Resources are lazy and the late-final
+/// initializer fires on first call-site read, never via `initState`.
 ({
   String fieldsText,
   List<String> disposeNamesInDeclarationOrder,
@@ -100,10 +115,12 @@ _emitReactiveBlock(
   List<FieldModel> solidFields,
   List<GetterModel> solidGetters,
   List<EffectModel> solidEffects,
+  List<QueryModel> solidQueries,
 ) {
   final fieldByName = {for (final f in solidFields) f.fieldName: f};
   final getterByName = {for (final g in solidGetters) g.getterName: g};
   final effectByName = {for (final e in solidEffects) e.methodName: e};
+  final queryByName = {for (final q in solidQueries) q.methodName: q};
   final lines = <String>[];
   final disposeNames = <String>[];
   final effectNames = <String>[];
@@ -132,6 +149,12 @@ _emitReactiveBlock(
           lines.add(emitEffectField(e));
           disposeNames.add(e.methodName);
           effectNames.add(e.methodName);
+          continue;
+        }
+        final q = queryByName[name];
+        if (q != null) {
+          lines.add(emitResourceField(q));
+          disposeNames.add(q.methodName);
         }
       }
     }

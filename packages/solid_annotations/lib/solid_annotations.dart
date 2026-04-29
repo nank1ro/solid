@@ -2,3 +2,4 @@
 library;
 
 export 'src/annotations.dart';
+export 'src/query_extensions.dart';

@@ -43,19 +43,30 @@ class SourceEdit {
 /// upgrades to resolved-element analysis at M3-05, at which point the call
 /// site swaps to a resolved predicate without restructuring this file.
 ///
+/// [queryNames] is the set of `@SolidQuery` method names declared on the
+/// enclosing class (M5-01). Their zero-arg call sites in the build body are
+/// recorded as tracked reads for SignalBuilder placement (SPEC §4.8 rule 3)
+/// without mutating the call expression itself.
+///
 /// [source] is the full source text of the input file. The returned string
 /// is the rewritten build method (from `@override` through the closing `}`),
 /// ready for the caller to embed into the emitted `State` class.
 String rewriteBuildMethod(
   MethodDeclaration buildMethod,
   Set<String> reactiveFields,
-  String source,
-) {
+  String source, {
+  Set<String> queryNames = const {},
+}) {
   final methodStart = buildMethod.offset;
   final methodEnd = buildMethod.end;
   final methodText = source.substring(methodStart, methodEnd);
 
-  final valueResult = collectValueEdits(buildMethod, reactiveFields, source);
+  final valueResult = collectValueEdits(
+    buildMethod,
+    reactiveFields,
+    source,
+    queryNames: queryNames,
+  );
   final wrapNodes = computeWrapSet(buildMethod, valueResult.trackedReadOffsets);
 
   final edits = <SourceEdit>[];

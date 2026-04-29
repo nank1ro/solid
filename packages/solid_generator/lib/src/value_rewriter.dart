@@ -65,6 +65,16 @@ bool _isOnPrefixedCallbackName(String name) {
 /// (`buildStep.resolver.compilationUnitFor` + `staticType` subtype queries)
 /// is deferred — it is the architectural prerequisite for M3-09 (shadowing).
 ///
+/// [queryNames] is the name-set of `@SolidQuery` methods declared on the
+/// enclosing class (M5-01). Zero-argument `MethodInvocation`s whose target is
+/// a bare `SimpleIdentifier` matching a query name (and not shadowed, and not
+/// inside an untracked context) have their offsets recorded in
+/// [ValueRewriteResult.trackedReadOffsets] so SPEC §7 SignalBuilder placement
+/// can wrap their enclosing widget subtree (SPEC §4.8 rule 3). NO source
+/// edit is emitted for the call expression itself — the call survives
+/// byte-identical because the lowered `<name>()` resolves through
+/// `Resource<T>.call() => state` to upstream extensions on `ResourceState<T>`.
+///
 /// [node] is typically the `build()` `MethodDeclaration` (the M1-05 path) or
 /// the body expression of a `@SolidState` getter (the M2-01 path). Both share
 /// the same identifier-rewrite contract; only `build()` consumes
@@ -72,9 +82,10 @@ bool _isOnPrefixedCallbackName(String name) {
 ValueRewriteResult collectValueEdits(
   AstNode node,
   Set<String> reactiveFields,
-  String source,
-) {
-  final visitor = _ValueRewriteVisitor(reactiveFields);
+  String source, {
+  Set<String> queryNames = const {},
+}) {
+  final visitor = _ValueRewriteVisitor(reactiveFields, queryNames);
   node.accept(visitor);
   return ValueRewriteResult(visitor.edits, visitor.trackedReadOffsets);
 }
@@ -113,9 +124,14 @@ const String _untrackedValueGetterName = 'untrackedValue';
 /// enclosing block. M3-09 replaces this heuristic with type-driven
 /// shadowing resolution.
 class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
-  _ValueRewriteVisitor(this._reactiveFields);
+  _ValueRewriteVisitor(this._reactiveFields, this._queryNames);
 
   final Set<String> _reactiveFields;
+
+  /// Per-class set of `@SolidQuery` method names. Empty when collecting edits
+  /// for a non-`build` body (M5-01 query-call detection only fires on
+  /// `build`'s body, where SignalBuilder placement consumes the offsets).
+  final Set<String> _queryNames;
   final List<ValueEdit> edits = [];
   final List<int> trackedReadOffsets = [];
 
@@ -175,6 +191,20 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
         null,
         'untracked() function-call form',
       );
+    }
+    // SPEC §4.8 rule 3: a zero-argument call to an `@SolidQuery` method on
+    // the enclosing class is a tracked read for SignalBuilder placement —
+    // the runtime subscription happens inside `Resource.call()` → `state`.
+    // No source edit is emitted: `fetchData()` survives byte-identical
+    // because the lowered field is a `Resource<T>` whose upstream callable
+    // returns `ResourceState<T>` and the trailing chain resolves to upstream
+    // extensions. Shadowing follows SPEC §5.5.
+    if (node.target == null &&
+        node.argumentList.arguments.isEmpty &&
+        _queryNames.contains(node.methodName.name) &&
+        !_isShadowed(node.methodName.name) &&
+        _untrackedDepth == 0) {
+      trackedReadOffsets.add(node.offset);
     }
     super.visitMethodInvocation(node);
   }
