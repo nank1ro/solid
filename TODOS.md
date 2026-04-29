@@ -1512,7 +1512,9 @@ class _CounterState extends State<Counter> {
 
 **Dependencies:** M4-01, M4-06 (Effect must no longer be reserved).
 
-**Status:** TODO
+**Implementation note:** This PR also added a synthesized `initState()` block (`signal_emitter.dart::emitInitState`) and regenerated the M4-01/M4-02/M4-03 goldens. Without that fix, the `late final` Effect field is never materialized at mount time, so the Effect's autorun never fires during the widget's mounted lifetime — see SPEC §4.7. The widget-test's `recordHistory` Effect reads `history.untrackedValue` on the spread to avoid the self-dep loop where the Effect's own `history.value = …` write would re-fire it.
+
+**Status:** DONE
 
 ---
 

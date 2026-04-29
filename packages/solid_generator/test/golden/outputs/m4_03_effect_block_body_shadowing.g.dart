@@ -20,6 +20,12 @@ class _EffectShadowingState extends State<EffectShadowing> {
   }, name: 'logCounter');
 
   @override
+  void initState() {
+    super.initState();
+    logCounter;
+  }
+
+  @override
   void dispose() {
     logCounter.dispose();
     counter.dispose();

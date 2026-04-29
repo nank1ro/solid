@@ -103,3 +103,34 @@ String emitDispose(
   buffer.write('  }');
   return buffer.toString();
 }
+
+/// Emits an `initState()` method that materializes every `late final` Effect
+/// field by reading it as a bare-identifier statement (`<effectName>;`), in
+/// source-declaration order.
+///
+/// SPEC §4.7: in Dart, `late final field = expr` defers the initializer until
+/// the field is first read. Without this synthesized read, the Effect's
+/// factory constructor — and its `effect.run()` autorun, which registers
+/// reactive dependencies — would never fire during the widget's mounted
+/// lifetime. The `dispose()` body's `<effectName>.dispose()` call is the
+/// first read, by which point signal mutations have already happened.
+///
+/// Touching each Effect by name in `initState` triggers the `late final`
+/// initializer at mount time, so `Effect(...)`'s autorun runs once with the
+/// initial signal values and subscribes to subsequent changes.
+///
+/// [effectNamesInDeclarationOrder] should mirror the source order of the
+/// emitted `late final … = Effect(...)` fields. Caller is responsible for
+/// only invoking this when the list is non-empty — the resulting `initState`
+/// is otherwise a pure-overhead `super.initState()` no-op.
+String emitInitState(List<String> effectNamesInDeclarationOrder) {
+  final buffer = StringBuffer()
+    ..writeln('  @override')
+    ..writeln('  void initState() {')
+    ..writeln('    super.initState();');
+  for (final name in effectNamesInDeclarationOrder) {
+    buffer.writeln('    $name;');
+  }
+  buffer.write('  }');
+  return buffer.toString();
+}
