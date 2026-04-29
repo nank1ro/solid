@@ -80,6 +80,11 @@ class _SolidBuilder implements Builder {
     // `_collectAnnotatedClasses`; rejected targets (final / const / static
     // fields, setters, top-level vars, methods, …) never reach the readers.
     validateSolidStateTargets(parsed.unit);
+    // SPEC §3.4 invalid-target guard for `@SolidEffect`. Same contract as
+    // the line above: rejected targets (getters, setters, static/abstract
+    // methods, parameterized methods, non-void methods, top-level functions,
+    // fields) never reach `readSolidEffectMethod`.
+    validateSolidEffectTargets(parsed.unit);
 
     final annotatedClasses = _collectAnnotatedClasses(parsed.unit, source);
     if (annotatedClasses.every(
