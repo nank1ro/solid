@@ -210,7 +210,7 @@ Whenever `userId` changes, `fetchData()` auto-refreshes. The 1-second `debounce:
 
 #### Read pattern
 
-The user invokes the query as a method (`fetchData()`) and chains pattern-match / control methods on the result:
+The user invokes the query in two distinct shapes depending on the operation. **State reads** (`.when`, `.maybeWhen`, `.isRefreshing`) call the method first, then chain on the resulting `Future<T>` / `Stream<T>`. **Refresh** uses the method tear-off (no parens) and chains `.refresh()` on the resulting function reference:
 
 ```dart
 @override
@@ -232,16 +232,16 @@ fetchData().maybeWhen(
 )
 ```
 
-`.refresh()` re-runs the fetcher imperatively (typically inside an `onPressed` callback):
+`.refresh()` re-runs the fetcher imperatively (typically inside an `onPressed` callback). Note the tear-off form — `fetchData.refresh()`, not `fetchData().refresh()`:
 
 ```dart
 ElevatedButton(
-  onPressed: () => fetchData().refresh(),
+  onPressed: () => fetchData.refresh(),
   child: const Text('Reload'),
 )
 ```
 
-`.isRefreshing` exposes whether a refresh is in flight (only meaningful when `useRefreshing: true` — otherwise the query enters `loading` instead):
+`.isRefreshing` exposes whether a refresh is in flight (only meaningful when `useRefreshing: true` — otherwise the query enters `loading` instead). Same call-then-chain shape as `.when`:
 
 ```dart
 if (fetchData().isRefreshing) const LinearProgressIndicator(),
@@ -249,7 +249,16 @@ if (fetchData().isRefreshing) const LinearProgressIndicator(),
 
 #### Source-time typechecking
 
-For source under `source/` to typecheck before generation, `package:solid_annotations` exports extensions on `Future<T>` and `Stream<T>` that surface `.when`, `.maybeWhen`, `.refresh`, and `.isRefreshing` with runtime-throwing bodies. The extensions exist solely to make `fetchData().when(...)`, `fetchData().refresh()`, and similar source-side calls typecheck at source-analysis time, where `fetchData()` resolves to its source-declared `Future<T>` or `Stream<T>` return type. The extension bodies are never executed at runtime because the runtime artifact lives in `lib/`, where the lowered `fetchData()` returns `Resource<T>` (Section 4.8) and call-sites resolve to runtime extensions on `Resource<T>` (also exported from `solid_annotations`) that proxy to upstream `ResourceState<T>` extensions for `.when` / `.maybeWhen` / `.isRefreshing` and to the upstream `Resource<T>.refresh()` instance method.
+The user's source layer never references `Resource<T>` or `ResourceState<T>` directly — those are codegen-internal types that appear only in `lib/`. To preserve that abstraction while keeping source-time typechecking honest, `package:solid_annotations` exports six runtime-throwing stub extension families that mirror the upstream `flutter_solidart` surface but on `Future<T>` / `Stream<T>` (and their tear-off types):
+
+- `extension FutureWhen<T> on Future<T>` — surfaces `.when({ready, loading, error})` and `.maybeWhen({orElse, ready, loading, error})`, both returning `Widget`. Used in source by `fetchData().when(...)` / `fetchData().maybeWhen(...)`.
+- `extension StreamWhen<T> on Stream<T>` — same surface as `FutureWhen` but on `Stream<T>` for the Stream-form queries.
+- `extension RefreshFuture<T> on Future<T> Function()` — surfaces `.refresh()` returning `Future<void>`. Note the receiver type is the function tear-off (`Future<T> Function()`), not the Future itself; this is why the source idiom is `fetchData.refresh()` (no parens) — the user is chaining on the method reference, not on the called Future.
+- `extension RefreshStream<T> on Stream<T> Function()` — same surface as `RefreshFuture` but on Stream tear-offs.
+- `extension IsRefreshingFuture<T> on Future<T>` — surfaces `.isRefreshing` returning `bool`. Used by `fetchData().isRefreshing`.
+- `extension IsRefreshingStream<T> on Stream<T>` — same on `Stream<T>`.
+
+Every extension method body throws `Exception('This is just a stub for code generation.')`. The bodies are never executed at runtime because the runtime artifact lives in `lib/`, where the body rewriter (Section 4.8 rule 2) has already turned `fetchData()` into `fetchData.state` (resolving to upstream `ResourceState<T>` extensions for `.when` / `.maybeWhen` / `.isRefreshing`) and `fetchData.refresh()` into the upstream `Resource<T>.refresh()` direct instance method. `solid_annotations` exports no extensions on `Resource<T>` or `ResourceState<T>` — the codegen rewrites the chains so the upstream `flutter_solidart` extensions handle them directly.
 
 ---
 
@@ -434,15 +443,13 @@ Future<String> fetchData() async {
 Output:
 
 ```dart
-late final _fetchData = Resource<String>(
+late final fetchData = Resource<String>(
   () async {
     await Future.delayed(const Duration(seconds: 1));
     return 'fetched';
   },
   name: 'fetchData',
 );
-
-Resource<String> fetchData() => _fetchData;
 ```
 
 Input (Future form, body reads ONE upstream `@SolidState` signal — auto-tracking, direct source):
@@ -462,7 +469,7 @@ Output:
 ```dart
 final userId = Signal<String?>(null, name: 'userId');
 
-late final _fetchData = Resource<String?>(
+late final fetchData = Resource<String?>(
   () async {
     if (userId.value == null) return null;
     return await api.fetch(userId.value);
@@ -471,8 +478,6 @@ late final _fetchData = Resource<String?>(
   debounceDelay: const Duration(seconds: 1),
   name: 'fetchData',
 );
-
-Resource<String?> fetchData() => _fetchData;
 ```
 
 Input (Future form, body reads TWO upstream signals — synthesized Record-Computed source):
@@ -499,7 +504,7 @@ late final _fetchUserSource = Computed<(String?, String?)>(
   name: 'fetchUser_source',
 );
 
-late final _fetchUser = Resource<User?>(
+late final fetchUser = Resource<User?>(
   () async {
     if (userId.value == null || orgId.value == null) return null;
     return await api.fetch(userId.value, orgId.value);
@@ -507,8 +512,6 @@ late final _fetchUser = Resource<User?>(
   source: _fetchUserSource,
   name: 'fetchUser',
 );
-
-Resource<User?> fetchUser() => _fetchUser;
 ```
 
 Stream form:
@@ -523,37 +526,36 @@ Stream<int> watchTicks() {
 Output:
 
 ```dart
-late final _watchTicks = Resource<int>.stream(
+late final watchTicks = Resource<int>.stream(
   () => Stream.periodic(const Duration(seconds: 1), (i) => i),
   name: 'watchTicks',
 );
-
-Resource<int> watchTicks() => _watchTicks;
 ```
 
 Rules:
 
-1. **Two emitted declarations per query.** The annotated method becomes a private `late final _<name>` field holding the `Resource<T>` (or `Resource<T>.stream(...)`), plus a thin-accessor method `Resource<T> <name>() => _<name>;` that replaces the original method declaration. The thin-accessor's source-side return type changes from `Future<T>` / `Stream<T>` (in `source/`) to `Resource<T>` (in `lib/`). Source-time typechecking is preserved by the runtime-throwing stub extensions on `Future<T>` / `Stream<T>` that `solid_annotations` exports (Section 3.5 "Source-time typechecking").
+1. **One emitted declaration per query.** The annotated method is replaced by a single `late final <name>` field holding the upstream `Resource<T>` (or `Resource<T>.stream(...)`). No private wrapper, no thin-accessor, no underscore prefix. The field bears the same identifier the user wrote on the source-side method, so consumers continue to reference it by that name. The original method's body becomes the Resource's fetcher closure.
 
-2. **Body rewrite.** The original method's body is wrapped in a parameterless function expression preserving the `async` / `async*` keyword (or returning a `Stream<T>` directly for the synchronous Stream form). Section 5.1 type-driven `.value` rewrite applies inside the body so any `@SolidState` field / getter reads are correctly unboxed.
+2. **Source-side `<name>()` call sites are rewritten to `<name>.state` at lowering time.** In the user's source, state reads (`.when` / `.maybeWhen` / `.isRefreshing`) chain after a method call: `fetchData().when(...)`. After lowering, `<name>` is a `Resource<T>` field, not a method, and the chain `<name>().<member>` would not typecheck because `Resource<T>` itself does not have `.when` / `.maybeWhen` / `.isRefreshing` — those live as extensions on `ResourceState<T>` upstream. The body rewriter therefore replaces `<queryName>()` (a zero-argument `MethodInvocation` whose target resolves to a `@SolidQuery` method on the enclosing class) with `<queryName>.state` (a `PropertyAccess` reading the Resource's `ResourceState<T>`). The trailing `.when(...)` / `.maybeWhen(...)` / `.isRefreshing` chains then resolve directly to upstream `flutter_solidart` extensions on `ResourceState<T>` — no runtime adapters in `solid_annotations` are needed. The rewrite applies inside `build` bodies, `@SolidEffect` bodies, `@SolidState` getter bodies, and other `@SolidQuery` bodies — every place the body-rewrite pipeline runs. The `.refresh()` form uses a method tear-off in source (`fetchData.refresh()` — no parens after `fetchData`); after lowering, `<queryName>` is a `Resource<T>` field, and `.refresh()` resolves to the upstream direct instance method on `Resource<T>` — no rewrite needed. Shadowing is handled by the same analyzer-driven mechanism as Section 5.5: if a local with the same name shadows the query, neither rewrite fires.
 
-3. **Auto-tracking — direct source for one dep, synthesized Record-Computed for multiple.** The body's reactive reads (identifiers whose resolved static type is `SignalBase<T>`) determine the Resource's `source:` argument:
+3. **Body rewrite.** The original method's body is wrapped in a parameterless function expression preserving the `async` / `async*` keyword (or returning a `Stream<T>` directly for the synchronous Stream form). Section 5.1 type-driven `.value` rewrite applies inside the body so any `@SolidState` field / getter reads are correctly unboxed.
+
+4. **Auto-tracking — direct source for one dep, synthesized Record-Computed for multiple.** The body's reactive reads (identifiers whose resolved static type is `SignalBase<T>`) determine the Resource's `source:` argument:
    - **Zero reactive reads**: no `source:` argument emitted; the Resource only refreshes via explicit `.refresh()` calls.
    - **One reactive read**: the read identifier (a `Signal` or `Computed`) is passed directly as `source: <name>`. No synthesized field is emitted — wrapping a single Signal in a Computed that just returns its `.value` would be a no-op, so the generator skips it. The upstream `Resource<T>` constructor accepts any `SignalBase<dynamic>` as `source:`, and `Signal<T>` / `Computed<T>` already qualify.
-   - **Two or more reactive reads**: the generator synthesizes a `late final _<name>Source = Computed<(T1, T2, …)>(() => (s1.value, s2.value, …), name: '<name>_source')` field whose value is a `Record` combining all tracked values. The Computed is passed as `source: _<name>Source`. Records compare by value-equality, so changing ANY tracked signal flips the Record's identity, the Resource sees its source change, and the fetcher re-runs (subject to any `debounce:` delay).
-   When the body reads zero reactive declarations, no source field is emitted and the `source:` argument is omitted entirely.
+   - **Two or more reactive reads**: the generator synthesizes a `late final _<name>Source = Computed<(T1, T2, …)>(() => (s1.value, s2.value, …), name: '<name>_source')` field whose value is a `Record` combining all tracked values. The Computed is passed as `source: _<name>Source`. Records compare by value-equality, so changing ANY tracked signal flips the Record's identity, the Resource sees its source change, and the fetcher re-runs (subject to any `debounce:` delay). The synthesized field is the only reason an underscore-prefixed Resource-related declaration ever appears in lowered output.
 
-4. **`Resource<T>(...)` for Future, `Resource<T>.stream(...)` for Stream.** Type argument `T` is the inner type of the original `Future<T>` / `Stream<T>` return signature.
+5. **`Resource<T>(...)` for Future, `Resource<T>.stream(...)` for Stream.** Type argument `T` is the inner type of the original `Future<T>` / `Stream<T>` return signature.
 
-5. **`late final` is required** on both the private Resource field and (when synthesized) the source Computed field, parallel to `Computed` (Section 4.5) and `Effect` (Section 4.7): each initializer references other reactive instance fields, so its evaluation must defer until `this` is in scope.
+6. **`late final` is required** on the Resource field and (when synthesized) on the source Record-Computed field, parallel to `Computed` (Section 4.5) and `Effect` (Section 4.7): each initializer references other reactive instance fields, so its evaluation must defer until `this` is in scope.
 
-6. **Method-name → `name:` argument** unless `@SolidQuery(name: '…')` overrides. The synthesized source Computed uses `'<methodName>_source'` (or `'<overrideName>_source'` when `name:` is overridden) as its debug name.
+7. **Method-name → `name:` argument** unless `@SolidQuery(name: '…')` overrides. When a Record-Computed source is synthesized, it uses `'<methodName>_source'` (or `'<overrideName>_source'` when `name:` is overridden) as its debug name.
 
-7. **Annotation parameters propagate.** `@SolidQuery(debounce: Duration(...))` becomes the Resource's `debounceDelay:` argument. `@SolidQuery(useRefreshing: false)` becomes `useRefreshing: false` on the Resource (the upstream default `useRefreshing: true` is omitted from the emitted code to keep generated lines short).
+8. **Annotation parameters propagate.** `@SolidQuery(debounce: Duration(...))` becomes the Resource's `debounceDelay:` argument. `@SolidQuery(useRefreshing: false)` becomes `useRefreshing: false` on the Resource (the upstream default `useRefreshing: true` is omitted from the emitted code to keep generated lines short).
 
-8. **Lazy by default.** The `late final _<name>` field stays uninitialized until the thin-accessor `<name>()` is first invoked. The first invocation triggers the `late final` initializer, which constructs the upstream `Resource<T>` (which is itself `lazy: true` upstream and so does not yet fire the fetcher). The fetcher fires on the first `.state` read, which the `.when` / `.maybeWhen` / `.isRefreshing` extensions perform internally. Resources do NOT use the Section 4.7 / Section 8.3 forced-materialization pattern that `Effect` requires — the thin-accessor invocation IS the consumer.
+9. **Lazy by default.** The `late final <name>` field stays uninitialized until first read. The first read happens at the first reactive call site (e.g., the body of a `SignalBuilder`-wrapped `<name>.when(...)` chain in `build`). That access triggers the `late final` initializer, which constructs the upstream `Resource<T>` (which is itself `lazy: true` upstream and so does not yet fire the fetcher). The fetcher fires on the first `.state` read, which the `.when` / `.maybeWhen` / `.isRefreshing` extensions perform internally. Resources do NOT use the Section 4.7 / Section 8.3 forced-materialization pattern that `Effect` requires.
 
-9. **Disposal.** Both the `_<name>` Resource field AND the `_<name>Source` Computed field (if synthesized) join the unified ordered dispose list in declaration order. Reverse-declaration disposal (Section 10) tears them down before the Signals/Computeds they consume.
+10. **Disposal.** The `<name>` Resource field always joins the unified ordered dispose list. The `_<name>Source` Record-Computed (when synthesized) is emitted immediately before its Resource and joins the dispose list in that source-declaration position, so reverse-declaration disposal (Section 10) tears the Resource down before the Record-Computed and before any Signals they read.
 
 ---
 
