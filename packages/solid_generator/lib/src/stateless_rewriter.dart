@@ -58,12 +58,14 @@ RewriteResult rewriteStatelessWidget(
     partition.widgetFieldsText,
   );
   final stateClass = _emitStateClass(
-    className,
-    stateClassName,
-    reactiveBlock.fieldsText,
-    reactiveBlock.disposeNamesInDeclarationOrder,
-    partition.stateFieldsText,
-    buildMethodText,
+    className: className,
+    stateClassName: stateClassName,
+    reactiveFieldsText: reactiveBlock.fieldsText,
+    disposeNamesInDeclarationOrder:
+        reactiveBlock.disposeNamesInDeclarationOrder,
+    effectNamesInDeclarationOrder: reactiveBlock.effectNamesInDeclarationOrder,
+    stateFieldsText: partition.stateFieldsText,
+    buildMethodText: buildMethodText,
   );
 
   final solidartNames = <String>{'Signal', 'SignalBuilder'};
@@ -83,7 +85,16 @@ RewriteResult rewriteStatelessWidget(
 /// `Effect` depend on: each must reference declarations defined before it,
 /// so the emitted `late final` lines must appear after the declarations they
 /// read in the rewritten State class.
-({String fieldsText, List<String> disposeNamesInDeclarationOrder})
+///
+/// `effectNamesInDeclarationOrder` is the Effect-only subset of
+/// `disposeNamesInDeclarationOrder`, pulled out so the rewriter can synthesize
+/// `initState()` that materializes each `late final` Effect field at mount
+/// time (SPEC §4.7).
+({
+  String fieldsText,
+  List<String> disposeNamesInDeclarationOrder,
+  List<String> effectNamesInDeclarationOrder,
+})
 _emitReactiveBlock(
   ClassDeclaration classDecl,
   List<FieldModel> solidFields,
@@ -95,6 +106,7 @@ _emitReactiveBlock(
   final effectByName = {for (final e in solidEffects) e.methodName: e};
   final lines = <String>[];
   final disposeNames = <String>[];
+  final effectNames = <String>[];
 
   for (final member in classDecl.members) {
     if (member is FieldDeclaration) {
@@ -119,6 +131,7 @@ _emitReactiveBlock(
         if (e != null) {
           lines.add(emitEffectField(e));
           disposeNames.add(e.methodName);
+          effectNames.add(e.methodName);
         }
       }
     }
@@ -127,6 +140,7 @@ _emitReactiveBlock(
   return (
     fieldsText: lines.join('\n'),
     disposeNamesInDeclarationOrder: disposeNames,
+    effectNamesInDeclarationOrder: effectNames,
   );
 }
 
@@ -261,26 +275,38 @@ String _emitWidgetClass(
 /// non-widget-bound field that has been moved off the widget; emitted before
 /// the synthesized reactive fields so original declaration order is preserved.
 /// [reactiveFieldsText] is the source-ordered emission of every reactive
-/// declaration (Signal field + Computed getter) on the original class.
-String _emitStateClass(
-  String className,
-  String stateClassName,
-  String reactiveFieldsText,
-  List<String> disposeNamesInDeclarationOrder,
-  String stateFieldsText,
-  String buildMethodText,
-) {
+/// declaration (Signal field + Computed getter + Effect method) on the
+/// original class.
+///
+/// [effectNamesInDeclarationOrder] is the Effect-only subset of
+/// [disposeNamesInDeclarationOrder]. When non-empty, this method emits a
+/// synthesized `initState()` that materializes each `late final` Effect field
+/// at mount time so its autorun fires (SPEC §4.7). When empty, no `initState`
+/// is emitted — preserving byte-equality with every M1/M2/M3 golden that has
+/// no Effects.
+String _emitStateClass({
+  required String className,
+  required String stateClassName,
+  required String reactiveFieldsText,
+  required List<String> disposeNamesInDeclarationOrder,
+  required List<String> effectNamesInDeclarationOrder,
+  required String stateFieldsText,
+  required String buildMethodText,
+}) {
   final dispose = emitDispose(
     disposeNamesInDeclarationOrder,
     inheritsDispose: true,
   );
   final fieldsPrefix = stateFieldsText.isNotEmpty ? '$stateFieldsText\n\n' : '';
+  final initStateBlock = effectNamesInDeclarationOrder.isEmpty
+      ? ''
+      : '${emitInitState(effectNamesInDeclarationOrder)}\n\n';
 
   return '''
 class $stateClassName extends State<$className> {
 $fieldsPrefix$reactiveFieldsText
 
-$dispose
+$initStateBlock$dispose
 
   $buildMethodText
 }''';

@@ -20,6 +20,12 @@ class _EffectWithDepsState extends State<EffectWithDeps> {
   }, name: 'logBoth');
 
   @override
+  void initState() {
+    super.initState();
+    final _ = logBoth;
+  }
+
+  @override
   void dispose() {
     logBoth.dispose();
     doubleCounter.dispose();
