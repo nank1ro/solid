@@ -656,6 +656,8 @@ class Counter {
 
 If the developer has already declared a `dispose()` method, the generator merges: the generated disposal calls are prepended to the existing body, then `super.dispose()` is emitted if and only if the class's supertype chain contains a `dispose()` method (e.g., `State<T>`, `ChangeNotifier`). The generator determines this via the analyzer's type resolution, not by name matching. For a plain class with no `dispose()` in the supertype chain, `super.dispose()` is omitted.
 
+When the plain class has one or more `@SolidEffect` methods, the generator synthesizes a no-arg constructor whose body reads each Effect field by bare identifier in declaration order — analogue of the State class's `initState()` materialization (§4.7). The synthesized constructor takes the place a widget lifecycle would otherwise serve, activating each `late final` Effect at construction time so its autorun fires once with the initial Signal values and subscribes to subsequent changes. Plain classes with a user-defined constructor and `@SolidEffect` are not supported in this milestone — the generator rejects with a `CodeGenerationError`.
+
 ### 8.4 StatelessWidget with zero `@SolidState` annotations
 
 Passes through unchanged to `lib/`.
@@ -751,7 +753,7 @@ These were open questions during SPEC drafting and have been answered by the dev
 1. **Plain (non-Widget) classes with `@SolidState` fields** — supported per Section 8.3.
 2. **Compound-assignment operator list in Section 5.3** — complete.
 3. **`@SolidState` on `final` fields** — rejected with a clear error (wrapping a never-reassigned value in a `Signal` is pointless).
-4. **Custom `initState` / `didUpdateWidget` overrides in an existing State class (Section 8.2)** — preserved untouched. If an existing `dispose()` is present, reactive disposals are merged into its body.
+4. **Custom `initState` / `didUpdateWidget` overrides in an existing State class (Section 8.2)** — preserved untouched, with one carve-out: when one or more `@SolidEffect` methods exist on the class, Effect-materialization reads (`<effectName>;`) are spliced into the existing `initState` body immediately after the `super.initState();` call (or after the opening brace if no super call is detected as the first statement). If an existing `dispose()` is present, reactive disposals are merged into its body.
 5. **User-facing packages** — two packages. `package:solid_annotations` (runtime dep) hosts the annotation classes (`@SolidState` and `@SolidEffect` today; `@SolidQuery`/`@SolidEnvironment` in later milestones). `package:solid_generator` (dev_dep) hosts the build_runner builder. There is no `package:solid` umbrella. Consumers add `solid_annotations` + `flutter_solidart` as runtime deps and `solid_generator` + `build_runner` as dev_deps, then import annotations and `flutter_solidart` primitives directly.
 6. **Shadowing rule (Section 5.5)** — handled by type resolution. Because Section 5.1 is type-driven, a shadowed local of a non-`SignalBase` type is never rewritten. A dedicated shadowing test case is required in M1.
 7. **`const` on the public widget constructor (Section 8.1)** — not added by the generator. Constructors round-trip verbatim from source. After the class split removes mutable `@SolidState` fields from the widget, the rewritten widget is usually const-eligible by Dart's own rules; `dart fix --apply` is the trusted lint pass that adds `const` (and removes unused imports — Section 9). The generator never emits `const` on its own.

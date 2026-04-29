@@ -44,6 +44,8 @@ const List<String> goldenNames = <String>[
   'm4_01_simple_effect_with_deps',
   'm4_02_effect_with_signal_and_computed',
   'm4_03_effect_block_body_shadowing',
+  'm4_08_effect_on_state_class',
+  'm4_08_effect_on_plain_class',
 ];
 
 /// Memoized golden directory resolution. Resolved relative to the package

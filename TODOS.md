@@ -1543,6 +1543,12 @@ class _CounterState extends State<Counter> {
 
 **Dependencies:** M4-01, M1-07.
 
-**Status:** TODO
+**Implementation note:** Three pieces beyond the simple guard removal:
+
+1. New `emitConstructor(className, effectNames)` helper in `signal_emitter.dart` — the plain-class analogue of `emitInitState`. A plain class has no widget lifecycle, so the synthesized constructor body materializes Effects via bare-id reads at construction time; SPEC §8.3 was extended with a sentence describing this. The helper is only invoked when `effectNames` is non-empty, preserving byte-equality with the M1-06 Signal-only plain-class golden.
+2. New `_mergeInitState` in `state_class_rewriter.dart`, mirroring `_mergeDispose` — when Effects exist on a `State<X>` subclass that also declares `initState`, materialization reads (`<effectName>;`) are spliced in immediately after the `super.initState();` call (or after the opening brace if the user's body lacks the super call). SPEC §14 item 4 was extended with this carve-out. When no `initState` exists and Effects are present, a fresh one is synthesized via `emitInitState`.
+3. Both in-place rewriters now extend their `solidartNames` set with `'Effect'` when at least one Effect is present, so the import-rewriter adds `package:flutter_solidart/flutter_solidart.dart` for the Effect symbol used in the body. The walk in `state_class_rewriter` was refactored to build `disposeNames` incrementally during the member walk so Signal field names and Effect method names interleave by source-declaration order — required for SPEC §10's reverse-disposal correctness when Signals and Effects coexist. User-defined constructors on plain classes remain rejected: the synthesized constructor and a user constructor are mutually exclusive in this milestone.
+
+**Status:** DONE
 
 ---

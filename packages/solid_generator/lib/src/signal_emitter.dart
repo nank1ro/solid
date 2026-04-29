@@ -134,3 +134,31 @@ String emitInitState(List<String> effectNamesInDeclarationOrder) {
   buffer.write('  }');
   return buffer.toString();
 }
+
+/// Emits a no-arg constructor whose body materializes every `late final`
+/// Effect field by reading it as a bare-identifier statement
+/// (`<effectName>;`), in source-declaration order.
+///
+/// SPEC §4.7 + §8.3: a plain Dart class has no `initState` lifecycle hook,
+/// but the same `late final` Effect-materialization rule applies — without a
+/// synthesized read, the Effect's factory constructor never runs and the
+/// autorun never registers dependencies. Reading each Effect inside the
+/// generated constructor body is the plain-class analogue of
+/// [emitInitState] for State classes: the Effects activate at construction
+/// time, so a `Counter()` instantiation is enough to start the autoruns.
+///
+/// Caller is responsible for only invoking this when
+/// [effectNamesInDeclarationOrder] is non-empty — otherwise an empty
+/// constructor is emitted, which is just noise relative to Dart's implicit
+/// default constructor for a Signal-only class (see `rewritePlainClass`).
+String emitConstructor(
+  String className,
+  List<String> effectNamesInDeclarationOrder,
+) {
+  final buffer = StringBuffer()..writeln('  $className() {');
+  for (final name in effectNamesInDeclarationOrder) {
+    buffer.writeln('    $name;');
+  }
+  buffer.write('  }');
+  return buffer.toString();
+}
