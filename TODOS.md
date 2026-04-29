@@ -1463,7 +1463,9 @@ class _CounterState extends State<Counter> {
 
 **Dependencies:** M4-01.
 
-**Status:** TODO
+**Implementation note:** The runtime detection already shipped with M4-01 — `_readReactiveBody` in `packages/solid_generator/lib/src/annotation_reader.dart` throws the SPEC §3.4 error when `collectValueEdits(...).edits.isEmpty`, and `readSolidEffectMethod` already passes the SPEC-defined `emptyDepsError` string. M4-05 added the dedicated rejection fixture + test (`test/golden/inputs/m4_05_effect_no_deps_rejected.dart` + `test/rejections/m4_05_effect_no_deps_test.dart`) to pin this behavior independent of M4-01's regress.
+
+**Status:** DONE
 
 ---
 
