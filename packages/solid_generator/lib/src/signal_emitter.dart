@@ -105,8 +105,8 @@ String emitDispose(
 }
 
 /// Emits an `initState()` method that materializes every `late final` Effect
-/// field by reading it through a wildcard discard (`final _ = <effectName>;`),
-/// in source-declaration order.
+/// field by reading it as a bare-identifier statement (`<effectName>;`), in
+/// source-declaration order.
 ///
 /// SPEC §4.7: in Dart, `late final field = expr` defers the initializer until
 /// the field is first read. Without this synthesized read, the Effect's
@@ -117,10 +117,7 @@ String emitDispose(
 ///
 /// Touching each Effect by name in `initState` triggers the `late final`
 /// initializer at mount time, so `Effect(...)`'s autorun runs once with the
-/// initial signal values and subscribes to subsequent changes. The Dart 3
-/// wildcard pattern `final _ = <name>;` is used (rather than a bare
-/// `<name>;` statement) so consumer apps that enable the
-/// `unnecessary_statements` lint do not flag generator output.
+/// initial signal values and subscribes to subsequent changes.
 ///
 /// [effectNamesInDeclarationOrder] should mirror the source order of the
 /// emitted `late final … = Effect(...)` fields. Caller is responsible for
@@ -132,7 +129,7 @@ String emitInitState(List<String> effectNamesInDeclarationOrder) {
     ..writeln('  void initState() {')
     ..writeln('    super.initState();');
   for (final name in effectNamesInDeclarationOrder) {
-    buffer.writeln('    final _ = $name;');
+    buffer.writeln('    $name;');
   }
   buffer.write('  }');
   return buffer.toString();

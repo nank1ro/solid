@@ -22,7 +22,7 @@ class _EffectShadowingState extends State<EffectShadowing> {
   @override
   void initState() {
     super.initState();
-    final _ = logCounter;
+    logCounter;
   }
 
   @override

@@ -111,7 +111,7 @@ class _EffectCounterPageState extends State<_EffectCounterPage> {
   @override
   void initState() {
     super.initState();
-    final _ = recordHistory;
+    recordHistory;
   }
 
   @override

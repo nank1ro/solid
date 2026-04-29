@@ -22,7 +22,7 @@ class _EffectWithDepsState extends State<EffectWithDeps> {
   @override
   void initState() {
     super.initState();
-    final _ = logBoth;
+    logBoth;
   }
 
   @override
