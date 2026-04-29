@@ -1,7 +1,7 @@
 # Solid — Product Specification (v2)
 
 **Status:** DRAFT — under review
-**Scope of this SPEC:** defines the user-facing contract for `@SolidState` and `@SolidEffect` (M1 and M4 milestones). The remaining annotations shipped before v2 release — `@SolidQuery`, `@SolidEnvironment` — are reserved names only; their full contract lives in a future SPEC revision.
+**Scope of this SPEC:** defines the user-facing contract for `@SolidState`, `@SolidEffect`, and `@SolidQuery` (M1, M4, and M5 milestones). The remaining annotation shipped before v2 release — `@SolidEnvironment` — is a reserved name only; its full contract lives in a future SPEC revision.
 
 This document is the single source of truth for what Solid does. Reviewer agents cite this document by section number when judging an implementation. It contains no file names, no class names, no AST details — only what the developer sees and the guarantees they get.
 
@@ -30,7 +30,7 @@ Rules:
 
 - **Input path**: any `.dart` file under `source/` at any depth.
 - **Output path**: same relative path under `lib/`. No suffix change. `source/foo/bar.dart` becomes `lib/foo/bar.dart`.
-- **Transformation vs verbatim copy.** Solid reads every `.dart` file under `source/`. If a file contains at least one `@Solid*` annotation (`@SolidState` and `@SolidEffect` today; `@SolidQuery`, `@SolidEnvironment` in later milestones), Solid transforms it. Otherwise the file is copied verbatim to the mirrored path under `lib/`. Non-`.dart` files (assets, configs, etc.) are always copied verbatim. The key is annotation presence, not file extension.
+- **Transformation vs verbatim copy.** Solid reads every `.dart` file under `source/`. If a file contains at least one `@Solid*` annotation (`@SolidState`, `@SolidEffect`, and `@SolidQuery` today; `@SolidEnvironment` in a later milestone), Solid transforms it. Otherwise the file is copied verbatim to the mirrored path under `lib/`. Non-`.dart` files (assets, configs, etc.) are always copied verbatim. The key is annotation presence, not file extension.
 - **Both are committed to git.** Source is the review artifact for intent. Lib is the review artifact for correctness — every PR that changes `source/` must include the regenerated `lib/` diff so reviewers catch generator regressions.
 - **Solid emits no `.g.dart` files of its own.** Third-party generators (freezed, json_serializable, drift) may emit `.g.dart` or `.freezed.dart` files under `source/`; Solid copies those verbatim to the mirrored path under `lib/`.
 - **The example app's `main.dart`** lives in `lib/` (or `source/` if itself annotated) and imports from `lib/` using normal Flutter imports (`import 'counter.dart';`).
@@ -41,7 +41,7 @@ Rules:
 
 ## 3. Annotations
 
-> **Milestones vs v2.** The v2 public release ships the full annotation set: `@SolidState`, `@SolidEffect`, `@SolidQuery`, `@SolidEnvironment`. Implementation is split into internal milestones. M1 implements `@SolidState`; M4 adds `@SolidEffect`. Later milestones add `@SolidQuery` and `@SolidEnvironment` before v2 ships. The user-facing API of every annotation is fixed in this SPEC; no source-code change is required when a later milestone lands.
+> **Milestones vs v2.** The v2 public release ships the full annotation set: `@SolidState`, `@SolidEffect`, `@SolidQuery`, `@SolidEnvironment`. Implementation is split into internal milestones. M1 implements `@SolidState`; M4 adds `@SolidEffect`; M5 adds `@SolidQuery`. A later milestone adds `@SolidEnvironment` before v2 ships. The user-facing API of every annotation is fixed in this SPEC; no source-code change is required when a later milestone lands.
 
 ### 3.1 M1 scope: `@SolidState`
 
@@ -78,9 +78,8 @@ int counter = 0;
 
 ### 3.2 Later milestones (shipped before v2 release)
 
-The following annotations are part of the v2 public release but land in milestones after the SPEC's currently-specified set (`@SolidState` in M1, `@SolidEffect` in M4). Until each one ships, the generator must fail with a clear error that names the annotation and says "not yet implemented; scheduled for a later v2 milestone." Their names are reserved here; the full user-facing contract (parameters, valid targets, transformation rules) will be specified in a future SPEC revision before each lands.
+The following annotation is part of the v2 public release but lands in a milestone after the SPEC's currently-specified set (`@SolidState` in M1, `@SolidEffect` in M4, `@SolidQuery` in M5). Until it ships, the generator must fail with a clear error that names the annotation and says "not yet implemented; scheduled for a later v2 milestone." Its name is reserved here; the full user-facing contract (parameters, valid targets, transformation rules) will be specified in a future SPEC revision before it lands.
 
-- `@SolidQuery` — async reactive source (method)
 - `@SolidEnvironment` — dependency injection (field)
 
 ### 3.3 Permanent non-goals
@@ -133,6 +132,69 @@ void logCounter() {
 #### Reactive-deps requirement
 
 The method body MUST read at least one reactive declaration — any identifier whose resolved static type is `SignalBase<T>` or a subtype. An `Effect` with zero reactive dependencies is rejected at build time: *"effect `<name>` has no reactive dependencies; use a regular method or call it once explicitly instead of `@SolidEffect`."* This mirrors Section 4.5's rejection rule for zero-dep `Computed`.
+
+### 3.5 M5 scope: `@SolidQuery`
+
+`@SolidQuery` declares an async reactive source on a class. It attaches to an instance method whose body fetches data from a `Future` or `Stream` and exposes the result as a `Resource<T>`. The annotated method's body is wrapped in a parameterless function expression that becomes the `Resource<T>`'s fetcher. The resulting `Resource<T>` re-fetches when the user calls `.refresh()` on it; for advanced upstream-binding scenarios the user constructs a hand-written `Resource<T>` directly without `@SolidQuery`.
+
+```dart
+@SolidQuery()
+Future<User> fetchUser() async => api.getUser();
+
+@SolidQuery()
+Stream<int> watchTicker() async* {
+  yield* tickerStream;
+}
+```
+
+Optional `name:` parameter overrides the auto-derived debug name:
+
+```dart
+@SolidQuery(name: 'currentUser')
+Future<User> fetchUser() async => api.getUser();
+```
+
+#### Valid target
+
+- Instance method with one of two return-type / body-keyword pairings:
+  1. `Future<T>` return type with an `async` body (expression or block).
+  2. `Stream<T>` return type with an `async*` body (block only — Dart does not allow `async*` expression bodies).
+- The method must take **no parameters** (see Section 14 item 8).
+
+#### Invalid targets (the generator must reject with a clear error)
+
+- Method with a non-`Future`/non-`Stream` return type (sync return cannot back a `Resource<T>`; for a sync reactive value use `@SolidState` on a getter).
+- Method whose body keyword does not match the return type (a `Future<T>`-typed body that is not `async`, or a `Stream<T>`-typed body that is not `async*`).
+- Method with one or more parameters (deferred per Section 14 item 8).
+- `static` method (class-level, not instance — out of scope, parallel to `@SolidState` and `@SolidEffect`).
+- `abstract` or `external` method (no body to lower).
+- Getter (use `@SolidState` on a getter for a `Computed`).
+- Setter.
+- Top-level function.
+- Field.
+
+#### No reactive-deps requirement
+
+Unlike `@SolidEffect` (Section 3.4) and `@SolidState` getter (Section 4.5), a `@SolidQuery` method body fetches from external sources (HTTP, database, Stream subscription, etc.) and may legitimately have zero reactive-field references. The Section 4.5 / Section 3.4 zero-deps rejection rule does NOT apply to queries. A query that does read reactive declarations behaves correctly under Section 5: the `.value` / `.state` rewrite fires on each identifier per its resolved type.
+
+#### Read pattern
+
+A reference to a `@SolidQuery` field elsewhere in the class (in a `build` method, a `@SolidEffect` body, or a `@SolidState` getter body) is canonically chained as `<query>.state.when(...)` — `.state` returns `ResourceState<T>` and `.when({required ready, required loading, required error})` is an extension method on `ResourceState<T>` from `package:flutter_solidart`. `.maybeWhen({orElse, ready, loading, error})` is the partial-match analogue.
+
+```dart
+@override
+Widget build(BuildContext context) => fetchUser.state.when(
+  ready: (user) => Text(user.name),
+  loading: () => const CircularProgressIndicator(),
+  error: (e, _) => Text('error: $e'),
+);
+```
+
+The `.state` accessor is required in source because `.when` is not defined on `Resource<T>` itself (only on `ResourceState<T>`). The Section 5.1 `.state` rewrite handles the corner case of a *bare-identifier* read of a query field (an argument-position read or interpolation), where the user has not written `.state` explicitly; for method-call chains like `.when(...)` the user writes `.state` themselves so the source typechecks.
+
+#### Refresh
+
+`<query>.refresh()` is a direct upstream method on `Resource<T>` that re-runs the fetcher and emits a new `ResourceState<T>`. It survives the body-rewrite pipeline unchanged — `.refresh()` is a method call, not a bare-identifier read, so neither the Section 5.1 `.state` rewrite nor the Section 6 untracked-context rules amend its shape.
 
 ---
 
@@ -302,6 +364,52 @@ Rules:
 - When the synthesized State class declares one or more `late final` Effect fields, the generator emits an `initState()` override that calls `super.initState()` then reads each Effect field via a bare-identifier statement (`<effectName>;`) in declaration order. This materializes each lazy `late final` initializer at mount time, triggering the upstream `Effect` factory's autorun (`flutter_solidart` `Effect.run()` in the factory `finally`) and registering reactive dependencies before any user interaction. Without this read, no access to the Effect field occurs until `dispose()`, so the Effect never fires.
 - The cross-cutting rules in Sections 5.1, 5.2, 5.4, 5.5, 6.0, 6.2, 6.4, and 9 apply uniformly inside `Effect` bodies. The body is reactive code in the same sense as a `Computed` or a `build` body, so the type-driven `.value` rewrite, string-interpolation rewrite, no-double-append guard, shadowing handling, untracked-context detection, `.untracked` opt-out, and import-rewrite rules are reused without amendment. No new SPEC rule is required for `Effect` bodies.
 
+### 4.8 `@SolidQuery` on method → `Resource`
+
+Input (Future form):
+
+```dart
+@SolidQuery()
+Future<User> fetchUser() async => api.getUser();
+```
+
+Output:
+
+```dart
+late final fetchUser = Resource<User>(
+  () async => api.getUser(),
+  name: 'fetchUser',
+);
+```
+
+Input (Stream form):
+
+```dart
+@SolidQuery()
+Stream<int> watchTicker() async* {
+  yield* tickerStream;
+}
+```
+
+Output:
+
+```dart
+late final watchTicker = Resource<int>.stream(
+  () async* {
+    yield* tickerStream;
+  },
+  name: 'watchTicker',
+);
+```
+
+Rules:
+
+- The method's body — expression body (Future form) or block body (Future or Stream form) — is wrapped in a parameterless function expression that preserves the `async` / `async*` keyword. Section 5.1 type-driven rewriting (both the `.value` form for `Signal` / `Computed` reads and the `.state` form for cross-`Resource` reads) is applied verbatim inside the body. A query body MAY read other reactive declarations — the rewrite still fires per resolved type — but no upstream-Signal subscription is wired automatically (an annotated query body is the fetcher closure only; advanced re-fetch triggers belong to a future SPEC revision).
+- Future-returning methods lower to `Resource<T>(...)`; Stream-returning methods lower to `Resource<T>.stream(...)`. Type argument `T` is the inner type of the original `Future<T>` / `Stream<T>` return signature.
+- The resulting field is always declared `late final`, parallel to `Computed` (Section 4.5) and `Effect` (Section 4.7): the initializer may read other reactive instance fields, so its evaluation must defer until `this` is in scope.
+- Method-name → `name:` argument, unless `@SolidQuery(name: '…')` overrides — symmetric with the rules in Sections 4.1, 4.4, and 4.7.
+- The Section 4.7 `initState()` materialization (and Section 8.3 plain-class constructor materialization) extends to include `Resource` fields. A bare-identifier read of each Resource at mount time (or construction time on plain classes) forces the lazy `late final` initializer to run, registering the upstream `Resource` autorun before any user interaction. Without the forced read the `Resource` constructor (which defaults to `lazy: true`) never fires its fetcher.
+
 ---
 
 ## 5. Reactive-Read Rules
@@ -310,9 +418,9 @@ When a generated piece of code (anything under `lib/`) references a reactive val
 
 ### 5.1 Identifier rewrite
 
-A bare `SimpleIdentifier` is rewritten to `<name>.value` if and only if its resolved static type is `SignalBase<T>` (or a subtype: `Signal<T>`, `Computed<T>`, `ReadSignal<T>`, `Resource<T>`) from `package:flutter_solidart`.
+A bare `SimpleIdentifier` is rewritten to `<name>.value` if and only if its resolved static type is `SignalBase<T>` (or a subtype: `Signal<T>`, `Computed<T>`, `ReadSignal<T>`) from `package:flutter_solidart`. `Resource<T>` is special-cased: see the `Resource` paragraph below.
 
-In M1 the only way to introduce such an identifier is via `@SolidState` on the enclosing class, but the rule itself is expressed in terms of resolved type so later milestones (`@SolidEnvironment`, `@SolidQuery`) work without amendment.
+In M1 the only way to introduce such an identifier is via `@SolidState` on the enclosing class, but the rule itself is expressed in terms of resolved type so later milestones (`@SolidEnvironment`) work without amendment.
 
 Source:
 
@@ -325,6 +433,24 @@ Output (inside a SignalBuilder — see Section 7):
 ```dart
 Text(counter.value.toString())
 ```
+
+#### `Resource<T>` accessor — `.state` instead of `.value`
+
+`Resource<T>` is a subtype of `SignalBase<ResourceState<T>>`, not `SignalBase<T>`, and upstream `flutter_solidart` (≥ 2.7.3) deprecates `Resource<T>.value`. The rewriter therefore emits `<name>.state` (returning `ResourceState<T>`) for receivers whose resolved static type is `Resource<T>`, and `<name>.value` for every other `SignalBase<T>` subtype. The rule remains type-driven; the only difference is the accessor name.
+
+Source (a bare-identifier read of `fetchUser` passed as an argument):
+
+```dart
+final ResourceState<User> snapshot = fetchUser;
+```
+
+Output:
+
+```dart
+final ResourceState<User> snapshot = fetchUser.state;
+```
+
+This rewrite fires only on bare `SimpleIdentifier` reads of a `Resource<T>`-typed receiver. Method-call chains (e.g., `fetchUser.state.when(...)`, `fetchUser.refresh()`) are unaffected — the source must already chain `.state` (or call a direct `Resource` method like `.refresh()`) for analyzer-level typechecking, and the rewriter does not edit method-call receivers.
 
 ### 5.2 String interpolation rewrite
 
@@ -656,7 +782,7 @@ class Counter {
 
 If the developer has already declared a `dispose()` method, the generator merges: the generated disposal calls are prepended to the existing body, then `super.dispose()` is emitted if and only if the class's supertype chain contains a `dispose()` method (e.g., `State<T>`, `ChangeNotifier`). The generator determines this via the analyzer's type resolution, not by name matching. For a plain class with no `dispose()` in the supertype chain, `super.dispose()` is omitted.
 
-When the plain class has one or more `@SolidEffect` methods, the generator synthesizes a no-arg constructor whose body reads each Effect field by bare identifier in declaration order — analogue of the State class's `initState()` materialization (§4.7). The synthesized constructor takes the place a widget lifecycle would otherwise serve, activating each `late final` Effect at construction time so its autorun fires once with the initial Signal values and subscribes to subsequent changes. Plain classes with a user-defined constructor and `@SolidEffect` are not supported in this milestone — the generator rejects with a `CodeGenerationError`.
+When the plain class has one or more `@SolidEffect` methods or `@SolidQuery` methods, the generator synthesizes a no-arg constructor whose body reads each Effect / Resource field by bare identifier in declaration order — analogue of the State class's `initState()` materialization (§4.7, §4.8). The synthesized constructor takes the place a widget lifecycle would otherwise serve, activating each `late final` Effect / Resource at construction time so its autorun fires once with the initial Signal values (or its fetcher fires once at construction) and subscribes to subsequent changes. Plain classes with a user-defined constructor and `@SolidEffect` or `@SolidQuery` are not supported in this milestone — the generator rejects with a `CodeGenerationError`.
 
 ### 8.4 StatelessWidget with zero `@SolidState` annotations
 
@@ -678,11 +804,11 @@ This is the fix for issue #8.
 
 ## 10. `dispose()` Contract
 
-Every generated `Signal`, `Computed`, and `Effect` must be disposed when its owning class is disposed. The merging algorithm below applies identically to every class kind; the per-kind sections (8.1–8.3) describe how the algorithm is triggered.
+Every generated `Signal`, `Computed`, `Effect`, and `Resource` must be disposed when its owning class is disposed. The merging algorithm below applies identically to every class kind; the per-kind sections (8.1–8.3) describe how the algorithm is triggered.
 
 Algorithm: if the target class already has a `dispose()` body, prepend one `xxx.dispose()` call per reactive declaration to the top of the body and leave the rest untouched; if no `dispose()` exists, synthesize one. Emit `super.dispose()` at the end if and only if the class's supertype chain contains a `dispose()` method (e.g., `State<T>`, `ChangeNotifier`); the generator determines this via the analyzer's type resolution, not by name matching. For a plain class with no `dispose()` in the supertype chain, omit `super.dispose()`.
 
-Disposal order is **reverse declaration order**: dependents are disposed before their dependencies. Because a `Computed` must always be declared after the `Signal`s it reads, and an `Effect` must always be declared after the `Signal`s/`Computed`s it reads (those declarations are the dependents' dependencies), reverse declaration order guarantees a dependent (`Effect` or `Computed`) is disposed first and a dependency (`Signal` or `Computed`) is never disposed while a live subscriber still holds a subscription to it.
+Disposal order is **reverse declaration order**: dependents are disposed before their dependencies. Because a `Computed` must always be declared after the `Signal`s it reads, an `Effect` must always be declared after the `Signal`s/`Computed`s it reads, and a `Resource` whose fetcher reads other reactive declarations must be declared after those declarations (those declarations are the dependents' dependencies), reverse declaration order guarantees a dependent (`Effect`, `Computed`, or `Resource`) is disposed first and a dependency (`Signal`, `Computed`, or another `Resource`) is never disposed while a live subscriber still holds a subscription to it.
 
 ---
 
@@ -732,9 +858,8 @@ With Option A the developer saves `source/`, waits for build_runner to emit, the
 
 ## 13. Not yet shipped (deferred until later milestones, before v2 release)
 
-These features are part of the v2 public release but land in milestones after the SPEC's currently-specified set (`@SolidState` in M1, `@SolidEffect` in M4). A build that encounters any of them in source code must fail with a clear error naming the unsupported feature and referencing this section.
+These features are part of the v2 public release but land in milestones after the SPEC's currently-specified set (`@SolidState` in M1, `@SolidEffect` in M4, `@SolidQuery` in M5). A build that encounters any of them in source code must fail with a clear error naming the unsupported feature and referencing this section.
 
-- `@SolidQuery` (Future and Stream forms; `.when`, `.maybeWhen`, `.refresh`, `.isRefreshing`; debounce; useRefreshing)
 - `@SolidEnvironment`
 - `SolidProvider` / `InheritedSolidProvider` / `.environment()` widget extension / `context.read` / `context.watch`
 
@@ -753,10 +878,11 @@ These were open questions during SPEC drafting and have been answered by the dev
 1. **Plain (non-Widget) classes with `@SolidState` fields** — supported per Section 8.3.
 2. **Compound-assignment operator list in Section 5.3** — complete.
 3. **`@SolidState` on `final` fields** — rejected with a clear error (wrapping a never-reassigned value in a `Signal` is pointless).
-4. **Custom `initState` / `didUpdateWidget` overrides in an existing State class (Section 8.2)** — preserved untouched, with one carve-out: when one or more `@SolidEffect` methods exist on the class, Effect-materialization reads (`<effectName>;`) are spliced into the existing `initState` body immediately after the `super.initState();` call (or after the opening brace if no super call is detected as the first statement). If an existing `dispose()` is present, reactive disposals are merged into its body.
-5. **User-facing packages** — two packages. `package:solid_annotations` (runtime dep) hosts the annotation classes (`@SolidState` and `@SolidEffect` today; `@SolidQuery`/`@SolidEnvironment` in later milestones). `package:solid_generator` (dev_dep) hosts the build_runner builder. There is no `package:solid` umbrella. Consumers add `solid_annotations` + `flutter_solidart` as runtime deps and `solid_generator` + `build_runner` as dev_deps, then import annotations and `flutter_solidart` primitives directly.
+4. **Custom `initState` / `didUpdateWidget` overrides in an existing State class (Section 8.2)** — preserved untouched, with one carve-out: when one or more `@SolidEffect` or `@SolidQuery` methods exist on the class, materialization reads (`<effectName>;` / `<queryName>;`) are spliced into the existing `initState` body immediately after the `super.initState();` call (or after the opening brace if no super call is detected as the first statement). If an existing `dispose()` is present, reactive disposals are merged into its body.
+5. **User-facing packages** — two packages. `package:solid_annotations` (runtime dep) hosts the annotation classes (`@SolidState`, `@SolidEffect`, and `@SolidQuery` today; `@SolidEnvironment` in a later milestone). `package:solid_generator` (dev_dep) hosts the build_runner builder. There is no `package:solid` umbrella. Consumers add `solid_annotations` + `flutter_solidart` as runtime deps and `solid_generator` + `build_runner` as dev_deps, then import annotations and `flutter_solidart` primitives directly.
 6. **Shadowing rule (Section 5.5)** — handled by type resolution. Because Section 5.1 is type-driven, a shadowed local of a non-`SignalBase` type is never rewritten. A dedicated shadowing test case is required in M1.
 7. **`const` on the public widget constructor (Section 8.1)** — not added by the generator. Constructors round-trip verbatim from source. After the class split removes mutable `@SolidState` fields from the widget, the rewritten widget is usually const-eligible by Dart's own rules; `dart fix --apply` is the trusted lint pass that adds `const` (and removes unused imports — Section 9). The generator never emits `const` on its own.
+8. **`@SolidQuery` parameter forwarding (Section 3.5)** — rejected in M5. An annotated query method must be parameterless. The upstream `Resource<T>` constructor accepts a closure with no parameters, so introducing parameters requires either a fetcher-factory shape (parameterized method → method that returns a `Resource<T>`, requiring per-call disposal management) or a separate annotation form (e.g., `@SolidQueryFamily`). A future SPEC revision may revisit if a concrete use case emerges; M5 ships without it.
 
 ---
 
