@@ -1552,3 +1552,435 @@ class _CounterState extends State<Counter> {
 **Status:** DONE
 
 ---
+
+## M5 — `@SolidQuery`
+
+### TODO M5-01 — Golden: simple `@SolidQuery` Future-method on `StatelessWidget` (no upstream signals)
+
+**Goal:** `@SolidQuery() Future<String> fetchData() async => 'fetched';` on a `StatelessWidget` becomes a single `late final fetchData = Resource<String>(...)` field — no underscore prefix, no thin-accessor wrapper. The user's source-side `fetchData()` calls and `fetchData.refresh()` tear-offs are byte-identical in lowered output: at runtime, `fetchData()` invokes the upstream `Resource<T>.call() => state;` operator (returning `ResourceState<T>` for `.when` chains), and `fetchData.refresh()` resolves to the upstream `Resource<T>.refresh()` direct method. No body rewrite mutates the call sites. Establishes the M5 lowering pipeline: `QueryModel`, `readSolidQueryMethod`, `emitResourceField` (Future branch only, no auto-tracking), the non-getter `MethodDeclaration` branch in `_collectAnnotatedClasses` keyed on `Future<T>` return type, and a SignalBuilder-placement detection rule that records `<queryName>()` call offsets in the tracked-read set (so the enclosing widget subtree gets wrapped). Also performs the M4-06-style migration: removes `'SolidQuery'` from `_reservedAnnotations` and migrates the `m1_15_query` rejection case to a positive golden. Adds the source-time stub extensions to `solid_annotations`.
+
+**SPEC references:** Section 3.5, Section 4.8 (single-field lowering + rule 3 SignalBuilder-placement detection), Section 5.1 (identifier rewrite — note the rewrite does NOT apply to query call expressions per §5.1's clarification), Section 7 (SignalBuilder placement around tracked reads), Section 9 (import — `Resource` already on canonical list), Section 10 (dispose order), Section 14 item 4 (queries are NOT spliced into `initState`).
+
+**Files to create:**
+
+- `packages/solid_generator/test/golden/inputs/m5_01_simple_query_with_future.dart`
+- `packages/solid_generator/test/golden/outputs/m5_01_simple_query_with_future.g.dart`
+- entry in `packages/solid_generator/test/integration/golden_helpers.dart` `goldenNames`
+- `packages/solid_generator/lib/src/query_model.dart` — new model file, parallel to `effect_model.dart`. Carries `methodName`, `bodyText` (already with `.value` rewrites applied; auto-tracking source-list lands in M5-10), `innerTypeText` (the `T` peeled from `Future<T>`), `isStream` (false in M5-01; reserved for M5-02), `debounce` (null in M5-01; reserved for M5-11), `useRefreshing` (null in M5-01; reserved for M5-11), `annotationName`.
+- `packages/solid_annotations/lib/src/query_extensions.dart` — copy verbatim from the v1 reference at `solid_annotations-1.0.0/lib/extensions.dart`: `extension FutureWhen<T> on Future<T>` (`.when` / `.maybeWhen` returning `Widget`), `extension StreamWhen<T> on Stream<T>` (same surface), `extension RefreshFuture<T> on Future<T> Function()` (`.refresh()` returning `Future<void>`), `extension RefreshStream<T> on Stream<T> Function()` (same), `extension IsRefreshingFuture<T> on Future<T>` (`.isRefreshing` returning `bool`), `extension IsRefreshingStream<T> on Stream<T>` (same). Every method body throws `Exception('This is just a stub for code generation.')`. Exported from `solid_annotations.dart`. NOTE: there are NO runtime extensions on `Resource<T>` or `ResourceState<T>` in `solid_annotations` — the body rewriter turns `fetchData()` into `fetchData.state` so the chain resolves to upstream `flutter_solidart` extensions on `ResourceState<T>` directly (SPEC §4.8 rule 2).
+
+**Files to modify:**
+
+- `packages/solid_annotations/lib/src/annotations.dart` — replace the `SolidQuery` placeholder with `@Target({TargetKind.method}) class SolidQuery { const SolidQuery({this.name, this.debounce, this.useRefreshing = true}); final String? name; final Duration? debounce; final bool useRefreshing; }`. The `debounce:` and `useRefreshing:` fields are wired in M5-11; M5-01 only asserts the field shape.
+- `packages/solid_annotations/lib/solid_annotations.dart` — re-export the new `query_extensions.dart`.
+- `packages/solid_annotations/pubspec.yaml` — add `flutter` as a runtime dep (the source-side stubs return `Widget`, requiring `flutter`). `flutter_solidart` is NOT added: `solid_annotations` references no flutter_solidart symbols; the user's source never names `Resource<T>` or `ResourceState<T>` (those types appear only in lowered `lib/` output, where `flutter_solidart` is already a runtime dep of the consumer app). M0-02 originally kept `solid_annotations` deps-free; M5 introduces only `flutter` because the source-time typecheck contract (SPEC §3.5 "Source-time typechecking") requires Widget-typed return signatures on the stubs.
+- `packages/solid_generator/lib/src/annotation_reader.dart` — add `QueryModel? readSolidQueryMethod(MethodDeclaration decl, Set<String> reactiveFieldNames, String source)`; reuse `findSolidStateAnnotation` / `extractNameArgument` patterns. Peel `Future<T>` from `decl.returnType` to produce `innerTypeText`. Critically, this reader does NOT call the zero-deps check — a query body with no reactive reads is valid (SPEC §3.5 "No reactive-deps requirement").
+- `packages/solid_generator/lib/src/signal_emitter.dart` — add `String emitResourceField(QueryModel q)` returning `late final <methodName> = Resource<T>(() async => …, name: '…');` (public name, no underscore prefix). The string is emitted in source-declaration order alongside Signal/Computed/Effect declarations. Extend `emitDispose`'s argument-list semantics so the `<methodName>` name joins Signals/Computeds/Effects in the unified ordered name list.
+- `packages/solid_generator/lib/src/value_rewriter.dart` (or its visitor module) — extend `collectValueEdits`'s visitor to detect zero-argument `MethodInvocation` nodes whose target is a `SimpleIdentifier` matching a `@SolidQuery` method name on the enclosing class (with no receiver and no shadowing local) and add the call-expression's offset to the existing `trackedReadOffsets` set. NO edit is emitted for the call itself — at runtime `<queryName>()` invokes the upstream `Resource<T>.call() => state;` operator and the trailing `.when(...)` / `.maybeWhen(...)` / `.isRefreshing` chain resolves to upstream extensions on `ResourceState<T>` directly. The query-name set is passed alongside the existing `reactiveFieldNames` set. The `<queryName>.refresh()` form (tear-off + member-call) is also left unchanged — `Resource<T>.refresh()` is a direct upstream method.
+- `packages/solid_generator/lib/builder.dart` — extend `_AnnotatedClass` to carry `final List<QueryModel> queries;`; extend `_collectAnnotatedClasses` to walk `MethodDeclaration` members where `!member.isGetter && !member.isSetter && carriesSolidQuery && returnType is Future<T>`. Pass the query-name set into `collectValueEdits` so the call-expression rewrite has the data it needs.
+- `packages/solid_generator/lib/src/stateless_rewriter.dart` — accept `solidQueries`; for each query, emit the public `<methodName>` Resource field interleaved with Signal/Computed/Effect declarations in source order; pass the merged disposable-name list to `emitDispose` (the public `<methodName>` participates).
+- `packages/solid_generator/lib/src/state_class_rewriter.dart`, `packages/solid_generator/lib/src/plain_class_rewriter.dart` — for now, reject `@SolidQuery` with a `CodeGenerationError("@SolidQuery on State<X>/plain class will land in M5-08/M5-09")` until those TODOs ship them.
+- `packages/solid_generator/lib/src/reserved_annotation_validator.dart` — remove `'SolidQuery'` from the `_reservedAnnotations` map.
+- `packages/solid_generator/test/rejections/m1_15_non_m1_annotations_test.dart` — delete the `m1_15_query` case.
+- `packages/solid_generator/test/golden/inputs/m1_15_query.dart` — delete (no longer a rejection input).
+
+**Expected input content:**
+
+```dart
+import 'package:solid_annotations/solid_annotations.dart';
+import 'package:flutter/widgets.dart';
+
+class Greeter extends StatelessWidget {
+  Greeter({super.key});
+
+  @SolidQuery()
+  Future<String> fetchData() async {
+    await Future.delayed(const Duration(seconds: 1));
+    return 'fetched';
+  }
+
+  @override
+  Widget build(BuildContext context) => const Placeholder();
+}
+```
+
+**Expected output content:**
+
+```dart
+import 'package:solid_annotations/solid_annotations.dart';
+import 'package:flutter/widgets.dart';
+import 'package:flutter_solidart/flutter_solidart.dart';
+
+class Greeter extends StatefulWidget {
+  Greeter({super.key});
+
+  @override
+  State<Greeter> createState() => _GreeterState();
+}
+
+class _GreeterState extends State<Greeter> {
+  late final fetchData = Resource<String>(
+    () async {
+      await Future.delayed(const Duration(seconds: 1));
+      return 'fetched';
+    },
+    name: 'fetchData',
+  );
+
+  @override
+  void dispose() {
+    fetchData.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => const Placeholder();
+}
+```
+
+**Acceptance:** `dart test --name=m5_01` passes; golden analyzes clean; the State class has NO `initState()` override (queries are lazy and not materialized — SPEC §4.8 / §14 item 4) AND NO underscore-prefixed Resource field (single public `<name>` field per query); `dispose()` calls `fetchData.dispose()` before `super.dispose()`; `m1_15_query` rejection test no longer runs (case deleted); `dart analyze packages/solid_generator/test/golden/outputs/m5_01_*.g.dart` reports zero issues; source-side `solid_annotations` stubs allow `Greeter`'s source to compile if a build body invokes `fetchData().when(...)` (added as a smoke check in M5-04).
+
+**Dependencies:** M4-01 (body-rewrite pipeline + non-getter `MethodDeclaration` collection path), M4-06 (reserved-list trim pattern).
+
+**Implementation note:** Like M4-01, M5-01 also pulls in the M4-06-style migration (remove from `_reservedAnnotations`, migrate `m1_15_query`) because the reserved-annotation guard runs before lowering — without removing `'SolidQuery'` and migrating the rejection case in the same PR, the M5-01 golden could never go green. Document this inline in `reserved_annotation_validator.dart` similar to the M4-01 comment. The new `flutter` dep on `solid_annotations` is unavoidable: SPEC §3.5 "Source-time typechecking" requires the source-side stubs to return `Widget`. `flutter_solidart` is NOT added as a `solid_annotations` dep because the user's source layer does not name `Resource<T>`. The M0-02 "no runtime deps" rule is therefore amended in M5-01 (only `flutter`). The SignalBuilder-placement detection (visitor records `<queryName>()` offsets in `trackedReadOffsets`) is registered in M5-01 even though M5-01's golden has no call sites to exercise it (the build body is `const Placeholder()`); the detection is exercised end-to-end in M5-04's golden where SignalBuilder wraps the `fetchData().when(...)` chain.
+
+**Status:** TODO
+
+---
+
+### TODO M5-02 — Golden: `@SolidQuery` Stream-method form
+
+**Goal:** `@SolidQuery() Stream<int> watchTicks() => Stream.periodic(const Duration(seconds: 1), (i) => i);` on a `StatelessWidget` becomes `late final _watchTicks = Resource<int>.stream(() => Stream.periodic(...), name: 'watchTicks');` plus `Resource<int> watchTicks() => _watchTicks;`. Adds the `Resource<T>.stream(...)` branch in `emitResourceField`, the `isStream` discriminator in `QueryModel`, and the Stream-form body handling in `readSolidQueryMethod` (plain-bodied returning a Stream, OR `async*` block-bodied).
+
+**SPEC references:** Section 3.5, Section 4.8 (Stream form).
+
+**Files to create:**
+
+- `packages/solid_generator/test/golden/inputs/m5_02_simple_query_with_stream.dart`
+- `packages/solid_generator/test/golden/outputs/m5_02_simple_query_with_stream.g.dart`
+- entry in `golden_helpers.dart` `goldenNames`
+
+**Files to modify:**
+
+- `packages/solid_generator/lib/src/query_model.dart` — confirm `isStream` flag is consumed.
+- `packages/solid_generator/lib/src/annotation_reader.dart` — extend `readSolidQueryMethod` to detect `Stream<T>` return type and either body shape (synchronous returning a `Stream<T>`, OR `async*` block); set `isStream: true`.
+- `packages/solid_generator/lib/src/signal_emitter.dart` — extend `emitResourceField` to emit `Resource<T>.stream(...)` instead of `Resource<T>(...)` when `isStream` is true.
+
+**Expected input content:**
+
+```dart
+import 'package:solid_annotations/solid_annotations.dart';
+import 'package:flutter/widgets.dart';
+
+class Ticker extends StatelessWidget {
+  Ticker({super.key});
+
+  @SolidQuery()
+  Stream<int> watchTicks() {
+    return Stream.periodic(const Duration(seconds: 1), (i) => i);
+  }
+
+  @override
+  Widget build(BuildContext context) => const Placeholder();
+}
+```
+
+**Expected output content:** State class with `late final _watchTicks = Resource<int>.stream(() => Stream.periodic(const Duration(seconds: 1), (i) => i), name: 'watchTicks');` plus `Resource<int> watchTicks() => _watchTicks;`. Standard `dispose()` body.
+
+**Expected implementation change:** Stream-form branch in `emitResourceField` plus `isStream` detection in the reader. No changes to dispose / accessor / import paths beyond what M5-01 already established.
+
+**Acceptance:** `dart test --name=m5_02` passes; golden analyzes clean; emitted code uses `Resource<T>.stream(...)` named constructor; the thin-accessor's return type is `Resource<int>`.
+
+**Dependencies:** M5-01.
+
+**Status:** TODO
+
+---
+
+### TODO M5-03 — Golden: `@SolidQuery` co-exists with `@SolidState` field + getter + `@SolidEffect`
+
+**Goal:** A class with all four annotated shapes — `@SolidState()` field, `@SolidState()` getter, `@SolidEffect()` method, `@SolidQuery()` method — produces a State class with all four lowered shapes interleaved in source order, and a `dispose()` body in reverse-declaration order. `initState()` materializes ONLY the Effect (queries are lazy per §4.8). Validates the unified ordered-name list under all four lowered shapes.
+
+**SPEC references:** Section 4.1, Section 4.5, Section 4.7, Section 4.8, Section 10, Section 14 item 4.
+
+**Files to create:**
+
+- `packages/solid_generator/test/golden/inputs/m5_03_query_with_signal_computed_effect.dart`
+- `packages/solid_generator/test/golden/outputs/m5_03_query_with_signal_computed_effect.g.dart`
+- entry in `golden_helpers.dart` `goldenNames`
+
+**Expected input content:** A `StatelessWidget` with (in source order) `@SolidState() int counter = 0;`, `@SolidState() int get doubleCounter => counter * 2;`, `@SolidEffect() void logBoth() { print('$counter / $doubleCounter'); }`, `@SolidQuery() Future<int> fetchSnapshot() async => 0;` (no upstream signals — auto-tracking lands in M5-10).
+
+**Expected output content:** State class declares `counter` (Signal), then `doubleCounter` (late final Computed), then `logBoth` (late final Effect), then `_fetchSnapshot` (late final Resource) + `fetchSnapshot()` thin-accessor — all in source order. `initState()` materializes ONLY `logBoth` after `super.initState();`. `dispose()` body calls `_fetchSnapshot.dispose()`, then `logBoth.dispose()`, then `doubleCounter.dispose()`, then `counter.dispose()`, then `super.dispose()` — reverse declaration order per SPEC Section 10.
+
+**Expected implementation change:** None beyond M5-01 + M4-02 — this is a regression fence on the unified dispose-ordering rule across all four shapes AND a regression fence proving Effects (always materialized) and queries (NEVER materialized) coexist correctly.
+
+**Acceptance:** `dart test --name=m5_03` passes; golden's `dispose()` body has Resource → Effect → Computed → Signal → super order verbatim; `initState()` body is `super.initState(); logBoth;` (no `_fetchSnapshot;`).
+
+**Dependencies:** M5-01, M4-02.
+
+**Status:** TODO
+
+---
+
+### TODO M5-04 — Golden: `fetchData().when(ready:..., loading:..., error:...)` byte-identical, wrapped in SignalBuilder
+
+**Goal:** A widget whose `build` body invokes `fetchData().when({ready, loading, error})` is lowered such that (a) the build method is wrapped in a `SignalBuilder` (the SignalBuilder-placement detection rule fires on the `fetchData()` call expression — SPEC §4.8 rule 3) and (b) the `fetchData().when(...)` chain is byte-identical between input and output. At runtime, `fetchData()` invokes the upstream `Resource<T>.call() => state;` operator returning `ResourceState<T>`, and `.when(...)` resolves to upstream `flutter_solidart`'s extension on `ResourceState<T>` directly. Validates the source-time typecheck contract (`fetchData().when(...)` typechecks against the `Future<T>.when` stub in `solid_annotations`) AND the runtime contract (lowered `fetchData()` is the upstream callable on a `Resource<String>` field). Critical regression fence for the SPEC §4.8 rule 3 detection rule and §7 SignalBuilder placement.
+
+**SPEC references:** Section 3.5 "Read pattern", Section 3.5 "Source-time typechecking", Section 4.8 (single-field lowering, rule 2 byte-identical call expressions, rule 3 SignalBuilder-placement detection), Section 5.1 (rewrite does not apply to query call expressions per §5.1's clarification), Section 7 (SignalBuilder placement around tracked reads).
+
+**Files to create:**
+
+- `packages/solid_generator/test/golden/inputs/m5_04_query_when_in_build.dart`
+- `packages/solid_generator/test/golden/outputs/m5_04_query_when_in_build.g.dart`
+- entry in `golden_helpers.dart` `goldenNames`
+
+**Expected input content:**
+
+```dart
+import 'package:solid_annotations/solid_annotations.dart';
+import 'package:flutter/material.dart';
+
+class UserScreen extends StatelessWidget {
+  UserScreen({super.key});
+
+  @SolidQuery()
+  Future<String> fetchName() async => 'Alice';
+
+  @override
+  Widget build(BuildContext context) {
+    return fetchName().when(
+      ready: (name) => Text(name),
+      loading: () => const CircularProgressIndicator(),
+      error: (e, _) => Text('error: $e'),
+    );
+  }
+}
+```
+
+**Expected output content:** State class with `late final fetchName = Resource<String>(() async => 'Alice', name: 'fetchName');` (single public field, no underscore-prefixed wrapper). The `build` method wraps the byte-identical chain in a `SignalBuilder`:
+
+```dart
+@override
+Widget build(BuildContext context) {
+  return SignalBuilder(
+    builder: (context, child) {
+      return fetchName().when(
+        ready: (name) => Text(name),
+        loading: () => const CircularProgressIndicator(),
+        error: (e, _) => Text('error: $e'),
+      );
+    },
+  );
+}
+```
+
+The `fetchName().when(...)` chain is byte-identical between input and output — at runtime `fetchName()` invokes `Resource<String>.call()` (defined upstream as `ResourceState<T> call() => state;`), and `.when(...)` resolves to upstream `flutter_solidart`'s extension on `ResourceState<T>`.
+
+**Expected implementation change:** The M5-01 SignalBuilder-placement detection rule (§4.8 rule 3) fires here: the `fetchName()` call offset is added to `trackedReadOffsets`, triggering §7 to wrap the `Center`/`Text` subtree containing the call in a `SignalBuilder`. No mutation to the call expression itself. If the detection misses, no SignalBuilder is emitted and the widget never rebuilds when the Resource emits new state.
+
+**Acceptance:** `dart test --name=m5_04` passes; golden analyzes clean; the `fetchName().when(...)` chain is byte-identical input/output; the chain is wrapped in a `SignalBuilder`. The source under `source/` typechecks against the `Future<T>.when` stub extension from `solid_annotations`; the lowered output typechecks because `Resource<String>.call()` returns `ResourceState<String>` and `.when` is an upstream extension on `ResourceState<T>`.
+
+**Dependencies:** M5-01.
+
+**Status:** TODO
+
+---
+
+### TODO M5-05 — Rejection: invalid `@SolidQuery` targets
+
+**Goal:** The generator rejects `@SolidQuery` on every invalid target enumerated in SPEC Section 3.5 with a clear, per-case error message that identifies the offending declaration. Mirror of M4-04.
+
+**SPEC references:** Section 3.5 "Invalid targets".
+
+**Files to create:**
+
+- `packages/solid_generator/test/rejections/m5_05_invalid_query_targets_test.dart` — parametric test over the cases below. Each case is a minimal source snippet that places `@SolidQuery` on the invalid target; each asserts the builder raises an error whose message contains the SPEC description of the case.
+- One input file per case under `packages/solid_generator/test/golden/inputs/`:
+  - `m5_05_non_future_return.dart` — `@SolidQuery() int fetchCount() => 0;` (sync return).
+  - `m5_05_future_without_async.dart` — `@SolidQuery() Future<int> fetchCount() => Future.value(0);` (Future return without `async` keyword).
+  - `m5_05_parameterized.dart` — `@SolidQuery() Future<int> fetchOne(int id) async => id;`.
+  - `m5_05_static.dart` — `@SolidQuery() static Future<int> fetchCount() async => 0;`.
+  - `m5_05_abstract.dart` — `@SolidQuery() Future<int> fetchCount();` on an abstract class member.
+  - `m5_05_getter.dart` — `@SolidQuery() Future<int> get fetchCount async => 0;`.
+  - `m5_05_setter.dart` — `@SolidQuery() set fetchCount(int v) {}`.
+  - `m5_05_top_level.dart` — top-level `@SolidQuery() Future<int> fetchCount() async => 0;`.
+  - `m5_05_field.dart` — `@SolidQuery() Future<int> fetchCount = Future.value(0);` (field, not method).
+
+**Files to modify:**
+
+- `packages/solid_generator/lib/src/target_validator.dart` — extend with a parallel `validateSolidQueryTargets` (or branch in the unified validator). The check runs before transformation. Any invalid target produces a `ValidationError` with a SPEC-quoted message that names the target kind and the enclosing class + member identifier.
+
+**Expected implementation change:** New per-case branches in `target_validator.dart`. Return-type / body-keyword checks use `decl.returnType` and `decl.body.keyword?.lexeme` ('async' / 'async\*'). The async-mismatch case (Future without `async`) produces an error that quotes SPEC §3.5 "Method whose body keyword does not match the return type".
+
+**Acceptance:** The parametric test passes; every case produces a distinct error message that contains the SPEC description of the invalid-target category from Section 3.5.
+
+**Dependencies:** M5-01.
+
+**Status:** TODO
+
+---
+
+### TODO M5-06 — Golden: explicit `fetchData.refresh()` (tear-off form) call inside `onPressed`
+
+**Goal:** A widget that calls `fetchData.refresh()` inside an `onPressed` callback emits the call verbatim — the source uses the method tear-off form (no `()` after `fetchData`), which after lowering naturally resolves to `Resource<T>.refresh()` (a direct upstream instance method). No body rewrite fires for this shape because the receiver is already a bare `SimpleIdentifier`, not a zero-arg `MethodInvocation`. The FAB is NOT wrapped in `SignalBuilder` (SPEC §6.2 untracked-context rule applies inside `onPressed`).
+
+**SPEC references:** Section 3.5 "Read pattern" (refresh-tear-off shape), Section 3.5 "Source-time typechecking" (`RefreshFuture<T> on Future<T> Function()` extension), Section 4.8 rule 2 (the rewrite fires on zero-arg call form, NOT on tear-off form), Section 6.2 (untracked-context rules in `on*` callbacks).
+
+**Files to create:**
+
+- `packages/solid_generator/test/golden/inputs/m5_06_query_refresh_in_onpressed.dart`
+- `packages/solid_generator/test/golden/outputs/m5_06_query_refresh_in_onpressed.g.dart`
+- entry in `golden_helpers.dart` `goldenNames`
+
+**Expected input content:** A widget with `@SolidQuery() Future<int> fetchCount() async => 0;` and a `FloatingActionButton(onPressed: () => fetchCount.refresh(), child: const Icon(Icons.refresh))` inside `build`. Note: source uses tear-off `fetchCount.refresh()`, NOT call form `fetchCount().refresh()` — see SPEC §3.5's "Refresh" pattern and the `RefreshFuture<T> on Future<T> Function()` source-time stub extension.
+
+**Expected output content:** The `onPressed: () => fetchCount.refresh()` is emitted verbatim — byte-identical input/output. The FAB is NOT wrapped in `SignalBuilder`.
+
+**Expected implementation change:** None beyond M5-01 — the call-expression rewrite (rule 2) fires only on zero-arg `MethodInvocation` shapes (`fetchCount()`), NOT on the tear-off-then-method-call shape (`fetchCount.refresh()`). The receiver `fetchCount` here is a bare `SimpleIdentifier`, and after lowering it resolves to the `Resource<int>` field; `.refresh()` chains to the upstream direct method on Resource. This golden is a regression fence proving the rewrite is shape-specific.
+
+**Acceptance:** `dart test --name=m5_06` passes; golden analyzes clean; the source `() => fetchCount.refresh()` is byte-identical to the output `() => fetchCount.refresh()`.
+
+**Dependencies:** M5-01.
+
+**Status:** TODO
+
+---
+
+### TODO M5-07 — Widget test: tap reload three times, assert fetcher fires three times
+
+**Goal:** With a `@SolidQuery` whose fetcher increments a test-controlled counter, tapping a "Reload" FAB three times causes the fetcher to run three times. The test asserts via the recorded count and via `fetchCount().when(ready: ...)` re-emitting each time.
+
+**SPEC references:** Section 3.5 "Refresh", Section 4.8, Section 10 (Resource disposal on tear-down).
+
+**Files to create:**
+
+- `example/test/query_widget_test.dart` — `testWidgets` test that:
+  1. Pumps a widget with `@SolidQuery() Future<int> fetchCount() async => _testCounter++;` (where `_testCounter` is a top-level closure-captured int reset per test).
+  2. Reads `fetchCount().when(ready: (v) => Text('$v'), …)` in build.
+  3. Taps the Reload FAB three times, awaiting `pumpAndSettle()` between taps so the Future resolves.
+  4. Asserts the Resource's ready state ends with the correct value and the fetcher ran the expected number of times (initial subscribe + N refreshes).
+  5. On Navigator pop, asserts `_fetchCount.dispose()` is invoked (parallel to M1-11 / M4-07's `signal.onDispose` hook).
+
+**Expected implementation change:** None in the generator. The test exercises the runtime contract (Resource fetcher fires on `.refresh()`) end-to-end through the M5-01 / M5-02 lowered output.
+
+**Acceptance:** `flutter test example/` passes; the recorded counter equals the expected fetcher-invocation count (verify against upstream `flutter_solidart` semantics: lazy-subscribe-on-first-when fires once; each `.refresh()` fires once); the `dispose()` hook fires exactly once per test.
+
+**Dependencies:** M5-01, M5-02.
+
+**Status:** TODO
+
+---
+
+### TODO M5-08 — Golden: `@SolidQuery` on existing `State<X>` class
+
+**Goal:** A `StatefulWidget` whose existing `State<X>` subclass hosts `@SolidQuery` methods is transformed in-place, not re-wrapped. Each annotated method declaration is replaced by a single `late final <name> = Resource<T>(...)` field. Custom `initState` / `didUpdateWidget` overrides are preserved untouched (queries are lazy and not spliced into `initState` per SPEC §14 item 4); if an existing `dispose()` body is present, the `<methodName>` Resource disposal is prepended and the rest of the body is left alone. Mirror of M4-08's State-class path. Removes the `state_class_rewriter.dart` reject guard that M5-01 added.
+
+**SPEC references:** Section 3.5, Section 4.8 (single-field lowering), Section 8.2, Section 10, Section 14 item 4.
+
+**Files to create:**
+
+- `packages/solid_generator/test/golden/inputs/m5_08_query_on_state_class.dart`
+- `packages/solid_generator/test/golden/outputs/m5_08_query_on_state_class.g.dart`
+- entry in `golden_helpers.dart` `goldenNames`
+
+**Files to modify:**
+
+- `packages/solid_generator/lib/src/state_class_rewriter.dart` — remove the M5-01 reject guard; route Resources through the same in-place lowering used by Signals/Computeds/Effects for the dispose-name list and import set. Extend the `solidartNames` set with `'Resource'` when at least one query is present so the import-rewriter adds `package:flutter_solidart/flutter_solidart.dart`. The existing `_mergeDispose` helper handles the public `<methodName>` name alongside other dispose names. The user-supplied query method declaration is replaced by the emitted `late final <methodName>` field (the original method body becomes the Resource fetcher closure). Any `<queryName>()` call sites inside reactive contexts have their offsets added to `trackedReadOffsets` by the body-rewrite pipeline (the M5-01 detection rule), so SignalBuilder placement wraps the surrounding subtree.
+
+**Expected implementation change:** State class rewriter walks the user's existing class, identifies `@SolidQuery` method declarations, replaces each with the single Resource field (interleaved with Signal/Computed/Effect emissions in source order), and extends the dispose name list. No changes to `_mergeInitState` (queries don't enter the materialization list). The body-rewrite pipeline runs over every reactive context in the State class (build, Effect bodies, Computed bodies); query call expressions stay byte-identical but are tracked for SignalBuilder placement.
+
+**Acceptance:** `dart test --name=m5_08` passes; golden analyzes clean; existing `initState` body is byte-identical between input and output (no Resource splice); existing `dispose` body has `<methodName>.dispose()` calls prepended in reverse-declaration order with nothing else added or removed; the user-supplied query-method declaration is replaced by the single Resource field; any `<queryName>()` call sites in `build` / Effect / Computed bodies are byte-identical between input and output, with SignalBuilder wrapping where applicable.
+
+**Dependencies:** M5-01, M4-08.
+
+**Status:** TODO
+
+---
+
+### TODO M5-09 — Golden: `@SolidQuery` on plain class
+
+**Goal:** A plain class (no Widget superclass) hosting `@SolidQuery` methods is transformed in-place. Each annotated method is replaced by a single `late final <name> = Resource<T>(...)` field; disposal is added to the synthesized (or merged) `dispose()` body in reverse-declaration order. Queries do NOT trigger the M4-08 synthesized constructor (queries are lazy); a plain class with ONLY queries has no synthesized constructor. Mirror of M4-08's plain-class path. Removes the `plain_class_rewriter.dart` reject guard that M5-01 added.
+
+**SPEC references:** Section 3.5, Section 4.8 (single-field lowering), Section 8.3, Section 10.
+
+**Files to create:**
+
+- `packages/solid_generator/test/golden/inputs/m5_09_query_on_plain_class.dart`
+- `packages/solid_generator/test/golden/outputs/m5_09_query_on_plain_class.g.dart`
+- entry in `golden_helpers.dart` `goldenNames`
+
+**Files to modify:**
+
+- `packages/solid_generator/lib/src/plain_class_rewriter.dart` — remove the M5-01 reject guard; route Resources through the same in-place lowering used by Signals/Computeds/Effects for the dispose-name list and import set. Extend the `solidartNames` set with `'Resource'`. The user-supplied query method declaration is replaced by the single `late final <methodName>` Resource field. Queries do NOT enter the synthesized-constructor materialization list (per SPEC §8.3). Any `<queryName>()` call sites inside reactive contexts have their offsets added to `trackedReadOffsets` by the body-rewrite pipeline (the M5-01 detection rule); the call expressions themselves are byte-identical between input and output.
+
+**Expected implementation change:** Plain-class rewriter walks the user's existing class, identifies `@SolidQuery` method declarations, replaces each with the single Resource field, and extends the dispose-name list. The user-defined-constructor rejection from M4-08 still applies when Effects are present; for plain classes with ONLY queries (no Effects), a user-defined constructor is permitted (no synthesized constructor needed; the late-final lazy queries co-exist with the user's constructor).
+
+**Acceptance:** `dart test --name=m5_09` passes; golden analyzes clean; the synthesized constructor (if present, due to existing Effects) does NOT have query-materialization reads; `dispose()` body has `<methodName>.dispose()` calls in reverse declaration order before `super.dispose()` (or no `super.dispose()` if the plain class has no `dispose()` in supertype chain — analyzer-driven, per SPEC §10); the user-supplied query-method declaration is replaced by the single Resource field.
+
+**Dependencies:** M5-01, M4-08.
+
+**Status:** TODO
+
+---
+
+### TODO M5-10 — Auto-tracking: query body reads upstream reactive declarations
+
+**Goal:** When a query body reads one or more `@SolidState` field / getter identifiers, the generator wires those reads into the lowered Resource's `source:` argument. **One read** is passed directly (no synthesized field — wrapping a single `Signal` / `Computed` in a Computed that just returns its `.value` would be a no-op). **Two or more reads** synthesize a `late final _<methodName>Source = Computed<(T1, T2, …)>(() => (s1.value, s2.value, …), name: '<methodName>_source')` Record-Computed field that is passed as the source. The synthesized field, when present, is emitted IMMEDIATELY BEFORE the `_<methodName>` Resource it feeds, so reverse-declaration disposal tears the Resource down before the Computed.
+
+**SPEC references:** Section 3.5 "Auto-tracking of upstream reactive reads", Section 4.8 rule 3, Section 10.
+
+**Files to create:**
+
+- `packages/solid_generator/test/golden/inputs/m5_10_query_with_one_signal_dep.dart` — query body reads ONE Signal; output passes the Signal directly as `source:`.
+- `packages/solid_generator/test/golden/outputs/m5_10_query_with_one_signal_dep.g.dart`
+- `packages/solid_generator/test/golden/inputs/m5_10_query_with_multi_signal_deps.dart` — query body reads TWO Signals; output synthesizes a Record-Computed.
+- `packages/solid_generator/test/golden/outputs/m5_10_query_with_multi_signal_deps.g.dart`
+- entries in `golden_helpers.dart` `goldenNames`.
+
+**Files to modify:**
+
+- `packages/solid_generator/lib/src/query_model.dart` — add `final List<String> trackedSignalNames;` field (populated from body analysis) and a derived `bool get needsSourceComputed => trackedSignalNames.length >= 2;`. Single-dep queries store the single name; the emitter passes it directly.
+- `packages/solid_generator/lib/src/annotation_reader.dart` — `readSolidQueryMethod` extends body analysis to record which identifiers resolved to `SignalBase<T>` (this list already exists internally for the `.value` rewrite — surface it on the model).
+- `packages/solid_generator/lib/src/signal_emitter.dart` — add `String? emitQuerySourceField(QueryModel q)` that returns `null` for `q.trackedSignalNames.length < 2` (no synthesized field needed) and emits `late final _<name>Source = Computed<(T1, T2, …)>(() => (<signal1>.value, <signal2>.value, …), name: '<name>_source');` for `length >= 2`. Extend `emitResourceField` to add `source: <signalName>,` when `length == 1` (direct pass) and `source: _<name>Source,` when `length >= 2`.
+- `packages/solid_generator/lib/src/stateless_rewriter.dart`, `state_class_rewriter.dart`, `plain_class_rewriter.dart` — for each query with `length >= 2`, emit the source Computed field immediately before the Resource field; add the `_<name>Source` name to the dispose-name list (immediately before `_<name>` so reverse-disposal disposes the Resource first, then the source Computed). For `length == 1`, no extra field or dispose entry.
+
+**Expected implementation change:** New `trackedSignalNames` field on `QueryModel`; new `emitQuerySourceField` emitter that returns null for ≤1-dep queries; per-rewriter tweaks to emit-and-dispose the source Computed only when synthesized. The Computed's type argument is a `Record` of the resolved Signal-inner-types of the tracked names (e.g., `(int, String?)` for two signals of types `int` and `String?`).
+
+**Acceptance:** `dart test --name=m5_10` passes; both goldens analyze clean. Single-signal golden emits `source: <signalName>,` with NO synthesized field and NO extra dispose entry. Multi-signal golden emits `late final _<name>Source = Computed<(T1, T2)>(() => (signal1.value, signal2.value), …);` immediately before the Resource, and `source: _<name>Source,` on the Resource. Dispose order for multi: `_<name>.dispose()`, then `_<name>Source.dispose()`, then the underlying Signals (reverse declaration order). Single-dep dispose: `_<name>.dispose()` then the Signal directly (no source-Computed in between).
+
+**Dependencies:** M5-01.
+
+**Status:** TODO
+
+---
+
+### TODO M5-11 — Annotation parameters: `debounce:` and `useRefreshing:`
+
+**Goal:** `@SolidQuery(debounce: Duration(seconds: 1))` propagates to the emitted Resource's `debounceDelay:` argument. `@SolidQuery(useRefreshing: false)` propagates to `useRefreshing: false` on the Resource (the upstream default `useRefreshing: true` is omitted to keep generated lines short). Both parameters are independent and may be combined.
+
+**SPEC references:** Section 3.5 (`debounce:` and `useRefreshing:` parameter docs), Section 4.8 rule 7 (annotation parameters propagate).
+
+**Files to create:**
+
+- `packages/solid_generator/test/golden/inputs/m5_11_query_with_debounce.dart` — `@SolidQuery(debounce: Duration(milliseconds: 300))`.
+- `packages/solid_generator/test/golden/outputs/m5_11_query_with_debounce.g.dart`
+- `packages/solid_generator/test/golden/inputs/m5_11_query_with_use_refreshing_false.dart` — `@SolidQuery(useRefreshing: false)`.
+- `packages/solid_generator/test/golden/outputs/m5_11_query_with_use_refreshing_false.g.dart`
+- entries in `golden_helpers.dart` `goldenNames`.
+
+**Files to modify:**
+
+- `packages/solid_generator/lib/src/query_model.dart` — `debounce` and `useRefreshing` fields are wired (added in M5-01's stub model; M5-11 surfaces them in the emitted output).
+- `packages/solid_generator/lib/src/annotation_reader.dart` — extract `debounce:` (parsing the `Duration(...)` constant expression) and `useRefreshing:` (boolean literal) from the annotation arguments.
+- `packages/solid_generator/lib/src/signal_emitter.dart` — extend `emitResourceField` to include `debounceDelay: <const Duration(…)>,` when `debounce != null` and `useRefreshing: false,` when `useRefreshing == false` (omit when `useRefreshing == true` since that's the upstream default).
+
+**Expected implementation change:** Three small surface changes: model fields, reader extraction, emitter argument injection. No changes to dispose / accessor / import paths.
+
+**Acceptance:** `dart test --name=m5_11` passes; the `debounce` golden emits `debounceDelay: const Duration(milliseconds: 300),` in the Resource constructor; the `useRefreshing: false` golden emits `useRefreshing: false,`; a default `@SolidQuery()` (no params) emits neither argument.
+
+**Dependencies:** M5-01.
+
+**Status:** TODO
+
+---

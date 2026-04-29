@@ -1,7 +1,7 @@
 # Solid — Product Specification (v2)
 
 **Status:** DRAFT — under review
-**Scope of this SPEC:** defines the user-facing contract for `@SolidState` and `@SolidEffect` (M1 and M4 milestones). The remaining annotations shipped before v2 release — `@SolidQuery`, `@SolidEnvironment` — are reserved names only; their full contract lives in a future SPEC revision.
+**Scope of this SPEC:** defines the user-facing contract for `@SolidState`, `@SolidEffect`, and `@SolidQuery` (M1, M4, and M5 milestones). The remaining annotation shipped before v2 release — `@SolidEnvironment` — is a reserved name only; its full contract lives in a future SPEC revision.
 
 This document is the single source of truth for what Solid does. Reviewer agents cite this document by section number when judging an implementation. It contains no file names, no class names, no AST details — only what the developer sees and the guarantees they get.
 
@@ -30,7 +30,7 @@ Rules:
 
 - **Input path**: any `.dart` file under `source/` at any depth.
 - **Output path**: same relative path under `lib/`. No suffix change. `source/foo/bar.dart` becomes `lib/foo/bar.dart`.
-- **Transformation vs verbatim copy.** Solid reads every `.dart` file under `source/`. If a file contains at least one `@Solid*` annotation (`@SolidState` and `@SolidEffect` today; `@SolidQuery`, `@SolidEnvironment` in later milestones), Solid transforms it. Otherwise the file is copied verbatim to the mirrored path under `lib/`. Non-`.dart` files (assets, configs, etc.) are always copied verbatim. The key is annotation presence, not file extension.
+- **Transformation vs verbatim copy.** Solid reads every `.dart` file under `source/`. If a file contains at least one `@Solid*` annotation (`@SolidState`, `@SolidEffect`, and `@SolidQuery` today; `@SolidEnvironment` in a later milestone), Solid transforms it. Otherwise the file is copied verbatim to the mirrored path under `lib/`. Non-`.dart` files (assets, configs, etc.) are always copied verbatim. The key is annotation presence, not file extension.
 - **Both are committed to git.** Source is the review artifact for intent. Lib is the review artifact for correctness — every PR that changes `source/` must include the regenerated `lib/` diff so reviewers catch generator regressions.
 - **Solid emits no `.g.dart` files of its own.** Third-party generators (freezed, json_serializable, drift) may emit `.g.dart` or `.freezed.dart` files under `source/`; Solid copies those verbatim to the mirrored path under `lib/`.
 - **The example app's `main.dart`** lives in `lib/` (or `source/` if itself annotated) and imports from `lib/` using normal Flutter imports (`import 'counter.dart';`).
@@ -41,7 +41,7 @@ Rules:
 
 ## 3. Annotations
 
-> **Milestones vs v2.** The v2 public release ships the full annotation set: `@SolidState`, `@SolidEffect`, `@SolidQuery`, `@SolidEnvironment`. Implementation is split into internal milestones. M1 implements `@SolidState`; M4 adds `@SolidEffect`. Later milestones add `@SolidQuery` and `@SolidEnvironment` before v2 ships. The user-facing API of every annotation is fixed in this SPEC; no source-code change is required when a later milestone lands.
+> **Milestones vs v2.** The v2 public release ships the full annotation set: `@SolidState`, `@SolidEffect`, `@SolidQuery`, `@SolidEnvironment`. Implementation is split into internal milestones. M1 implements `@SolidState`; M4 adds `@SolidEffect`; M5 adds `@SolidQuery`. A later milestone adds `@SolidEnvironment` before v2 ships. The user-facing API of every annotation is fixed in this SPEC; no source-code change is required when a later milestone lands.
 
 ### 3.1 M1 scope: `@SolidState`
 
@@ -78,9 +78,8 @@ int counter = 0;
 
 ### 3.2 Later milestones (shipped before v2 release)
 
-The following annotations are part of the v2 public release but land in milestones after the SPEC's currently-specified set (`@SolidState` in M1, `@SolidEffect` in M4). Until each one ships, the generator must fail with a clear error that names the annotation and says "not yet implemented; scheduled for a later v2 milestone." Their names are reserved here; the full user-facing contract (parameters, valid targets, transformation rules) will be specified in a future SPEC revision before each lands.
+The following annotation is part of the v2 public release but lands in a milestone after the SPEC's currently-specified set (`@SolidState` in M1, `@SolidEffect` in M4, `@SolidQuery` in M5). Until it ships, the generator must fail with a clear error that names the annotation and says "not yet implemented; scheduled for a later v2 milestone." Its name is reserved here; the full user-facing contract (parameters, valid targets, transformation rules) will be specified in a future SPEC revision before it lands.
 
-- `@SolidQuery` — async reactive source (method)
 - `@SolidEnvironment` — dependency injection (field)
 
 ### 3.3 Permanent non-goals
@@ -133,6 +132,133 @@ void logCounter() {
 #### Reactive-deps requirement
 
 The method body MUST read at least one reactive declaration — any identifier whose resolved static type is `SignalBase<T>` or a subtype. An `Effect` with zero reactive dependencies is rejected at build time: *"effect `<name>` has no reactive dependencies; use a regular method or call it once explicitly instead of `@SolidEffect`."* This mirrors Section 4.5's rejection rule for zero-dep `Computed`.
+
+### 3.5 M5 scope: `@SolidQuery`
+
+`@SolidQuery` declares an async reactive source on a class. It attaches to an instance method whose body fetches data from a `Future` or `Stream` and exposes the result through a `Resource<T>` whose state any reader of the call site auto-subscribes to. The annotated method is invoked at every read site as a normal method call (`fetchData()`), and the value the call returns supports `.when`, `.maybeWhen`, `.refresh`, and `.isRefreshing`.
+
+```dart
+@SolidQuery()
+Future<String> fetchData() async {
+  await Future.delayed(const Duration(seconds: 1));
+  return 'fetched';
+}
+```
+
+Stream form:
+
+```dart
+@SolidQuery()
+Stream<int> watchTicks() {
+  return Stream.periodic(const Duration(seconds: 1), (i) => i);
+}
+```
+
+Optional `name:` parameter overrides the auto-derived debug name:
+
+```dart
+@SolidQuery(name: 'currentUser')
+Future<User> fetchUser() async => api.getUser();
+```
+
+Optional `debounce:` parameter delays auto-refresh after a tracked upstream change. Useful for typeahead-style queries where rapid keystrokes should coalesce into one fetch:
+
+```dart
+@SolidQuery(debounce: Duration(milliseconds: 300))
+Future<List<Item>> search() async => api.search(query);
+```
+
+Optional `useRefreshing:` parameter (default `true`) controls whether the query re-enters the `loading` state when an auto-refresh fires. With `true`, the query stays in its current `ready` / `error` state and exposes `isRefreshing == true` while the new value resolves (the upstream `flutter_solidart` default). With `false`, the query transitions back to `loading` on each refresh.
+
+#### Valid target
+
+- Instance method declared with one of two return-type / body-keyword pairings:
+  1. `Future<T>` return type with an `async` body (expression or block).
+  2. `Stream<T>` return type whose body either returns a pre-existing `Stream<T>` (synchronous body) or yields with an `async*` block body.
+- The method must take **no parameters**.
+
+#### Invalid targets (the generator must reject with a clear error)
+
+- Method with a non-`Future`/non-`Stream` return type.
+- Method whose body keyword does not match the return type (a `Future<T>`-typed body that is not `async`, or a `Stream<T>`-typed body that is neither plain-bodied nor `async*`).
+- Method with one or more parameters.
+- `static` method (class-level, not instance — out of scope, parallel to `@SolidState` and `@SolidEffect`).
+- `abstract` or `external` method (no body to lower).
+- Getter or setter.
+- Top-level function.
+- Field.
+
+#### No reactive-deps requirement
+
+A query body MAY read zero, one, or many reactive declarations. The Section 4.5 / Section 3.4 zero-deps rejection rule does NOT apply.
+
+#### Auto-tracking of upstream reactive reads
+
+When the body reads identifiers whose resolved type is `SignalBase<T>` (a `@SolidState` field, a `@SolidState` getter, etc.), the generator wires those reads into the lowered `Resource<T>`'s `source:` argument so the Resource auto-refreshes when any read signal changes. The Section 5.1 type-driven `.value` rewrite still applies inside the body so the bare identifiers typecheck against the lowered Signal types. See Section 4.8 for the synthesis details.
+
+```dart
+@SolidState() String? userId;
+
+@SolidQuery(debounce: Duration(seconds: 1))
+Future<String?> fetchData() async {
+  if (userId == null) return null;
+  return await api.fetch(userId);
+}
+```
+
+Whenever `userId` changes, `fetchData()` auto-refreshes. The 1-second `debounce:` coalesces rapid changes (e.g., typeahead) into one fetch.
+
+#### Read pattern
+
+The user invokes the query in two distinct shapes depending on the operation. **State reads** (`.when`, `.maybeWhen`, `.isRefreshing`) call the method first, then chain on the resulting `Future<T>` / `Stream<T>`. **Refresh** uses the method tear-off (no parens) and chains `.refresh()` on the resulting function reference:
+
+```dart
+@override
+Widget build(BuildContext context) {
+  return fetchData().when(
+    ready: (data) => Text(data),
+    loading: () => CircularProgressIndicator(),
+    error: (error, stackTrace) => Text('Error: $error'),
+  );
+}
+```
+
+`.maybeWhen` is the partial-match analogue with an `orElse:` default:
+
+```dart
+fetchData().maybeWhen(
+  orElse: () => const SizedBox.shrink(),
+  ready: (data) => Text(data),
+)
+```
+
+`.refresh()` re-runs the fetcher imperatively (typically inside an `onPressed` callback). Note the tear-off form — `fetchData.refresh()`, not `fetchData().refresh()`:
+
+```dart
+ElevatedButton(
+  onPressed: () => fetchData.refresh(),
+  child: const Text('Reload'),
+)
+```
+
+`.isRefreshing` exposes whether a refresh is in flight (only meaningful when `useRefreshing: true` — otherwise the query enters `loading` instead). Same call-then-chain shape as `.when`:
+
+```dart
+if (fetchData().isRefreshing) const LinearProgressIndicator(),
+```
+
+#### Source-time typechecking
+
+The user's source layer never references `Resource<T>` or `ResourceState<T>` directly — those are codegen-internal types that appear only in `lib/`. To preserve that abstraction while keeping source-time typechecking honest, `package:solid_annotations` exports six runtime-throwing stub extension families that mirror the upstream `flutter_solidart` surface but on `Future<T>` / `Stream<T>` (and their tear-off types):
+
+- `extension FutureWhen<T> on Future<T>` — surfaces `.when({ready, loading, error})` and `.maybeWhen({orElse, ready, loading, error})`, both returning `Widget`. Used in source by `fetchData().when(...)` / `fetchData().maybeWhen(...)`.
+- `extension StreamWhen<T> on Stream<T>` — same surface as `FutureWhen` but on `Stream<T>` for the Stream-form queries.
+- `extension RefreshFuture<T> on Future<T> Function()` — surfaces `.refresh()` returning `Future<void>`. Note the receiver type is the function tear-off (`Future<T> Function()`), not the Future itself; this is why the source idiom is `fetchData.refresh()` (no parens) — the user is chaining on the method reference, not on the called Future.
+- `extension RefreshStream<T> on Stream<T> Function()` — same surface as `RefreshFuture` but on Stream tear-offs.
+- `extension IsRefreshingFuture<T> on Future<T>` — surfaces `.isRefreshing` returning `bool`. Used by `fetchData().isRefreshing`.
+- `extension IsRefreshingStream<T> on Stream<T>` — same on `Stream<T>`.
+
+Every extension method body throws `Exception('This is just a stub for code generation.')`. The bodies are never executed at runtime because the runtime artifact lives in `lib/`, where `fetchData` is a `Resource<T>` field. The source syntax `fetchData()` survives byte-identical (no body rewrite) — at runtime it invokes the upstream `Resource<T>.call()` operator, which returns `ResourceState<T>`. The trailing `.when(...)` / `.maybeWhen(...)` / `.isRefreshing` chain then resolves to upstream `flutter_solidart` extensions on `ResourceState<T>` directly. The tear-off `fetchData.refresh()` resolves to the upstream `Resource<T>.refresh()` direct instance method. `solid_annotations` exports no extensions on `Resource<T>` or `ResourceState<T>` — the upstream `flutter_solidart` callable + extensions handle the chain.
 
 ---
 
@@ -302,6 +428,137 @@ Rules:
 - When the synthesized State class declares one or more `late final` Effect fields, the generator emits an `initState()` override that calls `super.initState()` then reads each Effect field via a bare-identifier statement (`<effectName>;`) in declaration order. This materializes each lazy `late final` initializer at mount time, triggering the upstream `Effect` factory's autorun (`flutter_solidart` `Effect.run()` in the factory `finally`) and registering reactive dependencies before any user interaction. Without this read, no access to the Effect field occurs until `dispose()`, so the Effect never fires.
 - The cross-cutting rules in Sections 5.1, 5.2, 5.4, 5.5, 6.0, 6.2, 6.4, and 9 apply uniformly inside `Effect` bodies. The body is reactive code in the same sense as a `Computed` or a `build` body, so the type-driven `.value` rewrite, string-interpolation rewrite, no-double-append guard, shadowing handling, untracked-context detection, `.untracked` opt-out, and import-rewrite rules are reused without amendment. No new SPEC rule is required for `Effect` bodies.
 
+### 4.8 `@SolidQuery` on method → `Resource`
+
+Input (Future form, no upstream signals):
+
+```dart
+@SolidQuery()
+Future<String> fetchData() async {
+  await Future.delayed(const Duration(seconds: 1));
+  return 'fetched';
+}
+```
+
+Output:
+
+```dart
+late final fetchData = Resource<String>(
+  () async {
+    await Future.delayed(const Duration(seconds: 1));
+    return 'fetched';
+  },
+  name: 'fetchData',
+);
+```
+
+Input (Future form, body reads ONE upstream `@SolidState` signal — auto-tracking, direct source):
+
+```dart
+@SolidState() String? userId;
+
+@SolidQuery(debounce: Duration(seconds: 1))
+Future<String?> fetchData() async {
+  if (userId == null) return null;
+  return await api.fetch(userId);
+}
+```
+
+Output:
+
+```dart
+final userId = Signal<String?>(null, name: 'userId');
+
+late final fetchData = Resource<String?>(
+  () async {
+    if (userId.value == null) return null;
+    return await api.fetch(userId.value);
+  },
+  source: userId,
+  debounceDelay: const Duration(seconds: 1),
+  name: 'fetchData',
+);
+```
+
+Input (Future form, body reads TWO upstream signals — synthesized Record-Computed source):
+
+```dart
+@SolidState() String? userId;
+@SolidState() String? orgId;
+
+@SolidQuery()
+Future<User?> fetchUser() async {
+  if (userId == null || orgId == null) return null;
+  return await api.fetch(userId, orgId);
+}
+```
+
+Output:
+
+```dart
+final userId = Signal<String?>(null, name: 'userId');
+final orgId = Signal<String?>(null, name: 'orgId');
+
+late final _fetchUserSource = Computed<(String?, String?)>(
+  () => (userId.value, orgId.value),
+  name: 'fetchUser_source',
+);
+
+late final fetchUser = Resource<User?>(
+  () async {
+    if (userId.value == null || orgId.value == null) return null;
+    return await api.fetch(userId.value, orgId.value);
+  },
+  source: _fetchUserSource,
+  name: 'fetchUser',
+);
+```
+
+Stream form:
+
+```dart
+@SolidQuery()
+Stream<int> watchTicks() {
+  return Stream.periodic(const Duration(seconds: 1), (i) => i);
+}
+```
+
+Output:
+
+```dart
+late final watchTicks = Resource<int>.stream(
+  () => Stream.periodic(const Duration(seconds: 1), (i) => i),
+  name: 'watchTicks',
+);
+```
+
+Rules:
+
+1. **One emitted declaration per query.** The annotated method is replaced by a single `late final <name>` field holding the upstream `Resource<T>` (or `Resource<T>.stream(...)`). No private wrapper, no thin-accessor, no underscore prefix. The field bears the same identifier the user wrote on the source-side method, so consumers continue to reference it by that name. The original method's body becomes the Resource's fetcher closure.
+
+2. **Source-side `<name>()` call sites survive byte-identical in lowered output.** In the user's source, state reads chain after a method call: `fetchData().when(...)`. After lowering, `<name>` is a `Resource<T>` field, not a method — but `Resource<T>` upstream defines `ResourceState<T> call() => state;`, so the syntax `fetchData()` resolves to `Resource.call()` at runtime, which returns `ResourceState<T>`. The trailing `.when(...)` / `.maybeWhen(...)` / `.isRefreshing` chains then resolve directly to upstream `flutter_solidart` extensions on `ResourceState<T>`. No body rewrite is applied to the call expression: source `fetchData().when(...)` is byte-identical to lowered `fetchData().when(...)`. The `.refresh()` form uses a method tear-off in source (`fetchData.refresh()` — no parens after `fetchData`); after lowering, `<queryName>` is a `Resource<T>` field, and `.refresh()` resolves to the upstream direct instance method on `Resource<T>` — also byte-identical between source and output.
+
+3. **SignalBuilder placement detects query call expressions as tracked reads.** Although the call expression itself is not rewritten, the body-rewrite visitor still records the offset of each `<queryName>()` invocation in the tracked-read set so that Section 7's SignalBuilder placement wraps the enclosing widget subtree. Detection is name-based on the visitor's per-class set of `@SolidQuery` method names: a zero-argument `MethodInvocation` whose target is a bare `SimpleIdentifier` matching a query name (and not shadowed by a local) is a tracked read. The runtime subscription happens inside `Resource.call()` → `state` → upstream `setCurrentSub`, so the SignalBuilder rebuild fires correctly when the Resource emits a new state. Shadowing follows the Section 5.5 rule: if a local with the same name shadows the query, the call is left alone and not marked as a tracked read.
+
+4. **Body rewrite.** The original method's body is wrapped in a parameterless function expression preserving the `async` / `async*` keyword (or returning a `Stream<T>` directly for the synchronous Stream form). Section 5.1 type-driven `.value` rewrite applies inside the body so any `@SolidState` field / getter reads are correctly unboxed.
+
+5. **Auto-tracking — direct source for one dep, synthesized Record-Computed for multiple.** The body's reactive reads (identifiers whose resolved static type is `SignalBase<T>`) determine the Resource's `source:` argument:
+   - **Zero reactive reads**: no `source:` argument emitted; the Resource only refreshes via explicit `.refresh()` calls.
+   - **One reactive read**: the read identifier (a `Signal` or `Computed`) is passed directly as `source: <name>`. No synthesized field is emitted — wrapping a single Signal in a Computed that just returns its `.value` would be a no-op, so the generator skips it. The upstream `Resource<T>` constructor accepts any `SignalBase<dynamic>` as `source:`, and `Signal<T>` / `Computed<T>` already qualify.
+   - **Two or more reactive reads**: the generator synthesizes a `late final _<name>Source = Computed<(T1, T2, …)>(() => (s1.value, s2.value, …), name: '<name>_source')` field whose value is a `Record` combining all tracked values. The Computed is passed as `source: _<name>Source`. Records compare by value-equality, so changing ANY tracked signal flips the Record's identity, the Resource sees its source change, and the fetcher re-runs (subject to any `debounce:` delay). The synthesized field is the only reason an underscore-prefixed Resource-related declaration ever appears in lowered output.
+
+6. **`Resource<T>(...)` for Future, `Resource<T>.stream(...)` for Stream.** Type argument `T` is the inner type of the original `Future<T>` / `Stream<T>` return signature.
+
+7. **`late final` is required** on the Resource field and (when synthesized) on the source Record-Computed field, parallel to `Computed` (Section 4.5) and `Effect` (Section 4.7): each initializer references other reactive instance fields, so its evaluation must defer until `this` is in scope.
+
+8. **Method-name → `name:` argument** unless `@SolidQuery(name: '…')` overrides. When a Record-Computed source is synthesized, it uses `'<methodName>_source'` (or `'<overrideName>_source'` when `name:` is overridden) as its debug name.
+
+9. **Annotation parameters propagate.** `@SolidQuery(debounce: Duration(...))` becomes the Resource's `debounceDelay:` argument. `@SolidQuery(useRefreshing: false)` becomes `useRefreshing: false` on the Resource (the upstream default `useRefreshing: true` is omitted from the emitted code to keep generated lines short).
+
+10. **Lazy by default.** The `late final <name>` field stays uninitialized until first read. The first read happens at the first reactive call site (e.g., the body of a `SignalBuilder`-wrapped `<name>().when(...)` chain in `build` — `Resource.call()` is invoked, which triggers the late-final initializer and reads `.state`, firing the upstream Resource's first fetch). Resources do NOT use the Section 4.7 / Section 8.3 forced-materialization pattern that `Effect` requires.
+
+11. **Disposal.** The `<name>` Resource field always joins the unified ordered dispose list. The `_<name>Source` Record-Computed (when synthesized) is emitted immediately before its Resource and joins the dispose list in that source-declaration position, so reverse-declaration disposal (Section 10) tears the Resource down before the Record-Computed and before any Signals they read.
+
 ---
 
 ## 5. Reactive-Read Rules
@@ -310,9 +567,9 @@ When a generated piece of code (anything under `lib/`) references a reactive val
 
 ### 5.1 Identifier rewrite
 
-A bare `SimpleIdentifier` is rewritten to `<name>.value` if and only if its resolved static type is `SignalBase<T>` (or a subtype: `Signal<T>`, `Computed<T>`, `ReadSignal<T>`, `Resource<T>`) from `package:flutter_solidart`.
+A bare `SimpleIdentifier` is rewritten to `<name>.value` if and only if its resolved static type is `SignalBase<T>` (or a subtype: `Signal<T>`, `Computed<T>`, `ReadSignal<T>`) from `package:flutter_solidart`.
 
-In M1 the only way to introduce such an identifier is via `@SolidState` on the enclosing class, but the rule itself is expressed in terms of resolved type so later milestones (`@SolidEnvironment`, `@SolidQuery`) work without amendment.
+In M1 the only way to introduce such an identifier is via `@SolidState` on the enclosing class, but the rule itself is expressed in terms of resolved type so later milestones (`@SolidEnvironment`) work without amendment. `@SolidQuery` (Section 3.5) does NOT introduce a `SignalBase<T>` identifier at the call site: a query is invoked as a method call (`fetchData()`), and the lowered method returns `Resource<T>` (Section 4.8), which the call-site reads via the `.when` / `.maybeWhen` / `.refresh` / `.isRefreshing` extensions on `Resource<T>` from `solid_annotations`. The Section 5.1 `.value` rewrite does not apply to query call expressions.
 
 Source:
 
@@ -656,7 +913,7 @@ class Counter {
 
 If the developer has already declared a `dispose()` method, the generator merges: the generated disposal calls are prepended to the existing body, then `super.dispose()` is emitted if and only if the class's supertype chain contains a `dispose()` method (e.g., `State<T>`, `ChangeNotifier`). The generator determines this via the analyzer's type resolution, not by name matching. For a plain class with no `dispose()` in the supertype chain, `super.dispose()` is omitted.
 
-When the plain class has one or more `@SolidEffect` methods, the generator synthesizes a no-arg constructor whose body reads each Effect field by bare identifier in declaration order — analogue of the State class's `initState()` materialization (§4.7). The synthesized constructor takes the place a widget lifecycle would otherwise serve, activating each `late final` Effect at construction time so its autorun fires once with the initial Signal values and subscribes to subsequent changes. Plain classes with a user-defined constructor and `@SolidEffect` are not supported in this milestone — the generator rejects with a `CodeGenerationError`.
+When the plain class has one or more `@SolidEffect` methods, the generator synthesizes a no-arg constructor whose body reads each Effect field by bare identifier in declaration order — analogue of the State class's `initState()` materialization (§4.7). The synthesized constructor takes the place a widget lifecycle would otherwise serve, activating each `late final` Effect at construction time so its autorun fires once with the initial Signal values and subscribes to subsequent changes. `@SolidQuery` fields are NOT materialized in the synthesized constructor — they are lazy by default and initialize on first thin-accessor invocation (Section 4.8). Plain classes with a user-defined constructor and `@SolidEffect` are not supported in this milestone — the generator rejects with a `CodeGenerationError`.
 
 ### 8.4 StatelessWidget with zero `@SolidState` annotations
 
@@ -678,11 +935,11 @@ This is the fix for issue #8.
 
 ## 10. `dispose()` Contract
 
-Every generated `Signal`, `Computed`, and `Effect` must be disposed when its owning class is disposed. The merging algorithm below applies identically to every class kind; the per-kind sections (8.1–8.3) describe how the algorithm is triggered.
+Every generated `Signal`, `Computed`, `Effect`, and `Resource` (including any synthesized `_<name>Source` Record-Computed wired into a multi-dep `@SolidQuery`'s `source:` for auto-tracking — Section 4.8 rule 3) must be disposed when its owning class is disposed. The merging algorithm below applies identically to every class kind; the per-kind sections (8.1–8.3) describe how the algorithm is triggered.
 
 Algorithm: if the target class already has a `dispose()` body, prepend one `xxx.dispose()` call per reactive declaration to the top of the body and leave the rest untouched; if no `dispose()` exists, synthesize one. Emit `super.dispose()` at the end if and only if the class's supertype chain contains a `dispose()` method (e.g., `State<T>`, `ChangeNotifier`); the generator determines this via the analyzer's type resolution, not by name matching. For a plain class with no `dispose()` in the supertype chain, omit `super.dispose()`.
 
-Disposal order is **reverse declaration order**: dependents are disposed before their dependencies. Because a `Computed` must always be declared after the `Signal`s it reads, and an `Effect` must always be declared after the `Signal`s/`Computed`s it reads (those declarations are the dependents' dependencies), reverse declaration order guarantees a dependent (`Effect` or `Computed`) is disposed first and a dependency (`Signal` or `Computed`) is never disposed while a live subscriber still holds a subscription to it.
+Disposal order is **reverse declaration order**: dependents are disposed before their dependencies. Because a `Computed` must always be declared after the `Signal`s it reads, an `Effect` must always be declared after the `Signal`s/`Computed`s it reads, and a `Resource` whose fetcher reads other reactive declarations must be declared after those declarations (those declarations are the dependents' dependencies), reverse declaration order guarantees a dependent (`Effect`, `Computed`, or `Resource`) is disposed first and a dependency (`Signal`, `Computed`, or another `Resource`) is never disposed while a live subscriber still holds a subscription to it. When a synthesized `_<name>Source` Record-Computed is emitted (multi-dep `@SolidQuery` only — see Section 4.8 rule 3), it is emitted immediately before the `_<name>` Resource it feeds, so reverse-order disposal tears the Resource down first, then the source Computed, then the underlying Signals.
 
 ---
 
@@ -732,9 +989,8 @@ With Option A the developer saves `source/`, waits for build_runner to emit, the
 
 ## 13. Not yet shipped (deferred until later milestones, before v2 release)
 
-These features are part of the v2 public release but land in milestones after the SPEC's currently-specified set (`@SolidState` in M1, `@SolidEffect` in M4). A build that encounters any of them in source code must fail with a clear error naming the unsupported feature and referencing this section.
+These features are part of the v2 public release but land in milestones after the SPEC's currently-specified set (`@SolidState` in M1, `@SolidEffect` in M4, `@SolidQuery` in M5). A build that encounters any of them in source code must fail with a clear error naming the unsupported feature and referencing this section.
 
-- `@SolidQuery` (Future and Stream forms; `.when`, `.maybeWhen`, `.refresh`, `.isRefreshing`; debounce; useRefreshing)
 - `@SolidEnvironment`
 - `SolidProvider` / `InheritedSolidProvider` / `.environment()` widget extension / `context.read` / `context.watch`
 
@@ -753,8 +1009,8 @@ These were open questions during SPEC drafting and have been answered by the dev
 1. **Plain (non-Widget) classes with `@SolidState` fields** — supported per Section 8.3.
 2. **Compound-assignment operator list in Section 5.3** — complete.
 3. **`@SolidState` on `final` fields** — rejected with a clear error (wrapping a never-reassigned value in a `Signal` is pointless).
-4. **Custom `initState` / `didUpdateWidget` overrides in an existing State class (Section 8.2)** — preserved untouched, with one carve-out: when one or more `@SolidEffect` methods exist on the class, Effect-materialization reads (`<effectName>;`) are spliced into the existing `initState` body immediately after the `super.initState();` call (or after the opening brace if no super call is detected as the first statement). If an existing `dispose()` is present, reactive disposals are merged into its body.
-5. **User-facing packages** — two packages. `package:solid_annotations` (runtime dep) hosts the annotation classes (`@SolidState` and `@SolidEffect` today; `@SolidQuery`/`@SolidEnvironment` in later milestones). `package:solid_generator` (dev_dep) hosts the build_runner builder. There is no `package:solid` umbrella. Consumers add `solid_annotations` + `flutter_solidart` as runtime deps and `solid_generator` + `build_runner` as dev_deps, then import annotations and `flutter_solidart` primitives directly.
+4. **Custom `initState` / `didUpdateWidget` overrides in an existing State class (Section 8.2)** — preserved untouched, with one carve-out: when one or more `@SolidEffect` methods exist on the class, Effect-materialization reads (`<effectName>;`) are spliced into the existing `initState` body immediately after the `super.initState();` call (or after the opening brace if no super call is detected as the first statement). `@SolidQuery` fields are NOT spliced — they are lazy and materialize on first thin-accessor invocation (Section 4.8). If an existing `dispose()` is present, reactive disposals are merged into its body (this part applies to all `Signal` / `Computed` / `Effect` / `Resource` declarations and to any synthesized `_<name>Source` Computed for query auto-tracking).
+5. **User-facing packages** — two packages. `package:solid_annotations` (runtime dep) hosts the annotation classes (`@SolidState`, `@SolidEffect`, and `@SolidQuery` today; `@SolidEnvironment` in a later milestone). `package:solid_generator` (dev_dep) hosts the build_runner builder. There is no `package:solid` umbrella. Consumers add `solid_annotations` + `flutter_solidart` as runtime deps and `solid_generator` + `build_runner` as dev_deps, then import annotations and `flutter_solidart` primitives directly.
 6. **Shadowing rule (Section 5.5)** — handled by type resolution. Because Section 5.1 is type-driven, a shadowed local of a non-`SignalBase` type is never rewritten. A dedicated shadowing test case is required in M1.
 7. **`const` on the public widget constructor (Section 8.1)** — not added by the generator. Constructors round-trip verbatim from source. After the class split removes mutable `@SolidState` fields from the widget, the rewritten widget is usually const-eligible by Dart's own rules; `dart fix --apply` is the trusted lint pass that adds `const` (and removes unused imports — Section 9). The generator never emits `const` on its own.
 
