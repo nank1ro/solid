@@ -1697,7 +1697,7 @@ class Ticker extends StatelessWidget {
 
 ---
 
-### TODO M5-03 — Golden: `@SolidQuery` co-exists with `@SolidState` field + getter + `@SolidEffect`
+### DONE M5-03 — Golden: `@SolidQuery` co-exists with `@SolidState` field + getter + `@SolidEffect`
 
 **Goal:** A class with all four annotated shapes — `@SolidState()` field, `@SolidState()` getter, `@SolidEffect()` method, `@SolidQuery()` method — produces a State class with all four lowered shapes interleaved in source order, and a `dispose()` body in reverse-declaration order. `initState()` materializes ONLY the Effect (queries are lazy per §4.8). Validates the unified ordered-name list under all four lowered shapes.
 
@@ -1711,15 +1711,15 @@ class Ticker extends StatelessWidget {
 
 **Expected input content:** A `StatelessWidget` with (in source order) `@SolidState() int counter = 0;`, `@SolidState() int get doubleCounter => counter * 2;`, `@SolidEffect() void logBoth() { print('$counter / $doubleCounter'); }`, `@SolidQuery() Future<int> fetchSnapshot() async => 0;` (no upstream signals — auto-tracking lands in M5-10).
 
-**Expected output content:** State class declares `counter` (Signal), then `doubleCounter` (late final Computed), then `logBoth` (late final Effect), then `_fetchSnapshot` (late final Resource) + `fetchSnapshot()` thin-accessor — all in source order. `initState()` materializes ONLY `logBoth` after `super.initState();`. `dispose()` body calls `_fetchSnapshot.dispose()`, then `logBoth.dispose()`, then `doubleCounter.dispose()`, then `counter.dispose()`, then `super.dispose()` — reverse declaration order per SPEC Section 10.
+**Expected output content:** State class declares `counter` (Signal), then `doubleCounter` (late final Computed), then `logBoth` (late final Effect), then `fetchSnapshot` (late final Resource) — single public field, no underscore prefix, no thin-accessor wrapper per the M5-01 emit shape; all in source order. `initState()` materializes ONLY `logBoth` after `super.initState();`. `dispose()` body calls `fetchSnapshot.dispose()`, then `logBoth.dispose()`, then `doubleCounter.dispose()`, then `counter.dispose()`, then `super.dispose()` — reverse declaration order per SPEC Section 10.
 
 **Expected implementation change:** None beyond M5-01 + M4-02 — this is a regression fence on the unified dispose-ordering rule across all four shapes AND a regression fence proving Effects (always materialized) and queries (NEVER materialized) coexist correctly.
 
-**Acceptance:** `dart test --name=m5_03` passes; golden's `dispose()` body has Resource → Effect → Computed → Signal → super order verbatim; `initState()` body is `super.initState(); logBoth;` (no `_fetchSnapshot;`).
+**Acceptance:** `dart test --name=m5_03` passes; golden's `dispose()` body has Resource → Effect → Computed → Signal → super order verbatim; `initState()` body is `super.initState(); logBoth;` (no `fetchSnapshot;`).
 
 **Dependencies:** M5-01, M4-02.
 
-**Status:** TODO
+**Status:** DONE
 
 ---
 
