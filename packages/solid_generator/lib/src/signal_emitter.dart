@@ -104,16 +104,21 @@ String emitResourceField(QueryModel q) {
       : 'Resource<${q.innerTypeText}>';
   // SPEC §4.8 rule 5: a single-Signal Computed wrapper would be a no-op, so
   // the one-name case passes the Signal/Computed directly as `source:`.
-  final String sourceArg;
-  if (q.trackedSignalNames.isEmpty) {
-    sourceArg = '';
-  } else if (q.trackedSignalNames.length == 1) {
-    sourceArg = ', source: ${q.trackedSignalNames.first}';
-  } else {
-    sourceArg = ', source: ${q.sourceFieldName}';
-  }
-  final ctor = "$ctorName($closure$sourceArg, name: '$debugName')";
-  return '  late final ${q.methodName} = $ctor;';
+  // SPEC §4.8 rule 9: `useRefreshing: true` is the upstream default and is
+  // omitted from emitted output to keep generated lines short.
+  final source = switch (q.trackedSignalNames) {
+    [] => null,
+    [final only] => only,
+    _ => q.sourceFieldName,
+  };
+  final args = [
+    closure,
+    if (source != null) 'source: $source',
+    if (q.debounce != null) 'debounceDelay: ${q.debounce}',
+    if (q.useRefreshing == false) 'useRefreshing: false',
+    "name: '$debugName'",
+  ].join(', ');
+  return '  late final ${q.methodName} = $ctorName($args);';
 }
 
 /// Emits the synthesized Record-Computed source field for an `@SolidQuery`
