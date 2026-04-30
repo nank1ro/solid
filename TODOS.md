@@ -1920,7 +1920,7 @@ The `fetchName().when(...)` chain is byte-identical between input and output —
 
 **Dependencies:** M5-01, M4-08.
 
-**Status:** TODO
+**Status:** DONE
 
 ---
 
