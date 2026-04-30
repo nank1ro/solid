@@ -77,8 +77,8 @@ RewriteResult rewritePlainClass(
       continue;
     }
     if (member is MethodDeclaration) {
-      // Non-Effect/Query methods are rejected by `_checkUnsupportedMembers`
-      // above, so exactly one of the two lookups hits.
+      // `_checkUnsupportedMembers` above guarantees exactly one of the two
+      // map lookups hits, so the `!` on the query branch is safe.
       final name = member.name.lexeme;
       final effect = effectByName[name];
       if (effect != null) {
@@ -92,6 +92,7 @@ RewriteResult rewritePlainClass(
       final query = queryByName[name]!;
       pieces.add(emitResourceField(query));
       disposeNames.add(query.methodName);
+      continue;
     }
   }
 
