@@ -246,10 +246,10 @@ String _renderOutput(
 
 /// Dispatches on [decl]'s class kind to the matching rewriter.
 ///
-/// `@SolidQuery` only lowers on `StatelessWidget` in M5-01. The plain-class
-/// and `State<X>` paths land in M5-08 / M5-09; until then, any query on
-/// those class kinds is rejected at the dispatch boundary so the rewriters
-/// stay query-unaware (their signatures don't change in this PR).
+/// `@SolidQuery` lowers on `StatelessWidget` (M5-01) and existing `State<X>`
+/// subclasses (M5-08). The plain-class path lands in M5-09; until then, any
+/// query on a plain class is rejected at the dispatch boundary so the
+/// `rewritePlainClass` signature stays query-unaware.
 RewriteResult _rewriteClass(
   ClassDeclaration decl,
   List<FieldModel> fields,
@@ -274,12 +274,14 @@ RewriteResult _rewriteClass(
       rejectIfQueriesNotYetSupported(queries, 'plain class', className);
       return rewritePlainClass(decl, fields, getters, effects, source);
     case ClassKind.stateClass:
-      rejectIfQueriesNotYetSupported(
+      return rewriteStateClass(
+        decl,
+        fields,
+        getters,
+        effects,
         queries,
-        'existing State<X> subclass',
-        className,
+        source,
       );
-      return rewriteStateClass(decl, fields, getters, effects, source);
     case ClassKind.statefulWidget:
       throw CodeGenerationError(
         'class-kind $kind is not supported yet '
