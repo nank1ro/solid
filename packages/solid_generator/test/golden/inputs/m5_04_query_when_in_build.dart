@@ -1,12 +1,7 @@
-// SPEC §4.8 rule 3: a `<query>().when(...)` chain in build is the canonical
-// reactive call site. The chain is byte-identical between input and output;
-// the SignalBuilder wrap is the only delta. UserScreen has only a query
-// (no mutable @SolidState field) so its constructor could be const before
-// lowering, but the SPEC §2 source model writes user-facing widgets with
-// non-const constructors uniformly. The `loading: () => const CircularProgress
-// Indicator()` closure intentionally preserves the const-construction wrapper
-// (a const tear-off is not expressible in Dart), so `unnecessary_lambdas` is
-// silenced for this file.
+// SPEC §4.8 rule 3 + §7: a `<query>().when(...)` chain is wrapped in
+// SignalBuilder while the chain itself is byte-identical input/output. The
+// `loading:` lambda preserves a const-constructed widget (Dart has no const
+// tear-off form), so `unnecessary_lambdas` is silenced.
 // ignore_for_file: prefer_const_constructors_in_immutables, unnecessary_lambdas
 
 import 'package:solid_annotations/solid_annotations.dart';

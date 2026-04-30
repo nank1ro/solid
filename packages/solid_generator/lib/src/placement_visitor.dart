@@ -108,6 +108,11 @@ bool _isSignalBuilder(AstNode node) {
   return false;
 }
 
+/// SPEC §3.5 query-state extension methods — both `<query>().when(...)` and
+/// `<query>().maybeWhen(...)` resolve to `Widget`-returning extensions, so
+/// either is a valid SignalBuilder wrap target.
+const Set<String> _queryStateChainMethods = {'when', 'maybeWhen'};
+
 class _WidgetCollector extends RecursiveAstVisitor<void> {
   _WidgetCollector(this._queryNames);
 
@@ -136,19 +141,13 @@ class _WidgetCollector extends RecursiveAstVisitor<void> {
     }
   }
 
-  /// True if [node] is a SPEC §3.5 / §4.8 query-state chain, i.e.
-  /// `<queryName>().when(...)` or `<queryName>().maybeWhen(...)`. The
-  /// `FutureWhen<T> on Future<T>` / `StreamWhen<T> on Stream<T>` source-time
-  /// stubs in `solid_annotations` return `Widget`, and the lowered chain
-  /// resolves through `Resource<T>.call() => state` to upstream
-  /// `flutter_solidart` extensions on `ResourceState<T>` that also return
-  /// `Widget`. The chain is therefore a valid SignalBuilder wrap target.
-  ///
-  /// The query-name guard ensures the clause never fires on user-defined
-  /// `.when` / `.maybeWhen` methods on non-query targets.
+  /// True if [node] is a SPEC §3.5 / §4.8 query-state chain
+  /// `<queryName>().when(...)` / `.maybeWhen(...)`. The query-name guard
+  /// prevents matches on user-defined `.when` / `.maybeWhen` methods on
+  /// non-query targets.
   bool _isQueryStateChain(MethodInvocation node) {
-    final name = node.methodName.name;
-    if (name != 'when' && name != 'maybeWhen') return false;
+    if (_queryNames.isEmpty) return false;
+    if (!_queryStateChainMethods.contains(node.methodName.name)) return false;
     final target = node.target;
     if (target is! MethodInvocation) return false;
     if (target.target != null) return false;
