@@ -278,6 +278,8 @@ QueryModel? readSolidQueryMethod(
     isStream: returnTypeName == streamLexeme,
     trackedSignalNames: trackedNames,
     annotationName: extractNameArgument(annotation),
+    debounce: extractDebounceArgument(annotation, source),
+    useRefreshing: extractUseRefreshingArgument(annotation),
   );
 }
 
@@ -296,17 +298,58 @@ Annotation? findAnnotationByName(
   return null;
 }
 
+/// Returns the [Expression] passed for `<label>: <expr>` on [annotation], or
+/// `null` if the annotation has no named argument with that label.
+Expression? _findNamedArg(Annotation annotation, String label) {
+  final args = annotation.arguments?.arguments ?? const [];
+  for (final arg in args) {
+    if (arg is NamedExpression && arg.name.label.name == label) {
+      return arg.expression;
+    }
+  }
+  return null;
+}
+
 /// Extracts the string value of a `name: '…'` named argument on [annotation],
 /// or `null` if the annotation has no such argument. Shared between the field
 /// and getter readers so both reactive shapes thread the SPEC §4.4 debug name
 /// uniformly.
 String? extractNameArgument(Annotation annotation) {
-  final args = annotation.arguments?.arguments ?? const [];
-  for (final arg in args) {
-    if (arg is NamedExpression && arg.name.label.name == 'name') {
-      final expr = arg.expression;
-      if (expr is SimpleStringLiteral) return expr.value;
-    }
-  }
-  return null;
+  final expr = _findNamedArg(annotation, 'name');
+  return expr is SimpleStringLiteral ? expr.value : null;
+}
+
+/// Returns the emit-ready source text of the `debounce:` argument's
+/// expression on `@SolidQuery(debounce: …)`, or `null` if the annotation has
+/// no `debounce:` argument.
+///
+/// In the unresolved AST that the builder operates on, `Duration(...)` (no
+/// keyword) parses as a [MethodInvocation] because the parser cannot tell
+/// it's a constructor call without semantic resolution; `const Duration(...)`
+/// parses as an [InstanceCreationExpression] because the keyword
+/// disambiguates. Annotation argument context is implicit-const, so the
+/// canonical user shape lacks `const`; both no-keyword shapes therefore
+/// receive a `const ` prefix so the lowered
+/// `Resource(... debounceDelay: <text>, ...)` arg compiles in its non-const
+/// constructor-arg context. Other shapes (`const Duration(...)`, identifier
+/// references like a const-declared `_myDebounce`) emit verbatim.
+String? extractDebounceArgument(Annotation annotation, String source) {
+  final expr = _findNamedArg(annotation, 'debounce');
+  if (expr == null) return null;
+  final raw = source.substring(expr.offset, expr.end);
+  final implicitConst =
+      expr is MethodInvocation ||
+      (expr is InstanceCreationExpression && expr.keyword == null);
+  return implicitConst ? 'const $raw' : raw;
+}
+
+/// Returns `true`/`false` for `useRefreshing: <bool>` on
+/// `@SolidQuery(useRefreshing: …)`, or `null` if the annotation has no
+/// `useRefreshing:` argument. The `null` case is distinct from the
+/// annotation default (`true`) at the model layer, but per SPEC §4.8 rule 9
+/// both omit the emitted `useRefreshing:` argument (the upstream
+/// `Resource` default is `true`, so emitting it would be redundant noise).
+bool? extractUseRefreshingArgument(Annotation annotation) {
+  final expr = _findNamedArg(annotation, 'useRefreshing');
+  return expr is BooleanLiteral ? expr.value : null;
 }

@@ -100,10 +100,16 @@ class QueryModel {
   /// list pushes in every rewriter.
   String get sourceFieldName => '_${methodName}Source';
 
-  /// Value of the `debounce:` argument on `@SolidQuery(debounce: …)`, or
-  /// `null` if the annotation had no `debounce:` argument. Reserved in M5-01
-  /// for M5-11 — present on the model so future readers don't reshape it.
-  final Duration? debounce;
+  /// Emit-ready source text of the `debounce:` annotation argument
+  /// (e.g. `'const Duration(milliseconds: 300)'`), or `null` if the
+  /// annotation had no `debounce:` argument. The reader prepends `const ` for
+  /// the implicit-const annotation form so the lowered
+  /// `Resource(... debounceDelay: <text>, ...)` arg compiles in a non-const
+  /// constructor-arg context. Stored as source text (not a runtime
+  /// `Duration`) so the emitter can splice it verbatim — mirrors how
+  /// [bodyText], [innerTypeText], and [annotationName] carry source
+  /// substrings. Wired in M5-11.
+  final String? debounce;
 
   /// Value of the `useRefreshing:` argument on `@SolidQuery(useRefreshing: …)`,
   /// or `null` if the annotation had no `useRefreshing:` argument. Reserved
