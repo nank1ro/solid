@@ -1,5 +1,4 @@
 import 'package:meta/meta.dart';
-import 'package:solid_generator/src/transformation_error.dart';
 
 /// Parsed description of one `@SolidQuery`-annotated method.
 ///
@@ -85,28 +84,4 @@ class QueryModel {
   /// Value of the `name:` argument on `@SolidQuery(name: '…')`, or `null` if
   /// the annotation had no `name:` argument (SPEC §3.5 / §4.8 rule 8).
   final String? annotationName;
-}
-
-/// Throws [CodeGenerationError] when [solidQueries] is non-empty, naming the
-/// first offending method and the [classKindLabel] (`'plain class'`,
-/// `'existing State<X> subclass'`, …) of the rewriter that has not yet
-/// implemented method→`Resource` lowering.
-///
-/// Mirrors `rejectIfEffectsNotYetSupported` in `effect_model.dart`: the
-/// message template lives in one place so two rewriters' "not yet supported"
-/// errors can never drift. The StatelessWidget path lands in M5-01; the
-/// `State<X>` and plain-class paths land in M5-08 / M5-09.
-void rejectIfQueriesNotYetSupported(
-  List<QueryModel> solidQueries,
-  String classKindLabel,
-  String className,
-) {
-  if (solidQueries.isEmpty) return;
-  throw CodeGenerationError(
-    '@SolidQuery on $classKindLabel is not yet supported '
-    '(will land in M5-08/M5-09); '
-    'offending method: ${solidQueries.first.methodName}',
-    null,
-    className,
-  );
 }
