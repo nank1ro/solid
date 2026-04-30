@@ -94,7 +94,8 @@ GetterModel? readSolidStateGetter(
 
   final body = decl.body;
   final getterName = decl.name.lexeme;
-  final (bodyText, isBlockBody) = _readReactiveBody(
+  // Getters do not need tracked names; no `source:` wiring.
+  final (:bodyText, :isBlockBody, trackedNames: _) = _readReactiveBody(
     body,
     reactiveFields,
     source,
@@ -116,18 +117,24 @@ GetterModel? readSolidStateGetter(
   );
 }
 
-/// Returns the rewritten body text and whether it came from a block body.
-/// Shared between `readSolidStateGetter`, `readSolidEffectMethod`, and
-/// `readSolidQueryMethod`: all three discriminate `ExpressionFunctionBody`
-/// vs `BlockFunctionBody`, run the SPEC §5.1 `.value` rewrite, and reject
-/// abstract/native bodies. The zero-deps check (SPEC §4.5 / §3.4) fires
-/// only when [emptyDepsError] is non-null; queries pass `null` because
-/// SPEC §3.5 explicitly waives the reactive-deps requirement. Error wording
-/// differs per caller (SPEC §4.5 vs §3.4 vs §3.5) — pass it in.
+/// Returns the rewritten body text, whether it came from a block body, and
+/// the dedup'd source-order list of `@SolidState` field/getter names read in
+/// tracked position inside the body. Shared between `readSolidStateGetter`,
+/// `readSolidEffectMethod`, and `readSolidQueryMethod`: all three
+/// discriminate `ExpressionFunctionBody` vs `BlockFunctionBody`, run the
+/// SPEC §5.1 `.value` rewrite, and reject abstract/native bodies. The
+/// zero-deps check (SPEC §4.5 / §3.4) fires only when [emptyDepsError] is
+/// non-null; queries pass `null` because SPEC §3.5 explicitly waives the
+/// reactive-deps requirement. Error wording differs per caller
+/// (SPEC §4.5 vs §3.4 vs §3.5) — pass it in.
 ///
-/// `trackedReadOffsets` are intentionally ignored — SignalBuilder placement
-/// is a `build()` concern, not a `Computed`/`Effect`/`Resource` body concern.
-(String bodyText, bool isBlockBody) _readReactiveBody(
+/// `trackedReadOffsets` from the rewrite are intentionally discarded here —
+/// SignalBuilder placement is a `build()` concern, not a `Computed` /
+/// `Effect` / `Resource` body concern. `trackedNames` is consumed only by
+/// `readSolidQueryMethod` to wire the Resource's `source:` argument; getter
+/// and effect callers destructure it into `_`.
+({String bodyText, bool isBlockBody, List<String> trackedNames})
+_readReactiveBody(
   FunctionBody body,
   Set<String> reactiveFields,
   String source, {
@@ -155,7 +162,11 @@ GetterModel? readSolidStateGetter(
     result.edits,
     node.offset,
   );
-  return (bodyText, isBlockBody);
+  return (
+    bodyText: bodyText,
+    isBlockBody: isBlockBody,
+    trackedNames: result.trackedReadNames,
+  );
 }
 
 /// Reads a `@SolidEffect(...)` annotation on the method [decl] and returns an
@@ -184,7 +195,9 @@ EffectModel? readSolidEffectMethod(
   if (annotation == null) return null;
 
   final methodName = decl.name.lexeme;
-  final (bodyText, isBlockBody) = _readReactiveBody(
+  // Effects do not need tracked names: the autorun subscribes by running the
+  // body eagerly, no explicit `source:` wiring.
+  final (:bodyText, :isBlockBody, trackedNames: _) = _readReactiveBody(
     decl.body,
     reactiveFields,
     source,
@@ -245,7 +258,7 @@ QueryModel? readSolidQueryMethod(
 
   final methodName = decl.name.lexeme;
   // emptyDepsError: null — SPEC §3.5 waives the reactive-deps requirement.
-  final (bodyText, isBlockBody) = _readReactiveBody(
+  final (:bodyText, :isBlockBody, :trackedNames) = _readReactiveBody(
     decl.body,
     reactiveFields,
     source,
@@ -263,6 +276,7 @@ QueryModel? readSolidQueryMethod(
     innerTypeText: innerTypeText,
     bodyKeyword: decl.body.keyword?.lexeme ?? '',
     isStream: returnTypeName == streamLexeme,
+    trackedSignalNames: trackedNames,
     annotationName: extractNameArgument(annotation),
   );
 }

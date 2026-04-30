@@ -53,6 +53,8 @@ const List<String> goldenNames = <String>[
   'm5_06_query_refresh_in_onpressed',
   'm5_08_query_on_state_class',
   'm5_09_query_on_plain_class',
+  'm5_10_query_with_one_signal_dep',
+  'm5_10_query_with_multi_signal_deps',
 ];
 
 /// Memoized golden directory resolution. Resolved relative to the package

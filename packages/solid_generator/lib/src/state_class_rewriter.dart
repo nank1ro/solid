@@ -61,6 +61,11 @@ RewriteResult rewriteStateClass(
   final effectByName = {for (final e in solidEffects) e.methodName: e};
   final queryByName = {for (final q in solidQueries) q.methodName: q};
   final reactiveNames = modelByName.keys.toSet();
+  // Fields-only: getters are rejected on this rewriter today
+  // (`rejectIfGettersNotYetSupported`).
+  final reactiveTypeTexts = <String, String>{
+    for (final f in solidFields) f.fieldName: f.typeText,
+  };
   // Built once before the member walk so the `build` branch and any future
   // reactive context can share the same set without rebuilding it. Mirrors
   // the `stateless_rewriter.dart` pattern: empty-list short-circuits to a
@@ -126,8 +131,7 @@ RewriteResult rewriteStateClass(
         // §14 item 4). The first reactive call site triggers the late-final
         // initializer.
         final query = queryByName[name]!;
-        pieces.add(emitResourceField(query));
-        disposeNames.add(query.methodName);
+        emitQueryFields(query, reactiveTypeTexts, pieces, disposeNames);
       } else {
         pieces.add(source.substring(member.offset, member.end));
       }
@@ -174,6 +178,10 @@ RewriteResult rewriteStateClass(
       // `rewriteBuildMethod` when at least one query is present.
       if (solidQueries.isNotEmpty) 'Resource',
       if (solidQueries.isNotEmpty) 'SignalBuilder',
+      // A multi-dep query synthesizes a Record-Computed source field,
+      // requiring `Computed` in the import set even when the class has no
+      // `@SolidState` getter.
+      if (solidQueries.any((q) => q.needsSourceComputed)) 'Computed',
     },
   );
 }

@@ -28,8 +28,13 @@ class ValueEdit {
 /// inside user-interaction callbacks (Section 6.2) or `<field>.untracked`
 /// reads (Section 6.4) are excluded.
 class ValueRewriteResult {
-  /// Creates a result holding [edits] and their [trackedReadOffsets].
-  const ValueRewriteResult(this.edits, this.trackedReadOffsets);
+  /// Creates a result holding [edits], [trackedReadOffsets], and
+  /// [trackedReadNames].
+  const ValueRewriteResult(
+    this.edits,
+    this.trackedReadOffsets,
+    this.trackedReadNames,
+  );
 
   /// Source edits to apply for `.value` / interpolation rewrites.
   final List<ValueEdit> edits;
@@ -37,6 +42,15 @@ class ValueRewriteResult {
   /// Source offsets of reads that must be tracked for SignalBuilder
   /// placement (Section 7). A subset of the read identifiers in [edits].
   final List<int> trackedReadOffsets;
+
+  /// Names of `@SolidState` field/getter identifiers read in tracked
+  /// position, in source-first-appearance order, deduplicated. Mirrors
+  /// [trackedReadOffsets] minus the offset → name lookup, restricted to
+  /// reactive-field reads (NOT query-call invocations). Consumed by
+  /// `readSolidQueryMethod` (M5-10) to wire the Resource's `source:`
+  /// argument: zero names → no source, one name → direct pass, two or
+  /// more names → synthesized Record-Computed source field.
+  final List<String> trackedReadNames;
 }
 
 /// True if [name] matches the SPEC Section 6.2 untracked-callback pattern:
@@ -79,6 +93,13 @@ bool _isOnPrefixedCallbackName(String name) {
 /// the body expression of a `@SolidState` getter (the M2-01 path). Both share
 /// the same identifier-rewrite contract; only `build()` consumes
 /// [ValueRewriteResult.trackedReadOffsets] for SignalBuilder placement.
+///
+/// [ValueRewriteResult.trackedReadNames] is asymmetric with
+/// `trackedReadOffsets`: it includes only `@SolidState` field/getter reads
+/// (the source-Computed inputs for M5-10), NOT query-call invocations. Query
+/// calls appear in `trackedReadOffsets` for SignalBuilder placement but not
+/// in `trackedReadNames` because they are not legal `Resource.source:`
+/// arguments.
 ValueRewriteResult collectValueEdits(
   AstNode node,
   Set<String> reactiveFields,
@@ -87,7 +108,11 @@ ValueRewriteResult collectValueEdits(
 }) {
   final visitor = _ValueRewriteVisitor(reactiveFields, queryNames);
   node.accept(visitor);
-  return ValueRewriteResult(visitor.edits, visitor.trackedReadOffsets);
+  return ValueRewriteResult(
+    visitor.edits,
+    visitor.trackedReadOffsets,
+    visitor.trackedReadNames,
+  );
 }
 
 /// Applies offset-based [edits] (with absolute file offsets) to [text] whose
@@ -134,6 +159,11 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
   final Set<String> _queryNames;
   final List<ValueEdit> edits = [];
   final List<int> trackedReadOffsets = [];
+
+  /// Reactive-field/getter identifier names read in tracked position, in
+  /// source-first-appearance order. Deduplicated via [_recordTrackedReadName].
+  /// Excludes query-call invocations (those go to [trackedReadOffsets] only).
+  final List<String> trackedReadNames = [];
 
   /// Stack of shadowed-name sets, one frame per enclosing block / function.
   final List<Set<String>> _scopeStack = [<String>{}];
@@ -246,7 +276,10 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
           '\${${expr.name}.value}',
         ),
       );
-      if (_untrackedDepth == 0) trackedReadOffsets.add(expr.offset);
+      if (_untrackedDepth == 0) {
+        trackedReadOffsets.add(expr.offset);
+        _recordTrackedReadName(expr.name);
+      }
       return;
     }
     super.visitInterpolationExpression(node);
@@ -268,7 +301,16 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
     // excluded from tracked reads.
     if (isGet && !isSet && _untrackedDepth == 0) {
       trackedReadOffsets.add(node.offset);
+      _recordTrackedReadName(name);
     }
+  }
+
+  /// Appends [name] to [trackedReadNames] iff not already present, preserving
+  /// source-first-appearance order. A query body that reads the same Signal
+  /// at multiple offsets — e.g. `'$userId-$userId'` — must contribute the
+  /// name exactly once to the M5-10 source-Computed tuple.
+  void _recordTrackedReadName(String name) {
+    if (!trackedReadNames.contains(name)) trackedReadNames.add(name);
   }
 
   /// Detects `counter.value` shapes where appending another `.value` would
