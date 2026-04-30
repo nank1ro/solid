@@ -25,6 +25,16 @@ const String solidEffectName = 'SolidEffect';
 /// [solidStateName] (textual on unresolved AST).
 const String solidQueryName = 'SolidQuery';
 
+/// Lexeme of the `Future` return-type identifier on a `@SolidQuery` method.
+/// Matched textually on the unresolved AST per the same contract as
+/// [solidStateName] — the user must import `dart:async` (or its re-export via
+/// `dart:core`) to write the type at all.
+const String futureLexeme = 'Future';
+
+/// Lexeme of the `Stream` return-type identifier on a `@SolidQuery` method.
+/// Same matching contract as [futureLexeme].
+const String streamLexeme = 'Stream';
+
 /// Reads a `@SolidState(...)` annotation on [decl] and returns a [FieldModel].
 ///
 /// Returns `null` if [decl] carries no `@SolidState` annotation. The raw
@@ -198,16 +208,16 @@ EffectModel? readSolidEffectMethod(
 
 /// Reads a `@SolidQuery(...)` annotation on the method [decl] and returns a
 /// [QueryModel]. Returns `null` when [decl] is not an `@SolidQuery`-bearing
-/// instance method whose return type is `Future<T>` (Stream form not yet
-/// implemented). Getters, setters, and static methods are filtered out here
-/// defensively; the target validator rejects them with a clearer error
-/// before this reader runs.
+/// instance method whose return type is `Future<T>` or `Stream<T>`. Getters,
+/// setters, and static methods are filtered out here defensively; the target
+/// validator rejects them with a clearer error before this reader runs.
 ///
 /// The method body is rewritten in place per SPEC §5.1: any reference to a
 /// name in [reactiveFields] receives `.value`. Both expression-body
-/// (`Future<T> m() async => …;`) and block-body (`Future<T> m() async {…}`)
-/// shapes are supported per SPEC §3.5 / §4.8. Other body kinds (abstract /
-/// native) are rejected with a [CodeGenerationError].
+/// (`Future<T> m() async => …;` / `Stream<T> m() => …;`) and block-body
+/// (`Future<T> m() async {…}` / `Stream<T> m() async* {…}` /
+/// `Stream<T> m() {…}`) shapes are supported per SPEC §3.5 / §4.8. Other body
+/// kinds (abstract / native) are rejected with a [CodeGenerationError].
 ///
 /// Unlike [readSolidEffectMethod] / [readSolidStateGetter], this reader does
 /// NOT enforce a reactive-deps requirement — a query body MAY have zero
@@ -220,10 +230,11 @@ QueryModel? readSolidQueryMethod(
   if (decl.isGetter || decl.isSetter || decl.isStatic) return null;
   final annotation = findAnnotationByName(solidQueryName, decl.metadata);
   if (annotation == null) return null;
-  // Only `Future<T>` return types are handled here; non-`Future`/non-`Stream`
-  // returns are rejected by the target validator and fall through as `null`.
+  // Other return types silently fall through; rejection lands in M5-05.
   final returnType = decl.returnType;
-  if (returnType is! NamedType || returnType.name.lexeme != 'Future') {
+  if (returnType is! NamedType) return null;
+  final returnTypeName = returnType.name.lexeme;
+  if (returnTypeName != futureLexeme && returnTypeName != streamLexeme) {
     return null;
   }
   final typeArg = returnType.typeArguments?.arguments.firstOrNull;
@@ -248,8 +259,9 @@ QueryModel? readSolidQueryMethod(
     methodName: methodName,
     bodyText: bodyText,
     isBlockBody: isBlockBody,
-    isAsyncBody: decl.body.keyword?.lexeme == 'async',
     innerTypeText: innerTypeText,
+    bodyKeyword: decl.body.keyword?.lexeme ?? '',
+    isStream: returnTypeName == streamLexeme,
     annotationName: extractNameArgument(annotation),
   );
 }

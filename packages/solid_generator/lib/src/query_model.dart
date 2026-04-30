@@ -13,10 +13,10 @@ import 'package:solid_generator/src/transformation_error.dart';
 /// Mirrors `EffectModel` for the parallel `@SolidEffect` method → `Effect`
 /// lowering (SPEC §4.7). The two models share an identical body-rewrite
 /// contract; the differences are (a) queries carry an [innerTypeText] for the
-/// `Resource<T>` type argument, (b) queries preserve the [isAsyncBody]
-/// keyword to splice into the emitted closure, and (c) queries do NOT enforce
-/// a reactive-deps requirement (SPEC §3.5 — a query body MAY have zero
-/// reactive reads).
+/// `Resource<T>` type argument, (b) queries preserve the [bodyKeyword] to
+/// splice into the emitted closure, and (c) queries do NOT enforce a
+/// reactive-deps requirement (SPEC §3.5 — a query body MAY have zero reactive
+/// reads).
 @immutable
 class QueryModel {
   /// Creates a [QueryModel] describing an annotated method.
@@ -24,8 +24,8 @@ class QueryModel {
     required this.methodName,
     required this.bodyText,
     required this.isBlockBody,
-    required this.isAsyncBody,
     required this.innerTypeText,
+    this.bodyKeyword = '',
     this.isStream = false,
     this.debounce,
     this.useRefreshing,
@@ -55,21 +55,20 @@ class QueryModel {
   /// how the emitter shapes the closure passed to `Resource(...)`.
   final bool isBlockBody;
 
-  /// True when the source method's body keyword is `async` (Future form) or
-  /// `async*` (Stream form). The emitter splices `async ` into the closure
-  /// signature so the lowered fetcher preserves the async semantics.
-  ///
-  /// In M5-01 only Future + `async` is reachable; the Stream + plain-bodied
-  /// path lands in M5-02 where this flag stays `false`.
-  final bool isAsyncBody;
-
-  /// Source text of the inner type `T` peeled from the method's `Future<T>`
-  /// (or in M5-02, `Stream<T>`) return type. Used as the `Resource<T>` type
-  /// argument in lowered output.
+  /// Source text of the inner type `T` peeled from the method's `Future<T>` /
+  /// `Stream<T>` return type. Used as the `Resource<T>` type argument in
+  /// lowered output.
   final String innerTypeText;
 
+  /// Source method's body modifier keyword — one of `'async'`, `'async*'`, or
+  /// `''` (empty for sync-bodied Stream queries like `Stream<T> m() => …;` or
+  /// `Stream<T> m() { return …; }`). Spliced verbatim into the closure
+  /// signature so the lowered fetcher preserves the original body semantics.
+  final String bodyKeyword;
+
   /// True when the source return type is `Stream<T>`; false for `Future<T>`.
-  /// Reserved in M5-01 for the M5-02 Stream-form branch in `emitResourceField`.
+  /// Drives the choice between `Resource<T>(...)` and `Resource<T>.stream(...)`
+  /// in the emitter.
   final bool isStream;
 
   /// Value of the `debounce:` argument on `@SolidQuery(debounce: …)`, or

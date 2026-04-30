@@ -72,14 +72,18 @@ String emitEffectField(EffectModel e) {
 }
 
 /// Emits one `late final <name> = Resource<T>(<closure>, name: '<debug>');`
-/// line per SPEC §4.8. Mirrors [emitEffectField]'s closure-shape contract —
-/// same `late final` rationale, same body-text contract — but adds:
+/// (Future form) or the `Resource<T>.stream(...)` named-constructor variant
+/// (Stream form) line per SPEC §4.8. Mirrors [emitEffectField]'s closure-shape
+/// contract — same `late final` rationale, same body-text contract — but
+/// adds:
 ///
 /// * a type argument `Resource<T>` peeled from the source `Future<T>` /
 ///   `Stream<T>` return type (carried on [QueryModel.innerTypeText]),
-/// * an `async ` keyword spliced into the closure signature when
-///   [QueryModel.isAsyncBody] is true (Future-form queries require `async`;
-///   plain-bodied Stream queries leave the keyword empty), and
+/// * the upstream `.stream` named constructor when [QueryModel.isStream] is
+///   true (its fetcher signature is `Stream<T> Function()`, not the default
+///   `Future<T> Function()`),
+/// * the source body keyword spliced verbatim into the closure signature
+///   ([QueryModel.bodyKeyword] is one of `'async'`, `'async*'`, or `''`), and
 /// * a public field name (no underscore prefix) — SPEC §4.8 rule 1 specifies
 ///   a single emitted declaration per query.
 ///
@@ -90,11 +94,14 @@ String emitEffectField(EffectModel e) {
 /// (SPEC §4.8 rule 10 / §14 item 4).
 String emitResourceField(QueryModel q) {
   final debugName = q.annotationName ?? q.methodName;
-  final asyncKw = q.isAsyncBody ? 'async ' : '';
+  final asyncKw = q.bodyKeyword.isEmpty ? '' : '${q.bodyKeyword} ';
   final closure = q.isBlockBody
       ? '() $asyncKw${q.bodyText}'
       : '() $asyncKw=> ${q.bodyText}';
-  final ctor = "Resource<${q.innerTypeText}>($closure, name: '$debugName')";
+  final ctorName = q.isStream
+      ? 'Resource<${q.innerTypeText}>.stream'
+      : 'Resource<${q.innerTypeText}>';
+  final ctor = "$ctorName($closure, name: '$debugName')";
   return '  late final ${q.methodName} = $ctor;';
 }
 

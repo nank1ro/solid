@@ -1648,9 +1648,9 @@ class _GreeterState extends State<Greeter> {
 
 ---
 
-### TODO M5-02 — Golden: `@SolidQuery` Stream-method form
+### DONE M5-02 — Golden: `@SolidQuery` Stream-method form
 
-**Goal:** `@SolidQuery() Stream<int> watchTicks() => Stream.periodic(const Duration(seconds: 1), (i) => i);` on a `StatelessWidget` becomes `late final _watchTicks = Resource<int>.stream(() => Stream.periodic(...), name: 'watchTicks');` plus `Resource<int> watchTicks() => _watchTicks;`. Adds the `Resource<T>.stream(...)` branch in `emitResourceField`, the `isStream` discriminator in `QueryModel`, and the Stream-form body handling in `readSolidQueryMethod` (plain-bodied returning a Stream, OR `async*` block-bodied).
+**Goal:** `@SolidQuery() Stream<int> watchTicks() { return Stream.periodic(const Duration(seconds: 1), (i) => i); }` on a `StatelessWidget` becomes a single `late final watchTicks = Resource<int>.stream(() { return Stream.periodic(...); }, name: 'watchTicks');` field — no underscore prefix, no thin-accessor wrapper, matching SPEC §4.8 rule 1 and the M5-01 lowering shape. Adds the `Resource<T>.stream(...)` branch in `emitResourceField`, the `isStream` discriminator in `QueryModel`, generalizes the body keyword to a single `bodyKeyword: String` field (preserving `async`, `async*`, or empty), and adds the Stream-form body handling in `readSolidQueryMethod` (plain-bodied returning a Stream, OR `async*` block-bodied).
 
 **SPEC references:** Section 3.5, Section 4.8 (Stream form).
 
@@ -1662,9 +1662,9 @@ class _GreeterState extends State<Greeter> {
 
 **Files to modify:**
 
-- `packages/solid_generator/lib/src/query_model.dart` — confirm `isStream` flag is consumed.
-- `packages/solid_generator/lib/src/annotation_reader.dart` — extend `readSolidQueryMethod` to detect `Stream<T>` return type and either body shape (synchronous returning a `Stream<T>`, OR `async*` block); set `isStream: true`.
-- `packages/solid_generator/lib/src/signal_emitter.dart` — extend `emitResourceField` to emit `Resource<T>.stream(...)` instead of `Resource<T>(...)` when `isStream` is true.
+- `packages/solid_generator/lib/src/query_model.dart` — `isStream` flag is consumed; replaced the M5-01 `isAsyncBody: bool` with a generalized `bodyKeyword: String` field (`'async'`, `'async*'`, or `''`) so the emitter splices the source body keyword verbatim.
+- `packages/solid_generator/lib/src/annotation_reader.dart` — extend `readSolidQueryMethod` to detect `Stream<T>` return type and either body shape (synchronous returning a `Stream<T>`, OR `async*` block); set `isStream: true`; route `decl.body.keyword?.lexeme` directly into `bodyKeyword`. Adds `futureLexeme` / `streamLexeme` constants alongside `solidStateName` / `solidEffectName` / `solidQueryName`.
+- `packages/solid_generator/lib/src/signal_emitter.dart` — extend `emitResourceField` to emit `Resource<T>.stream(...)` instead of `Resource<T>(...)` when `isStream` is true, and to splice the source `bodyKeyword` (with trailing space) into the closure signature.
 
 **Expected input content:**
 
@@ -1685,15 +1685,15 @@ class Ticker extends StatelessWidget {
 }
 ```
 
-**Expected output content:** State class with `late final _watchTicks = Resource<int>.stream(() => Stream.periodic(const Duration(seconds: 1), (i) => i), name: 'watchTicks');` plus `Resource<int> watchTicks() => _watchTicks;`. Standard `dispose()` body.
+**Expected output content:** State class with `late final watchTicks = Resource<int>.stream(() { return Stream.periodic(const Duration(seconds: 1), (i) => i); }, name: 'watchTicks');` (single public field, no underscore prefix, no thin-accessor wrapper — SPEC §4.8 rule 1). Standard `dispose()` body. No `initState()` (Resources are lazy per §4.8 rule 10).
 
-**Expected implementation change:** Stream-form branch in `emitResourceField` plus `isStream` detection in the reader. No changes to dispose / accessor / import paths beyond what M5-01 already established.
+**Expected implementation change:** Stream-form branch in `emitResourceField` plus `isStream` detection in the reader plus generalized `bodyKeyword: String` model field replacing `isAsyncBody: bool` (so `async*` bodies are preserved verbatim). No changes to dispose / import paths beyond what M5-01 already established.
 
-**Acceptance:** `dart test --name=m5_02` passes; golden analyzes clean; emitted code uses `Resource<T>.stream(...)` named constructor; the thin-accessor's return type is `Resource<int>`.
+**Acceptance:** `dart test --name=m5_02` passes; golden analyzes clean; emitted code uses `Resource<T>.stream(...)` named constructor; the public field's runtime type is `Resource<int>`.
 
 **Dependencies:** M5-01.
 
-**Status:** TODO
+**Status:** DONE
 
 ---
 

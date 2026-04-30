@@ -47,6 +47,7 @@ const List<String> goldenNames = <String>[
   'm4_08_effect_on_state_class',
   'm4_08_effect_on_plain_class',
   'm5_01_simple_query_with_future',
+  'm5_02_simple_query_with_stream',
 ];
 
 /// Memoized golden directory resolution. Resolved relative to the package
