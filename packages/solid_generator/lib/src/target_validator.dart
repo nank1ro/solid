@@ -225,14 +225,11 @@ Never _rejectQuery(String kind, String location) {
   );
 }
 
-/// Rejects `@SolidQuery` on any field. The SPEC §3.5 bullet does not
-/// subdivide field kinds, so static and instance fields share the single
-/// `'field'` label.
-void _validateQueryField(FieldDeclaration field, String className) {
-  if (findAnnotationByName(solidQueryName, field.metadata) == null) return;
-  final fieldName = field.fields.variables.first.name.lexeme;
-  _rejectQuery('field', '$className.$fieldName');
-}
+/// `@SolidQuery` on a class field is a valid target: the field initializer
+/// expression (e.g. `Future.value(0)`) becomes the Resource fetcher closure
+/// at lowering time. No validation runs here; the field-as-fetcher reading
+/// + lowering is handled in the builder pipeline.
+void _validateQueryField(FieldDeclaration field, String className) {}
 
 /// Rejects `@SolidQuery` on a getter, setter, static method, abstract or
 /// external method, parameterized method, non-Future/Stream-returning method,

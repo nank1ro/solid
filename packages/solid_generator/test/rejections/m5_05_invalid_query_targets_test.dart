@@ -2,7 +2,9 @@
 //
 // Cases ordered to mirror the SPEC §3.5 bullet list: non-Future/Stream return
 // → Future-without-async body → parameterized → static → abstract/external →
-// getter → setter → top-level function → field.
+// getter → setter → top-level function. Class fields are NOT rejected: a
+// field initializer expression (e.g. `Future.value(0)`) is a valid fetcher
+// shape — the lowering wraps it as `Resource<T>(fetcher: () => <init>)`.
 
 import '../integration/golden_helpers.dart';
 
@@ -41,10 +43,6 @@ const List<({String name, String errorContains})> _cases = [
   (
     name: 'm5_05_top_level',
     errorContains: '@SolidQuery cannot be applied to a top-level function',
-  ),
-  (
-    name: 'm5_05_field',
-    errorContains: '@SolidQuery cannot be applied to a field',
   ),
 ];
 
