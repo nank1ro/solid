@@ -86,6 +86,12 @@ class _SolidBuilder implements Builder {
     // methods, parameterized methods, non-void methods, top-level functions,
     // fields) never reach `readSolidEffectMethod`.
     validateSolidEffectTargets(parsed.unit);
+    // SPEC §3.5 invalid-target guard for `@SolidQuery`. Same contract as
+    // the lines above: rejected targets (non-Future/Stream returns,
+    // Future-without-async bodies, parameterized/static/abstract methods,
+    // getters/setters, top-level functions, fields) never reach
+    // `readSolidQueryMethod`.
+    validateSolidQueryTargets(parsed.unit);
 
     final annotatedClasses = _collectAnnotatedClasses(parsed.unit, source);
     if (annotatedClasses.every(

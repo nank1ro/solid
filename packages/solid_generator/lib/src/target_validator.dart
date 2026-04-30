@@ -190,3 +190,114 @@ void _validateEffectTopLevel(CompilationUnitMember decl) {
     _rejectEffect('top-level function', name);
   }
 }
+
+// --- @SolidQuery target validator (SPEC §3.5) ---
+
+/// Validates every `@SolidQuery` annotation in [unit] against the SPEC
+/// Section 3.5 valid-target list. Throws [ValidationError] on the first
+/// invalid placement; returns silently when every annotation targets a
+/// valid declaration (instance method with no parameters and a `Future<T>`
+/// return type with `async` body, or a `Stream<T>` return type with either
+/// a synchronous body or an `async*` block body).
+///
+/// Runs after [validateSolidEffectTargets] and before transformation so that
+/// misplaced `@SolidQuery` annotations (non-Future/Stream returns,
+/// Future-without-async bodies, parameterized/static/abstract methods,
+/// getters/setters, top-level functions, fields) never reach
+/// `readSolidQueryMethod`, which would otherwise skip them silently or
+/// produce a confusing downstream error.
+void validateSolidQueryTargets(CompilationUnit unit) => _walkUnit(
+  unit,
+  onField: _validateQueryField,
+  onMethod: _validateQueryMethod,
+  onTopLevel: _validateQueryTopLevel,
+);
+
+/// Throws a [ValidationError] for `@SolidQuery` on a [kind] of declaration.
+/// Picks the indefinite article from `kind`'s first letter so the message
+/// reads naturally ("a getter" vs "an abstract method").
+Never _rejectQuery(String kind, String location) {
+  final article = 'aeiouAEIOU'.contains(kind[0]) ? 'an' : 'a';
+  throw ValidationError(
+    '@SolidQuery cannot be applied to $article $kind',
+    location,
+    'INVALID_QUERY_TARGET_${_kindCode(kind)}',
+  );
+}
+
+/// Rejects `@SolidQuery` on any field. The SPEC §3.5 bullet does not
+/// subdivide field kinds, so static and instance fields share the single
+/// `'field'` label.
+void _validateQueryField(FieldDeclaration field, String className) {
+  if (findAnnotationByName(solidQueryName, field.metadata) == null) return;
+  final fieldName = field.fields.variables.first.name.lexeme;
+  _rejectQuery('field', '$className.$fieldName');
+}
+
+/// Rejects `@SolidQuery` on a getter, setter, static method, abstract or
+/// external method, parameterized method, non-Future/Stream-returning method,
+/// or a `Future<T>`-returning method whose body is not `async`. Instance
+/// methods declared with the `Future<T> … async` or `Stream<T> …` /
+/// `Stream<T> … async*` shapes and zero parameters fall through silently —
+/// they are the canonical SPEC §3.5 valid targets.
+///
+/// Ordering rationale: structural shape (getter/setter/static/abstract/
+/// parameterized) is checked before the return-type discriminator, mirroring
+/// `_validateEffectMethod`. This ensures a `static int fetchCount() => 0` is
+/// reported as `'static method'` (the dominant placement violation) rather
+/// than `'non-Future/Stream method'`. The body-keyword check fires last
+/// because it requires the return type to already be `Future<T>`.
+void _validateQueryMethod(MethodDeclaration method, String className) {
+  if (findAnnotationByName(solidQueryName, method.metadata) == null) return;
+  final location = '$className.${method.name.lexeme}';
+  if (method.isGetter) _rejectQuery('getter', location);
+  if (method.isSetter) _rejectQuery('setter', location);
+  if (method.isStatic) _rejectQuery('static method', location);
+  if (method.isAbstract || method.externalKeyword != null) {
+    _rejectQuery('abstract method', location);
+  }
+  final params = method.parameters;
+  if (params != null && params.parameters.isNotEmpty) {
+    _rejectQuery('parameterized method', location);
+  }
+  // SPEC §3.5: return type must be Future<T> or Stream<T>.
+  final returnType = method.returnType;
+  final returnName = returnType is NamedType ? returnType.name.lexeme : null;
+  if (returnName != futureLexeme && returnName != streamLexeme) {
+    _rejectQuery('non-Future/Stream method', location);
+  }
+  // SPEC §3.5: Future<T> requires `async`. A null body keyword (expression
+  // body without `async`, e.g. `=> Future.value(0)`) is intentionally
+  // caught here — `?.lexeme` returns `null`, and `null != 'async'` is
+  // `true`. Mirrors `annotation_reader.dart`'s `?.lexeme ?? ''` pattern.
+  // Stream-form mismatches are out of scope (Stream has two valid shapes:
+  // sync-return or async*); they are exercised positively in M5-02.
+  final bodyKeyword = method.body.keyword?.lexeme;
+  if (returnName == futureLexeme && bodyKeyword != 'async') {
+    _rejectQuery(
+      'method whose body keyword does not match the return type',
+      location,
+    );
+  }
+}
+
+/// Rejects `@SolidQuery` on top-level declarations: variables, getters,
+/// setters, and functions. The SPEC §3.5 bullet calls out "top-level function"
+/// — top-level getters/setters/variables share the same fail-fast path with
+/// per-kind labels.
+void _validateQueryTopLevel(CompilationUnitMember decl) {
+  if (decl is TopLevelVariableDeclaration &&
+      findAnnotationByName(solidQueryName, decl.metadata) != null) {
+    _rejectQuery(
+      'top-level variable',
+      decl.variables.variables.first.name.lexeme,
+    );
+  }
+  if (decl is FunctionDeclaration &&
+      findAnnotationByName(solidQueryName, decl.metadata) != null) {
+    final name = decl.name.lexeme;
+    if (decl.isGetter) _rejectQuery('top-level getter', name);
+    if (decl.isSetter) _rejectQuery('top-level setter', name);
+    _rejectQuery('top-level function', name);
+  }
+}

@@ -230,7 +230,8 @@ QueryModel? readSolidQueryMethod(
   if (decl.isGetter || decl.isSetter || decl.isStatic) return null;
   final annotation = findAnnotationByName(solidQueryName, decl.metadata);
   if (annotation == null) return null;
-  // Other return types silently fall through; rejection lands in M5-05.
+  // Other return types are rejected by `validateSolidQueryTargets` (M5-05);
+  // this defensive guard keeps the reader robust against direct callers.
   final returnType = decl.returnType;
   if (returnType is! NamedType) return null;
   final returnTypeName = returnType.name.lexeme;
