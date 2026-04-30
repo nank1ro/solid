@@ -67,7 +67,11 @@ String rewriteBuildMethod(
     source,
     queryNames: queryNames,
   );
-  final wrapNodes = computeWrapSet(buildMethod, valueResult.trackedReadOffsets);
+  final wrapNodes = computeWrapSet(
+    buildMethod,
+    valueResult.trackedReadOffsets,
+    queryNames: queryNames,
+  );
 
   final edits = <SourceEdit>[];
 

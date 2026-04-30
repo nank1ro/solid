@@ -1723,7 +1723,7 @@ class Ticker extends StatelessWidget {
 
 ---
 
-### TODO M5-04 — Golden: `fetchData().when(ready:..., loading:..., error:...)` byte-identical, wrapped in SignalBuilder
+### DONE M5-04 — Golden: `fetchData().when(ready:..., loading:..., error:...)` byte-identical, wrapped in SignalBuilder
 
 **Goal:** A widget whose `build` body invokes `fetchData().when({ready, loading, error})` is lowered such that (a) the build method is wrapped in a `SignalBuilder` (the SignalBuilder-placement detection rule fires on the `fetchData()` call expression — SPEC §4.8 rule 3) and (b) the `fetchData().when(...)` chain is byte-identical between input and output. At runtime, `fetchData()` invokes the upstream `Resource<T>.call() => state;` operator returning `ResourceState<T>`, and `.when(...)` resolves to upstream `flutter_solidart`'s extension on `ResourceState<T>` directly. Validates the source-time typecheck contract (`fetchData().when(...)` typechecks against the `Future<T>.when` stub in `solid_annotations`) AND the runtime contract (lowered `fetchData()` is the upstream callable on a `Resource<String>` field). Critical regression fence for the SPEC §4.8 rule 3 detection rule and §7 SignalBuilder placement.
 
@@ -1783,7 +1783,7 @@ The `fetchName().when(...)` chain is byte-identical between input and output —
 
 **Dependencies:** M5-01.
 
-**Status:** TODO
+**Status:** DONE
 
 ---
 
