@@ -4,23 +4,29 @@ import 'package:solid_generator/src/effect_model.dart';
 import 'package:solid_generator/src/field_model.dart';
 import 'package:solid_generator/src/getter_model.dart';
 import 'package:solid_generator/src/import_rewriter.dart';
+import 'package:solid_generator/src/query_model.dart';
 import 'package:solid_generator/src/signal_emitter.dart';
 import 'package:solid_generator/src/transformation_error.dart';
 
-/// Rewrites an existing `State<X>` subclass containing `@SolidState` fields
-/// and/or `@SolidEffect` methods **in place** — without splitting the class.
-/// Replaces every `@SolidState` field with a `Signal<T>(…)` declaration,
-/// every `@SolidEffect` method with a `late final … = Effect(…)` field,
-/// routes `build()` through the reactive-read pipeline, and merges reactive
-/// disposals into any existing `dispose()` body. When Effects exist, Effect
-/// materialization reads (`<effectName>;`) are also merged into any existing
-/// `initState()` body, or a fresh `initState()` is synthesized if none was
-/// declared.
+/// Rewrites an existing `State<X>` subclass containing `@SolidState` fields,
+/// `@SolidEffect` methods, and/or `@SolidQuery` methods **in place** —
+/// without splitting the class. Replaces every `@SolidState` field with a
+/// `Signal<T>(…)` declaration, every `@SolidEffect` method with a
+/// `late final … = Effect(…)` field, every `@SolidQuery` method with a
+/// `late final … = Resource<T>(…)` field, routes `build()` through the
+/// reactive-read pipeline, and merges reactive disposals into any existing
+/// `dispose()` body. When Effects exist, Effect materialization reads
+/// (`<effectName>;`) are also merged into any existing `initState()` body,
+/// or a fresh `initState()` is synthesized if none was declared. Queries
+/// are intentionally never spliced into `initState` — Resources are lazy
+/// and the late-final initializer fires on first call-site read (SPEC §4.8
+/// rule 10 / §14 item 4).
 ///
-/// See SPEC §8.2 (in-place State lowering), §10 (dispose merging), and §4.7
-/// (Effect materialization). The Signal-only path is the fix for issue #3 —
-/// a `StatefulWidget` whose `State<X>` subclass declared `@SolidState` fields
-/// was silently passed through unchanged in v1.
+/// See SPEC §8.2 (in-place State lowering), §10 (dispose merging), §4.7
+/// (Effect materialization), and §4.8 (Resource lowering). The Signal-only
+/// path is the fix for issue #3 — a `StatefulWidget` whose `State<X>`
+/// subclass declared `@SolidState` fields was silently passed through
+/// unchanged in v1.
 ///
 /// Member ordering and non-annotated members (other fields,
 /// `didUpdateWidget`, user methods, constructors, …) are emitted verbatim
@@ -33,6 +39,7 @@ RewriteResult rewriteStateClass(
   List<FieldModel> solidFields,
   List<GetterModel> solidGetters,
   List<EffectModel> solidEffects,
+  List<QueryModel> solidQueries,
   String source,
 ) {
   final className = classDecl.name.lexeme;
@@ -46,15 +53,25 @@ RewriteResult rewriteStateClass(
     className,
   );
   // Index annotated fields and methods by name for O(1) lookup during the
-  // member walk. The builder already parsed `@SolidState`/`@SolidEffect`
-  // once when computing [solidFields] / [solidEffects]; re-parsing here would
-  // double the annotation-reader cost per file.
+  // member walk. The builder already parsed `@SolidState`/`@SolidEffect`/
+  // `@SolidQuery` once when computing [solidFields] / [solidEffects] /
+  // [solidQueries]; re-parsing here would double the annotation-reader cost
+  // per file.
   final modelByName = {for (final f in solidFields) f.fieldName: f};
   final effectByName = {for (final e in solidEffects) e.methodName: e};
+  final queryByName = {for (final q in solidQueries) q.methodName: q};
   final reactiveNames = modelByName.keys.toSet();
-  // Built incrementally during the walk so Signal field names and Effect
-  // method names interleave in source-declaration order — the contract
-  // `emitDispose` relies on for reverse-disposal correctness (SPEC §10).
+  // Built once before the member walk so the `build` branch and any future
+  // reactive context can share the same set without rebuilding it. Mirrors
+  // the `stateless_rewriter.dart` pattern: empty-list short-circuits to a
+  // shared const set so query-free classes pay zero allocation.
+  final queryNames = solidQueries.isEmpty
+      ? const <String>{}
+      : {for (final q in solidQueries) q.methodName};
+  // Built incrementally during the walk so Signal field names, Effect method
+  // names, and Query method names interleave in source-declaration order —
+  // the contract `emitDispose` relies on for reverse-disposal correctness
+  // (SPEC §10).
   final disposeNames = <String>[];
   final effectNames = <String>[];
   final pieces = <String>[];
@@ -82,7 +99,14 @@ RewriteResult rewriteStateClass(
     if (member is MethodDeclaration) {
       final name = member.name.lexeme;
       if (name == 'build') {
-        pieces.add(rewriteBuildMethod(member, reactiveNames, source));
+        pieces.add(
+          rewriteBuildMethod(
+            member,
+            reactiveNames,
+            source,
+            queryNames: queryNames,
+          ),
+        );
       } else if (name == 'initState') {
         initStateMethod = member;
         initStateSlot = pieces.length;
@@ -96,6 +120,14 @@ RewriteResult rewriteStateClass(
         pieces.add(emitEffectField(effect));
         disposeNames.add(effect.methodName);
         effectNames.add(effect.methodName);
+      } else if (queryByName.containsKey(name)) {
+        // Queries are lazy — joining `disposeNames` only, never
+        // `effectNames` / `initState` materialization (SPEC §4.8 rule 10 /
+        // §14 item 4). The first reactive call site triggers the late-final
+        // initializer.
+        final query = queryByName[name]!;
+        pieces.add(emitResourceField(query));
+        disposeNames.add(query.methodName);
       } else {
         pieces.add(source.substring(member.offset, member.end));
       }
@@ -137,6 +169,11 @@ RewriteResult rewriteStateClass(
     solidartNames: <String>{
       'Signal',
       if (effectNames.isNotEmpty) 'Effect',
+      // Queries emit `Resource<T>(...)` fields; their `<query>().when(...)`
+      // call sites in `build` are wrapped in `SignalBuilder` by
+      // `rewriteBuildMethod` when at least one query is present.
+      if (solidQueries.isNotEmpty) 'Resource',
+      if (solidQueries.isNotEmpty) 'SignalBuilder',
     },
   );
 }
