@@ -1951,7 +1951,7 @@ The `fetchName().when(...)` chain is byte-identical between input and output —
 
 **Dependencies:** M5-01.
 
-**Status:** TODO
+**Status:** DONE — synthesized-field debug name uses the field name (`_<methodName>Source`) instead of the originally-spec'd `<methodName>_source`, mirroring the convention every other reactive lowering follows (Signal/Computed/Effect/Resource use their own field name as the default debug name).
 
 ---
 

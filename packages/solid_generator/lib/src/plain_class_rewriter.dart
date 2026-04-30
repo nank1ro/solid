@@ -55,6 +55,11 @@ RewriteResult rewritePlainClass(
   final fieldByName = {for (final f in solidFields) f.fieldName: f};
   final effectByName = {for (final e in solidEffects) e.methodName: e};
   final queryByName = {for (final q in solidQueries) q.methodName: q};
+  // Fields-only: getters are rejected on this rewriter today
+  // (`rejectIfGettersNotYetSupported`).
+  final reactiveTypeTexts = <String, String>{
+    for (final f in solidFields) f.fieldName: f.typeText,
+  };
   _checkUnsupportedMembers(
     classDecl,
     fieldByName,
@@ -90,8 +95,7 @@ RewriteResult rewritePlainClass(
       // Queries are lazy — `disposeNames` only, never `effectNames`, so the
       // synthesized constructor below skips them (SPEC §4.8 rule 10 / §8.3).
       final query = queryByName[name]!;
-      pieces.add(emitResourceField(query));
-      disposeNames.add(query.methodName);
+      emitQueryFields(query, reactiveTypeTexts, pieces, disposeNames);
       continue;
     }
   }
@@ -111,6 +115,9 @@ RewriteResult rewritePlainClass(
       'Signal',
       if (effectNames.isNotEmpty) 'Effect',
       if (solidQueries.isNotEmpty) 'Resource',
+      // A multi-dep query synthesizes a Record-Computed source field,
+      // requiring `Computed` in the import set.
+      if (solidQueries.any((q) => q.needsSourceComputed)) 'Computed',
     },
   );
 }

@@ -26,6 +26,7 @@ class QueryModel {
     required this.innerTypeText,
     this.bodyKeyword = '',
     this.isStream = false,
+    this.trackedSignalNames = const [],
     this.debounce,
     this.useRefreshing,
     this.annotationName,
@@ -69,6 +70,35 @@ class QueryModel {
   /// Drives the choice between `Resource<T>(...)` and `Resource<T>.stream(...)`
   /// in the emitter.
   final bool isStream;
+
+  /// Names of `@SolidState` field/getter identifiers read in the query body's
+  /// tracked position, in source-first-appearance order, deduplicated. Drives
+  /// M5-10 source-Computed synthesis:
+  ///
+  /// * **0 names** → no `source:` argument on the lowered Resource.
+  /// * **1 name** → that Signal/Computed is passed directly as `source:`
+  ///   (SPEC §4.8 rule 5: a single-Signal Computed wrapper would be a no-op).
+  /// * **≥ 2 names** → a synthesized Record-Computed field
+  ///   `late final _<methodName>Source = Computed<(T1, T2, …)>(...)` is
+  ///   emitted before the Resource, and the Resource gets
+  ///   `source: _<methodName>Source,`. The closure body is
+  ///   `() => (s1.value, s2.value, …)`.
+  ///
+  /// The list is populated by `readSolidQueryMethod` from the body-rewriter's
+  /// [`ValueRewriteResult.trackedReadNames`]; a query body with zero reactive
+  /// reads is permitted (SPEC §3.5 waives the `@SolidEffect` deps requirement).
+  final List<String> trackedSignalNames;
+
+  /// True when [trackedSignalNames] has two or more names — i.e. the rewriter
+  /// must synthesize a Record-Computed `source:` field. Single-name queries
+  /// pass the Signal directly; zero-name queries omit `source:` entirely.
+  bool get needsSourceComputed => trackedSignalNames.length >= 2;
+
+  /// Conventional name of the synthesized Record-Computed source field
+  /// emitted when [needsSourceComputed] is true. Single source of truth shared
+  /// by `emitQuerySourceField`, `emitResourceField`, and the dispose-name
+  /// list pushes in every rewriter.
+  String get sourceFieldName => '_${methodName}Source';
 
   /// Value of the `debounce:` argument on `@SolidQuery(debounce: …)`, or
   /// `null` if the annotation had no `debounce:` argument. Reserved in M5-01

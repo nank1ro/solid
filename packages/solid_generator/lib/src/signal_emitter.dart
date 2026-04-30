@@ -2,6 +2,7 @@ import 'package:solid_generator/src/effect_model.dart';
 import 'package:solid_generator/src/field_model.dart';
 import 'package:solid_generator/src/getter_model.dart';
 import 'package:solid_generator/src/query_model.dart';
+import 'package:solid_generator/src/transformation_error.dart';
 
 /// Shared signal-emission helpers used by every class-kind rewriter.
 
@@ -101,8 +102,99 @@ String emitResourceField(QueryModel q) {
   final ctorName = q.isStream
       ? 'Resource<${q.innerTypeText}>.stream'
       : 'Resource<${q.innerTypeText}>';
-  final ctor = "$ctorName($closure, name: '$debugName')";
+  // SPEC §4.8 rule 5: a single-Signal Computed wrapper would be a no-op, so
+  // the one-name case passes the Signal/Computed directly as `source:`.
+  final String sourceArg;
+  if (q.trackedSignalNames.isEmpty) {
+    sourceArg = '';
+  } else if (q.trackedSignalNames.length == 1) {
+    sourceArg = ', source: ${q.trackedSignalNames.first}';
+  } else {
+    sourceArg = ', source: ${q.sourceFieldName}';
+  }
+  final ctor = "$ctorName($closure$sourceArg, name: '$debugName')";
   return '  late final ${q.methodName} = $ctor;';
+}
+
+/// Emits the synthesized Record-Computed source field for an `@SolidQuery`
+/// method whose body reads two or more `@SolidState` field/getter
+/// identifiers (SPEC §3.5 / §4.8 rule 5). Shape:
+///
+/// ```dart
+/// late final _<methodName>Source = Computed<(T1, T2, …)>(
+///   () => (s1.value, s2.value, …),
+///   name: '_<methodName>Source',
+/// );
+/// ```
+///
+/// Returns `null` for queries whose body reads zero or one upstream reactives:
+/// no synthesized field is needed in either case (zero → no `source:`; one →
+/// the existing Signal/Computed is passed directly as `source:`). The return
+/// type advertises that contract: the caller branches on `null` to know
+/// whether to emit a source field and add it to the dispose-name list.
+///
+/// [reactiveTypeTexts] maps each `@SolidState` field/getter name on the
+/// enclosing class to its declared inner type text (e.g. `'int'`, `'String?'`).
+/// The map is built by the caller from `solidFields` / `solidGetters` before
+/// the per-member walk. Each tracked name's type becomes the corresponding
+/// element in the `(T1, T2, …)` Record type literal.
+///
+/// Throws [CodeGenerationError] when any tracked name resolves to an empty
+/// type text — the SPEC requires explicit type annotations on `@SolidState`
+/// fields/getters, and a missing one would produce invalid Dart in the
+/// emitted Record-Computed type argument.
+///
+/// The synthesized field name `_<methodName>Source` could in theory collide
+/// with a user-declared private member; this is consistent with other
+/// generator-synthesized names (e.g. the `_<className>State` partner class in
+/// `stateless_rewriter`) and intentionally not validator-checked at this
+/// milestone — a future milestone may add a collision pass if needed.
+String? emitQuerySourceField(
+  QueryModel q,
+  Map<String, String> reactiveTypeTexts,
+) {
+  if (!q.needsSourceComputed) return null;
+  final names = q.trackedSignalNames;
+  final types = names.map((n) {
+    final t = reactiveTypeTexts[n];
+    if (t == null || t.isEmpty) {
+      throw CodeGenerationError(
+        "@SolidQuery '${q.methodName}' depends on reactive '$n' which has "
+        'no explicit type annotation; add a type to the @SolidState '
+        'declaration so the synthesized source-Computed Record type can be '
+        'emitted',
+        null,
+        q.methodName,
+      );
+    }
+    return t;
+  }).toList();
+  final tupleType = '(${types.join(', ')})';
+  final tupleExpr = '(${names.map((n) => '$n.value').join(', ')})';
+  final fieldName = q.sourceFieldName;
+  return '  late final $fieldName = '
+      "Computed<$tupleType>(() => $tupleExpr, name: '$fieldName');";
+}
+
+/// Emits the per-query field block used by all three rewriters: a synthesized
+/// source Computed (when [QueryModel.needsSourceComputed]) immediately before
+/// the Resource field. Both fields are appended to [output] in source-
+/// declaration order, and their names are appended to [disposeNames] in the
+/// same order — so reverse-disposal tears down the Resource first, then the
+/// source Computed, then the underlying Signals.
+void emitQueryFields(
+  QueryModel q,
+  Map<String, String> reactiveTypeTexts,
+  List<String> output,
+  List<String> disposeNames,
+) {
+  final sourceField = emitQuerySourceField(q, reactiveTypeTexts);
+  if (sourceField != null) {
+    output.add(sourceField);
+    disposeNames.add(q.sourceFieldName);
+  }
+  output.add(emitResourceField(q));
+  disposeNames.add(q.methodName);
 }
 
 /// Emits a `dispose()` method disposing every name in

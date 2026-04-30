@@ -83,6 +83,12 @@ RewriteResult rewriteStatelessWidget(
   if (solidGetters.isNotEmpty) solidartNames.add('Computed');
   if (solidEffects.isNotEmpty) solidartNames.add('Effect');
   if (solidQueries.isNotEmpty) solidartNames.add('Resource');
+  // A multi-dep query synthesizes a Record-Computed source field regardless
+  // of whether the class has any `@SolidState` getter — so `Computed` may be
+  // needed even when `solidGetters` is empty.
+  if (solidQueries.any((q) => q.needsSourceComputed)) {
+    solidartNames.add('Computed');
+  }
 
   return (
     text: '$widgetClass\n\n$stateClass\n',
@@ -121,6 +127,10 @@ _emitReactiveBlock(
   final getterByName = {for (final g in solidGetters) g.getterName: g};
   final effectByName = {for (final e in solidEffects) e.methodName: e};
   final queryByName = {for (final q in solidQueries) q.methodName: q};
+  final reactiveTypeTexts = <String, String>{
+    for (final f in solidFields) f.fieldName: f.typeText,
+    for (final g in solidGetters) g.getterName: g.typeText,
+  };
   final lines = <String>[];
   final disposeNames = <String>[];
   final effectNames = <String>[];
@@ -153,8 +163,7 @@ _emitReactiveBlock(
         }
         final q = queryByName[name];
         if (q != null) {
-          lines.add(emitResourceField(q));
-          disposeNames.add(q.methodName);
+          emitQueryFields(q, reactiveTypeTexts, lines, disposeNames);
         }
       }
     }
