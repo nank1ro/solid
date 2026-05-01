@@ -2188,7 +2188,9 @@ class HomePage extends StatelessWidget {
   late Logger logger;
 
   @override
-  Widget build(BuildContext context) => Text('hello');
+  Widget build(BuildContext context) {
+    return Text('hello');
+  }
 }
 ```
 
@@ -2214,7 +2216,9 @@ class _HomePageState extends State<HomePage> {
   late final logger = context.read<Logger>();
 
   @override
-  Widget build(BuildContext context) => Text('hello');
+  Widget build(BuildContext context) {
+    return Text('hello');
+  }
 }
 ```
 
@@ -2261,7 +2265,9 @@ class CounterDisplay extends StatelessWidget {
   late Counter counter;
 
   @override
-  Widget build(BuildContext context) => Text(counter.value.toString());
+  Widget build(BuildContext context) {
+    return Text(counter.value.toString());
+  }
 }
 ```
 

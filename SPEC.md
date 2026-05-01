@@ -426,7 +426,9 @@ class Counter extends StatelessWidget {
   int counter = 0;
 
   @override
-  Widget build(BuildContext context) => const Placeholder();
+  Widget build(BuildContext context) {
+    return const Placeholder();
+  }
 }
 ```
 
@@ -719,7 +721,9 @@ class CounterDisplay extends StatelessWidget {
   late Counter counter;
 
   @override
-  Widget build(BuildContext context) => Text(counter.value.toString());
+  Widget build(BuildContext context) {
+    return Text(counter.value.toString());
+  }
 }
 ```
 
@@ -1078,7 +1082,9 @@ class Counter extends StatelessWidget {
   int counter = 0;
 
   @override
-  Widget build(BuildContext context) => Text('$counter');
+  Widget build(BuildContext context) {
+    return Text('$counter');
+  }
 }
 ```
 
