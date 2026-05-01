@@ -7,6 +7,7 @@ import 'package:dart_style/dart_style.dart';
 import 'package:solid_generator/src/annotation_reader.dart';
 import 'package:solid_generator/src/class_kind.dart';
 import 'package:solid_generator/src/effect_model.dart';
+import 'package:solid_generator/src/environment_model.dart';
 import 'package:solid_generator/src/field_model.dart';
 import 'package:solid_generator/src/getter_model.dart';
 import 'package:solid_generator/src/import_rewriter.dart';
@@ -90,6 +91,9 @@ class _SolidBuilder implements Builder {
     // getters/setters, top-level functions, fields) never reach
     // `readSolidQueryMethod`.
     validateSolidQueryTargets(parsed.unit);
+    // SPEC §3.6 invalid-target guard for `@SolidEnvironment` — mirrors
+    // the validators above.
+    validateSolidEnvironmentTargets(parsed.unit);
 
     final annotatedClasses = _collectAnnotatedClasses(parsed.unit, source);
     if (annotatedClasses.every(
@@ -97,7 +101,8 @@ class _SolidBuilder implements Builder {
           c.fields.isEmpty &&
           c.getters.isEmpty &&
           c.effects.isEmpty &&
-          c.queries.isEmpty,
+          c.queries.isEmpty &&
+          c.environments.isEmpty,
     )) {
       // Hint matched, but no `@SolidState` field/getter, `@SolidEffect`
       // method, or `@SolidQuery` method resolved — the file likely contains
@@ -145,7 +150,8 @@ Map<String, Set<String>> _buildClassRegistry(
 }
 
 /// One class declaration paired with the `@SolidState` fields and getters,
-/// `@SolidEffect` methods, and `@SolidQuery` methods it contains.
+/// `@SolidEffect` methods, `@SolidQuery` methods, and `@SolidEnvironment`
+/// fields it contains.
 ///
 /// Every annotation list is empty when the class exists in the source but
 /// has no reactive annotations; such classes are passed through verbatim.
@@ -156,12 +162,14 @@ class _AnnotatedClass {
     required this.getters,
     required this.effects,
     required this.queries,
+    required this.environments,
   });
   final ClassDeclaration decl;
   final List<FieldModel> fields;
   final List<GetterModel> getters;
   final List<EffectModel> effects;
   final List<QueryModel> queries;
+  final List<EnvironmentModel> environments;
 }
 
 /// Walks [unit] once and returns every class paired with its `@SolidState`
@@ -184,6 +192,7 @@ List<_AnnotatedClass> _collectAnnotatedClasses(
     final getters = <GetterModel>[];
     final effects = <EffectModel>[];
     final queries = <QueryModel>[];
+    final environments = <EnvironmentModel>[];
     final reactiveNames = <String>{};
     for (final member in decl.members) {
       if (member is FieldDeclaration) {
@@ -191,6 +200,14 @@ List<_AnnotatedClass> _collectAnnotatedClasses(
         if (model != null) {
           fields.add(model);
           reactiveNames.add(model.fieldName);
+          continue;
+        }
+        // `@SolidState` wins over `@SolidEnvironment` on a both-annotated
+        // field (defense-in-depth — the target validator rejects this
+        // upstream).
+        final env = readSolidEnvironmentField(member, source);
+        if (env != null) {
+          environments.add(env);
         }
         continue;
       }
@@ -224,6 +241,7 @@ List<_AnnotatedClass> _collectAnnotatedClasses(
         getters: getters,
         effects: effects,
         queries: queries,
+        environments: environments,
       ),
     );
   }
@@ -235,7 +253,10 @@ List<_AnnotatedClass> _collectAnnotatedClasses(
 /// ones per their class kind.
 ///
 /// `flutter_solidart` is added to the import block iff any rewriter emitted
-/// a Section 9 identifier (SPEC §9).
+/// a Section 9 identifier (SPEC §9). `package:provider/provider.dart` is
+/// added iff any annotated class has at least one `@SolidEnvironment` field
+/// (SPEC §3.6 / §9 — env fields lower to `context.read<T>()`, which resolves
+/// through `package:provider`'s `ReadContext` extension).
 String _renderOutput(
   CompilationUnit unit,
   List<_AnnotatedClass> annotatedClasses,
@@ -246,7 +267,8 @@ String _renderOutput(
     if (c.fields.isEmpty &&
         c.getters.isEmpty &&
         c.effects.isEmpty &&
-        c.queries.isEmpty) {
+        c.queries.isEmpty &&
+        c.environments.isEmpty) {
       return (
         text: source.substring(c.decl.offset, c.decl.end),
         solidartNames: const <String>{},
@@ -258,6 +280,7 @@ String _renderOutput(
       c.getters,
       c.effects,
       c.queries,
+      c.environments,
       classRegistry,
       source,
     );
@@ -268,6 +291,7 @@ String _renderOutput(
     addSolidart: results.any(
       (r) => r.solidartNames.any(solidartNames.contains),
     ),
+    addProvider: annotatedClasses.any((c) => c.environments.isNotEmpty),
   );
   final importBlock = imports.map((u) => "import '$u';").join('\n');
 
@@ -288,6 +312,7 @@ RewriteResult _rewriteClass(
   List<GetterModel> getters,
   List<EffectModel> effects,
   List<QueryModel> queries,
+  List<EnvironmentModel> environments,
   Map<String, Set<String>> classRegistry,
   String source,
 ) {
@@ -301,6 +326,7 @@ RewriteResult _rewriteClass(
         getters,
         effects,
         queries,
+        environments,
         classRegistry,
         source,
       );
@@ -311,6 +337,7 @@ RewriteResult _rewriteClass(
         getters,
         effects,
         queries,
+        environments,
         classRegistry,
         source,
       );
@@ -321,6 +348,7 @@ RewriteResult _rewriteClass(
         getters,
         effects,
         queries,
+        environments,
         classRegistry,
         source,
       );

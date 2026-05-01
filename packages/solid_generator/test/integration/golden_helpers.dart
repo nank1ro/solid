@@ -63,6 +63,7 @@ const List<String> goldenNames = <String>[
   'm6_02_already_disposable',
   'm6_02_user_dispose_body',
   'm6_02_user_dispose_no_override',
+  'm6_03_simple_environment',
 ];
 
 /// Memoized golden directory resolution. Resolved relative to the package

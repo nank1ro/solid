@@ -1,6 +1,7 @@
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:solid_generator/src/build_rewriter.dart';
 import 'package:solid_generator/src/effect_model.dart';
+import 'package:solid_generator/src/environment_model.dart';
 import 'package:solid_generator/src/field_model.dart';
 import 'package:solid_generator/src/getter_model.dart';
 import 'package:solid_generator/src/import_rewriter.dart';
@@ -23,6 +24,7 @@ RewriteResult rewriteStatelessWidget(
   List<GetterModel> solidGetters,
   List<EffectModel> solidEffects,
   List<QueryModel> solidQueries,
+  List<EnvironmentModel> solidEnvironments,
   Map<String, Set<String>> classRegistry,
   String source,
 ) {
@@ -38,12 +40,20 @@ RewriteResult rewriteStatelessWidget(
   final queryNames = solidQueries.isEmpty
       ? const <String>{}
       : {for (final q in solidQueries) q.methodName};
+  // Superset of `reactiveNames` that also includes `@SolidEnvironment` field
+  // names. These are the field names `_emitReactiveBlock` will emit itself,
+  // so `_partitionFields` must skip them on the source-text walk to avoid
+  // double-emitting them as widget/state-bound fields.
+  final partitionExcludeNames = <String>{
+    ...reactiveNames,
+    ...solidEnvironments.map((e) => e.fieldName),
+  };
 
   final members = _splitMembers(classDecl);
   final widgetBoundNames = _collectWidgetBoundNames(members.ctors);
   final partition = _partitionFields(
     members.fields,
-    reactiveNames,
+    partitionExcludeNames,
     widgetBoundNames,
     source,
   );
@@ -62,6 +72,7 @@ RewriteResult rewriteStatelessWidget(
     solidGetters,
     solidEffects,
     solidQueries,
+    solidEnvironments,
   );
 
   final widgetClass = _emitWidgetClass(
@@ -81,7 +92,18 @@ RewriteResult rewriteStatelessWidget(
     buildMethodText: buildMethodText,
   );
 
-  final solidartNames = <String>{'Signal', 'SignalBuilder'};
+  // SPEC §9 import-add gates. `Signal` and `SignalBuilder` are only emitted
+  // when there's a same-class reactive declaration to wrap. An env-only
+  // class (M6-03 simple-environment) has no Signal/SignalBuilder reference
+  // in its lowered output and so does NOT pull in `flutter_solidart`.
+  final hasReactive =
+      solidFields.isNotEmpty ||
+      solidGetters.isNotEmpty ||
+      solidQueries.isNotEmpty;
+  final solidartNames = <String>{
+    if (solidFields.isNotEmpty) 'Signal',
+    if (hasReactive) 'SignalBuilder',
+  };
   if (solidGetters.isNotEmpty) solidartNames.add('Computed');
   if (solidEffects.isNotEmpty) solidartNames.add('Effect');
   if (solidQueries.isNotEmpty) solidartNames.add('Resource');
@@ -100,12 +122,12 @@ RewriteResult rewriteStatelessWidget(
 
 /// Returns the source-ordered emission of every reactive declaration on
 /// [classDecl] (Signal field + Computed getter + Effect method + Resource
-/// query) as a single 2-space-indented block, plus the declaration-order
-/// list of dispose names that pairs with it. Source order is the contract
-/// that `Computed`, `Effect`, and the future M5-10 query-source-Computed
-/// depend on: each must reference declarations defined before it, so the
-/// emitted `late final` lines must appear after the declarations they read
-/// in the rewritten State class.
+/// query + `@SolidEnvironment` env field) as a single 2-space-indented block,
+/// plus the declaration-order list of dispose names that pairs with it.
+/// Source order is the contract that `Computed`, `Effect`, and the M5-10
+/// query-source-Computed depend on: each must reference declarations defined
+/// before it, so the emitted `late final` lines must appear after the
+/// declarations they read in the rewritten State class.
 ///
 /// `effectNamesInDeclarationOrder` is the Effect-only subset of
 /// `disposeNamesInDeclarationOrder`, pulled out so the rewriter can
@@ -113,6 +135,12 @@ RewriteResult rewriteStatelessWidget(
 /// at mount time (SPEC §4.7). Queries are intentionally NOT in this list —
 /// per SPEC §4.8 rule 10 / §14 item 4, Resources are lazy and the late-final
 /// initializer fires on first call-site read, never via `initState`.
+///
+/// `@SolidEnvironment` env fields (M6-03) are emitted in source-declaration
+/// order alongside Signal/Computed/Effect/Resource fields but are NEVER added
+/// to `disposeNames` (SPEC §10 — env fields are not host-disposed) and NEVER
+/// added to `effectNames` (SPEC §4.9 rule 2 — env fields are lazy and need
+/// no initState materialization).
 ({
   String fieldsText,
   List<String> disposeNamesInDeclarationOrder,
@@ -124,8 +152,10 @@ _emitReactiveBlock(
   List<GetterModel> solidGetters,
   List<EffectModel> solidEffects,
   List<QueryModel> solidQueries,
+  List<EnvironmentModel> solidEnvironments,
 ) {
   final fieldByName = {for (final f in solidFields) f.fieldName: f};
+  final envByName = {for (final e in solidEnvironments) e.fieldName: e};
   final getterByName = {for (final g in solidGetters) g.getterName: g};
   final effectByName = {for (final e in solidEffects) e.methodName: e};
   final queryByName = {for (final q in solidQueries) q.methodName: q};
@@ -144,6 +174,13 @@ _emitReactiveBlock(
       if (f != null) {
         lines.add(emitSignalField(f));
         disposeNames.add(f.fieldName);
+        continue;
+      }
+      final env = envByName[name];
+      if (env != null) {
+        // No disposeNames / effectNames push — env fields are not host-
+        // disposed (SPEC §10) and not initState-materialized (SPEC §4.9).
+        lines.add(emitEnvironmentField(env));
       }
       continue;
     }
@@ -309,8 +346,8 @@ String _emitWidgetClass(
 /// non-widget-bound field that has been moved off the widget; emitted before
 /// the synthesized reactive fields so original declaration order is preserved.
 /// [reactiveFieldsText] is the source-ordered emission of every reactive
-/// declaration (Signal field + Computed getter + Effect method) on the
-/// original class.
+/// declaration (Signal field + Computed getter + Effect method +
+/// `@SolidEnvironment` env field) on the original class.
 ///
 /// [effectNamesInDeclarationOrder] is the Effect-only subset of
 /// [disposeNamesInDeclarationOrder]. When non-empty, this method emits a
@@ -318,6 +355,11 @@ String _emitWidgetClass(
 /// at mount time so its autorun fires (SPEC §4.7). When empty, no `initState`
 /// is emitted — preserving byte-equality with every M1/M2/M3 golden that has
 /// no Effects.
+///
+/// `dispose()` is similarly gated on [disposeNamesInDeclarationOrder] being
+/// non-empty (SPEC §10): an env-only host class (M6-03) has no reactive
+/// declarations to dispose, so no `dispose()` override is emitted — the
+/// inherited `State<T>.dispose()` runs unchanged.
 String _emitStateClass({
   required String className,
   required String stateClassName,
@@ -327,22 +369,22 @@ String _emitStateClass({
   required String stateFieldsText,
   required String buildMethodText,
 }) {
-  final dispose = emitDispose(
-    disposeNamesInDeclarationOrder,
-    emitOverride: true,
-    emitSuperCall: true,
-  );
   final fieldsPrefix = stateFieldsText.isNotEmpty ? '$stateFieldsText\n\n' : '';
   final initStateBlock = effectNamesInDeclarationOrder.isEmpty
       ? ''
       : '${emitInitState(effectNamesInDeclarationOrder)}\n\n';
+  final disposeBlock = disposeNamesInDeclarationOrder.isEmpty
+      ? ''
+      : '${emitDispose(
+          disposeNamesInDeclarationOrder,
+          emitOverride: true,
+          emitSuperCall: true,
+        )}\n\n';
 
   return '''
 class $stateClassName extends State<$className> {
 $fieldsPrefix$reactiveFieldsText
 
-$initStateBlock$dispose
-
-  $buildMethodText
+$initStateBlock$disposeBlock  $buildMethodText
 }''';
 }
