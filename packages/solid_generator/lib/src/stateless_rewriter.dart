@@ -23,6 +23,7 @@ RewriteResult rewriteStatelessWidget(
   List<GetterModel> solidGetters,
   List<EffectModel> solidEffects,
   List<QueryModel> solidQueries,
+  Map<String, Set<String>> classRegistry,
   String source,
 ) {
   final className = classDecl.name.lexeme;
@@ -52,6 +53,7 @@ RewriteResult rewriteStatelessWidget(
     reactiveNames,
     source,
     queryNames: queryNames,
+    classRegistry: classRegistry,
   );
 
   final reactiveBlock = _emitReactiveBlock(
@@ -327,7 +329,8 @@ String _emitStateClass({
 }) {
   final dispose = emitDispose(
     disposeNamesInDeclarationOrder,
-    inheritsDispose: true,
+    emitOverride: true,
+    emitSuperCall: true,
   );
   final fieldsPrefix = stateFieldsText.isNotEmpty ? '$stateFieldsText\n\n' : '';
   final initStateBlock = effectNamesInDeclarationOrder.isEmpty

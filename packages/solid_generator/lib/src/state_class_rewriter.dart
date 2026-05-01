@@ -40,6 +40,7 @@ RewriteResult rewriteStateClass(
   List<GetterModel> solidGetters,
   List<EffectModel> solidEffects,
   List<QueryModel> solidQueries,
+  Map<String, Set<String>> classRegistry,
   String source,
 ) {
   final className = classDecl.name.lexeme;
@@ -110,6 +111,7 @@ RewriteResult rewriteStateClass(
             reactiveNames,
             source,
             queryNames: queryNames,
+            classRegistry: classRegistry,
           ),
         );
       } else if (name == 'initState') {
@@ -154,14 +156,16 @@ RewriteResult rewriteStateClass(
     pieces.add(emitInitState(effectNames));
   }
   if (disposeMethod != null) {
-    pieces[disposeSlot] = _mergeDispose(
+    pieces[disposeSlot] = mergeDispose(
       disposeMethod,
       disposeNames,
       source,
       className,
     );
   } else {
-    pieces.add(emitDispose(disposeNames, inheritsDispose: true));
+    pieces.add(
+      emitDispose(disposeNames, emitOverride: true, emitSuperCall: true),
+    );
   }
 
   final header = source.substring(
@@ -184,45 +188,6 @@ RewriteResult rewriteStateClass(
       if (solidQueries.any((q) => q.needsSourceComputed)) 'Computed',
     },
   );
-}
-
-/// Prepends one `<name>.dispose();` call per reactive declaration to the
-/// existing `dispose()` body's leading boundary, leaving the rest of the body
-/// untouched (SPEC §10).
-///
-/// [disposeNamesInDeclarationOrder] is the unified, source-ordered list of
-/// reactive declarations (Signal field + Effect method). Reverse-iterating
-/// it puts dependents (Effects) ahead of their dependencies (Signals) in the
-/// dispose body.
-///
-/// Throws [CodeGenerationError] if the existing `dispose()` uses an
-/// expression body (`=> …`) — the merge is only well-defined for a block.
-String _mergeDispose(
-  MethodDeclaration method,
-  List<String> disposeNamesInDeclarationOrder,
-  String source,
-  String className,
-) {
-  final body = method.body;
-  if (body is! BlockFunctionBody) {
-    throw CodeGenerationError(
-      'existing dispose() must have a block body for reactive merge',
-      null,
-      className,
-    );
-  }
-  final lbrace = body.block.leftBracket.offset;
-  // The original source after `{` already begins with `\n` (the body's first
-  // line break) on every reasonable formatting; prepending `\n<disposals>`
-  // yields a single blank-line-free splice, leaving the rest of the body
-  // byte-identical to the source. The `DartFormatter` pass normalises any
-  // residual whitespace.
-  final disposals = disposeNamesInDeclarationOrder.reversed
-      .map((name) => '    $name.dispose();')
-      .join('\n');
-  return '${source.substring(method.offset, lbrace + 1)}'
-      '\n$disposals'
-      '${source.substring(lbrace + 1, method.end)}';
 }
 
 /// Splices Effect-materialization reads (`<effectName>;`, in declaration

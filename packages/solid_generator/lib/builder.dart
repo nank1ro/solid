@@ -107,9 +107,41 @@ class _SolidBuilder implements Builder {
       return;
     }
 
-    final transformed = _renderOutput(parsed.unit, annotatedClasses, source);
+    final classRegistry = _buildClassRegistry(annotatedClasses);
+    final transformed = _renderOutput(
+      parsed.unit,
+      annotatedClasses,
+      classRegistry,
+      source,
+    );
     await buildStep.writeAsString(outputId, transformed);
   }
+}
+
+/// Builds the cross-class reactivity map: class name → set of `@SolidState`
+/// field/getter names declared on that class. Consumed by `value_rewriter`
+/// to detect `<receiver>.<field>` reads where the receiver's declared type
+/// names a class with reactive declarations (SPEC §5.1 cross-class chain
+/// rewrite — single-level subset shipped in M6-02; full chains land in
+/// M6-04 alongside the resolved-AST migration).
+///
+/// `@SolidEffect` and `@SolidQuery` names are intentionally excluded — an
+/// Effect lowers to a `void`-returning `Effect` field with no observable
+/// `.value`, and a Query lowers to a `Resource<T>` whose call sites resolve
+/// through `Resource.call()` → `state` (no `.value` rewrite — SPEC §4.8
+/// rule 2 / §5.1).
+Map<String, Set<String>> _buildClassRegistry(
+  List<_AnnotatedClass> annotatedClasses,
+) {
+  final registry = <String, Set<String>>{};
+  for (final c in annotatedClasses) {
+    final names = <String>{
+      for (final f in c.fields) f.fieldName,
+      for (final g in c.getters) g.getterName,
+    };
+    if (names.isNotEmpty) registry[c.decl.name.lexeme] = names;
+  }
+  return registry;
 }
 
 /// One class declaration paired with the `@SolidState` fields and getters,
@@ -207,6 +239,7 @@ List<_AnnotatedClass> _collectAnnotatedClasses(
 String _renderOutput(
   CompilationUnit unit,
   List<_AnnotatedClass> annotatedClasses,
+  Map<String, Set<String>> classRegistry,
   String source,
 ) {
   final results = annotatedClasses.map((c) {
@@ -225,6 +258,7 @@ String _renderOutput(
       c.getters,
       c.effects,
       c.queries,
+      classRegistry,
       source,
     );
   }).toList();
@@ -254,6 +288,7 @@ RewriteResult _rewriteClass(
   List<GetterModel> getters,
   List<EffectModel> effects,
   List<QueryModel> queries,
+  Map<String, Set<String>> classRegistry,
   String source,
 ) {
   final kind = classKindOf(decl);
@@ -266,6 +301,7 @@ RewriteResult _rewriteClass(
         getters,
         effects,
         queries,
+        classRegistry,
         source,
       );
     case ClassKind.plainClass:
@@ -275,6 +311,7 @@ RewriteResult _rewriteClass(
         getters,
         effects,
         queries,
+        classRegistry,
         source,
       );
     case ClassKind.stateClass:
@@ -284,6 +321,7 @@ RewriteResult _rewriteClass(
         getters,
         effects,
         queries,
+        classRegistry,
         source,
       );
     case ClassKind.statefulWidget:

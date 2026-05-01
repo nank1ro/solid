@@ -2141,9 +2141,9 @@ class Counter implements Disposable {
 
 **Dependencies:** M6-01.
 
-**Implementation note:** This PR is purely a regression-fence + amendment to plain-class lowering. It does NOT introduce `@SolidEnvironment`-handling code yet. The new test goldens (b, c, d, e) exist as forward-compat: once M6-04's cross-class type-driven rewrite lands, consumers passing Solid-lowered types via `Provider<T>(dispose: (_, c) => c.dispose())` rely on the lowered class having a `dispose()` method (and `implements Disposable` as the typed contract).
+**Implementation note:** This PR is purely a regression-fence + amendment to plain-class lowering. It does NOT introduce `@SolidEnvironment`-handling code yet. The new test goldens (b, c, d, e) exist as forward-compat: once M6-04's cross-class type-driven rewrite lands, consumers passing Solid-lowered types via `Provider<T>(dispose: (_, c) => c.dispose())` rely on the lowered class having a `dispose()` method (and `implements Disposable` as the typed contract). Sub-case b additionally exercises a single-level slice of the SPEC §5.1 cross-class chain rewrite (typed-parameter receivers only, parsed-AST gated) so that the `compareTo(Counter other) => value - other.value;` body lowers cleanly to `=> value.value - other.value.value;` — full SPEC §5.4 type-driven resolution (resolved AST + `staticType`) lands in M6-04.
 
-**Status:** TODO
+**Status:** DONE
 
 ---
 

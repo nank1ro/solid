@@ -6,41 +6,61 @@ import 'package:solid_generator/src/import_rewriter.dart';
 import 'package:solid_generator/src/query_model.dart';
 import 'package:solid_generator/src/signal_emitter.dart';
 import 'package:solid_generator/src/transformation_error.dart';
+import 'package:solid_generator/src/value_rewriter.dart';
+
+/// Simple-identifier name of the `Disposable` interface from
+/// `package:solid_annotations` (SPEC §10). Used to detect an existing
+/// declaration in the user's `implements` clause and to splice the marker
+/// into lowered headers.
+const String _disposableMarkerName = 'Disposable';
 
 /// Rewrites a plain Dart class (no widget supertype) containing `@SolidState`
 /// fields, `@SolidEffect` methods, and/or `@SolidQuery` methods by replacing
 /// each annotated field with a `Signal<T>(…)`, each annotated method with a
 /// `late final … = Effect(…)` (Effect) or `late final … = Resource<T>(…)`
-/// (Query) field, and synthesizing a fresh `dispose()` method (plus, when
-/// Effects exist, a fresh no-arg constructor whose body materializes the
-/// Effects — the plain-class analogue of the State class's `initState()`
-/// materialization, SPEC §4.7). Queries are intentionally never spliced
-/// into the synthesized constructor — Resources are lazy and the late-final
-/// initializer fires on first call-site read (SPEC §4.8 rule 10 / §8.3).
+/// (Query) field, and synthesizing a `dispose()` method (or merging into a
+/// user-defined one — SPEC §10 / §14 item 4). When Effects exist, a fresh
+/// no-arg constructor body materializes them — the plain-class analogue of
+/// the State class's `initState()` materialization (SPEC §4.7). Queries are
+/// intentionally never spliced into the synthesized constructor — Resources
+/// are lazy and the late-final initializer fires on first call-site read
+/// (SPEC §4.8 rule 10 / §8.3).
 ///
-/// See SPEC §8.3 (plain class lowering), §4.8 (Resource lowering), and §10
-/// (dispose contract). The synthesized `dispose()` has neither `@override`
-/// nor `super.dispose()` because the supertype chain is `Object` only.
+/// Class header: M6-02 adds `implements Disposable` to every Solid-lowered
+/// plain class per SPEC §10's marker rule (lines 1206–1210 of SPEC.md):
+/// when no `implements` clause is present, ` implements Disposable` is
+/// appended after any `extends` / `with` clauses; when one is present,
+/// `, Disposable` is appended to the existing list; when `Disposable` is
+/// already named (simple identifier match), the header is left unchanged.
+/// The `extends` and `with` clauses are preserved verbatim.
 ///
-/// Currently only classes whose every member is an `@SolidState`-annotated
-/// field, an `@SolidEffect`-annotated method, or an `@SolidQuery`-annotated
-/// method are supported. Any other member (existing `dispose()`, user-defined
-/// constructors, non-annotated fields, non-annotated methods, …) throws
-/// [CodeGenerationError] — dispose-merge, constructor-merge, and in-place
-/// patching are scheduled for later milestones.
+/// `@override` is added to every synthesized `dispose()` (the marker
+/// interface contract). When the user has declared their own `dispose()`,
+/// the merge prepends synthesized reactive disposals to the user's body
+/// and the user's existing `@override` (or absence thereof) is carried
+/// through verbatim.
+///
+/// Non-annotated members (other fields, user-defined methods other than
+/// `dispose()`, …) are emitted verbatim — with the SPEC §5.1 same-class
+/// `.value` rewrite applied to user method bodies (and the M6-02 single-
+/// level cross-class slice from [classRegistry], so a `compareTo(Counter
+/// other) => value - other.value;` body lowers to
+/// `=> value.value - other.value.value;`). User-defined constructors are
+/// still rejected — constructor-merge is deferred to a later milestone.
+///
+/// See SPEC §8.3 (plain-class lowering header), §10 (dispose contract +
+/// `Disposable` marker rule + body merge), §14 item 4 (existing `State<X>`
+/// rule, extended here to plain classes).
 ///
 /// The emitted string is syntactically valid Dart but is not guaranteed to be
 /// pretty-printed — run through `DartFormatter` before writing.
-///
-/// [source] is unused here (full reconstruction from AST); it is part of the
-/// signature so the dispatcher in `builder.dart` can pass it uniformly to
-/// every class-kind rewriter.
 RewriteResult rewritePlainClass(
   ClassDeclaration classDecl,
   List<FieldModel> solidFields,
   List<GetterModel> solidGetters,
   List<EffectModel> solidEffects,
   List<QueryModel> solidQueries,
+  Map<String, Set<String>> classRegistry,
   String source,
 ) {
   final className = classDecl.name.lexeme;
@@ -60,57 +80,99 @@ RewriteResult rewritePlainClass(
   final reactiveTypeTexts = <String, String>{
     for (final f in solidFields) f.fieldName: f.typeText,
   };
-  _checkUnsupportedMembers(
-    classDecl,
-    fieldByName,
-    effectByName,
-    queryByName,
-    className,
-  );
+  final reactiveNames = fieldByName.keys.toSet();
 
   final pieces = <String>[];
   final disposeNames = <String>[];
   final effectNames = <String>[];
+  // `dispose` emission is deferred until after the walk so the merge sees
+  // the fully-populated `disposeNames` list. The slot index reserves the
+  // member's source-order position in `pieces` so a user-declared
+  // `dispose()` round-trips at its original position relative to the
+  // synthesized fields.
+  MethodDeclaration? disposeMethod;
+  var disposeSlot = -1;
 
   for (final member in classDecl.members) {
+    if (member is ConstructorDeclaration) {
+      // Constructor-merge would need to gate the synthesized Effect-
+      // materialization constructor; deferred to a later milestone.
+      throw CodeGenerationError(
+        'plain class with constructor is not yet supported',
+        null,
+        className,
+      );
+    }
     if (member is FieldDeclaration) {
-      // Non-annotated fields are rejected by `_checkUnsupportedMembers`
-      // above, so the lookup always hits.
-      final f = fieldByName[member.fields.variables.first.name.lexeme]!;
-      pieces.add(emitSignalField(f));
-      disposeNames.add(f.fieldName);
+      final varName = member.fields.variables.first.name.lexeme;
+      final f = fieldByName[varName];
+      if (f != null) {
+        pieces.add(emitSignalField(f));
+        disposeNames.add(f.fieldName);
+      } else {
+        pieces.add(source.substring(member.offset, member.end));
+      }
       continue;
     }
     if (member is MethodDeclaration) {
-      // `_checkUnsupportedMembers` above guarantees exactly one of the two
-      // map lookups hits, so the `!` on the query branch is safe.
       final name = member.name.lexeme;
-      final effect = effectByName[name];
-      if (effect != null) {
+      if (name == 'dispose') {
+        disposeMethod = member;
+        disposeSlot = pieces.length;
+        pieces.add('');
+      } else if (effectByName.containsKey(name)) {
+        final effect = effectByName[name]!;
         pieces.add(emitEffectField(effect));
         disposeNames.add(effect.methodName);
         effectNames.add(effect.methodName);
-        continue;
+      } else if (queryByName.containsKey(name)) {
+        // Queries are lazy — joining `disposeNames` only, never
+        // `effectNames`, so the synthesized constructor below skips them
+        // (SPEC §4.8 rule 10 / §8.3).
+        final query = queryByName[name]!;
+        emitQueryFields(query, reactiveTypeTexts, pieces, disposeNames);
+      } else {
+        pieces.add(
+          _rewriteUserMethod(member, reactiveNames, classRegistry, source),
+        );
       }
-      // Queries are lazy — `disposeNames` only, never `effectNames`, so the
-      // synthesized constructor below skips them (SPEC §4.8 rule 10 / §8.3).
-      final query = queryByName[name]!;
-      emitQueryFields(query, reactiveTypeTexts, pieces, disposeNames);
       continue;
     }
+    pieces.add(source.substring(member.offset, member.end));
   }
 
-  final fields = pieces.join('\n');
-  // No-arg constructor only when Effects need materialization — keeps the
-  // Signal-only output byte-identical to the M1-06 plain-class golden, and
-  // applies equally to queries-only classes (Resources are lazy).
-  final ctor = effectNames.isEmpty
-      ? ''
-      : '\n\n${emitConstructor(className, effectNames)}';
-  final dispose = emitDispose(disposeNames, inheritsDispose: false);
+  // Dispose: merge into user body if present, else synthesize. `@override`
+  // is emitted in either case (the marker interface contract). On the merge
+  // path the user's `@override` (if any) is carried through verbatim by
+  // `mergeDispose`'s byte-for-byte slice. `super.dispose()` is never
+  // emitted — a plain class's supertype is `Object` (no `dispose()` to
+  // forward to).
+  final disposeText = disposeMethod != null
+      ? mergeDispose(disposeMethod, disposeNames, source, className)
+      : emitDispose(
+          disposeNames,
+          emitOverride: true,
+          emitSuperCall: false,
+        );
+  // No-arg constructor: only when Effects need materialization. When the
+  // user declared `dispose()`, place the constructor immediately before
+  // the (slot-reserved) dispose body so the rendered order is fields →
+  // ctor → dispose.
+  if (disposeMethod != null) {
+    pieces[disposeSlot] = disposeText;
+    if (effectNames.isNotEmpty) {
+      pieces.insert(disposeSlot, emitConstructor(className, effectNames));
+    }
+  } else {
+    if (effectNames.isNotEmpty) {
+      pieces.add(emitConstructor(className, effectNames));
+    }
+    pieces.add(disposeText);
+  }
 
+  final header = _buildHeaderWithDisposable(classDecl, source);
   return (
-    text: 'class $className {\n$fields$ctor\n\n$dispose\n}',
+    text: '$header{\n${pieces.join('\n\n')}\n}',
     solidartNames: <String>{
       'Signal',
       if (effectNames.isNotEmpty) 'Effect',
@@ -122,59 +184,58 @@ RewriteResult rewritePlainClass(
   );
 }
 
-/// Throws [CodeGenerationError] if [classDecl] contains any member other than
-/// an `@SolidState`-annotated field (key in [fieldByName]), an
-/// `@SolidEffect`-annotated method (key in [effectByName]), or an
-/// `@SolidQuery`-annotated method (key in [queryByName]). Surfacing these
-/// explicitly avoids silently dropping user code while the rewriter is
-/// incomplete.
-///
-/// User-defined constructors are still rejected even on queries-only plain
-/// classes (where SPEC §8.3 permits them, since Resources are lazy and need
-/// no synthesized constructor). Lifting that restriction requires emitting
-/// the user's constructor verbatim from `source` and gating the synthesized
-/// one — deferred to a later milestone.
-void _checkUnsupportedMembers(
-  ClassDeclaration classDecl,
-  Map<String, FieldModel> fieldByName,
-  Map<String, EffectModel> effectByName,
-  Map<String, QueryModel> queryByName,
-  String className,
-) {
-  for (final member in classDecl.members) {
-    if (member is FieldDeclaration) {
-      final varName = member.fields.variables.first.name.lexeme;
-      if (!fieldByName.containsKey(varName)) {
-        throw CodeGenerationError(
-          'plain class with non-annotated field "$varName" is not yet '
-          'supported',
-          null,
-          className,
-        );
-      }
-      continue;
-    }
-    if (member is MethodDeclaration &&
-        (effectByName.containsKey(member.name.lexeme) ||
-            queryByName.containsKey(member.name.lexeme))) {
-      continue;
-    }
-    throw CodeGenerationError(
-      'plain class with ${_memberKindLabel(member)} is not yet supported',
-      null,
-      className,
-    );
+/// Returns the verbatim class header (everything from `class` up to the
+/// opening `{`) with `Disposable` merged into the `implements` clause per
+/// SPEC §10 (lines 1206–1210). `extends` and `with` clauses are preserved
+/// verbatim.
+String _buildHeaderWithDisposable(ClassDeclaration classDecl, String source) {
+  final classStart = classDecl.offset;
+  final base = source.substring(classStart, classDecl.leftBracket.offset);
+  final implementsClause = classDecl.implementsClause;
+
+  if (implementsClause == null) {
+    // Splice after the last header clause that IS present.
+    final beforeImplements =
+        classDecl.withClause?.end ??
+        classDecl.extendsClause?.end ??
+        classDecl.typeParameters?.end ??
+        classDecl.name.end;
+    final spliceIdx = beforeImplements - classStart;
+    return '${base.substring(0, spliceIdx)} implements $_disposableMarkerName'
+        '${base.substring(spliceIdx)}';
   }
+
+  final alreadyDeclared = implementsClause.interfaces.any(
+    (nt) => nt.name.lexeme == _disposableMarkerName,
+  );
+  if (alreadyDeclared) return base;
+
+  // Splice at the implements-clause `.end` so any trailing whitespace
+  // before `{` is preserved verbatim after the splice.
+  final spliceIdx = implementsClause.end - classStart;
+  return '${base.substring(0, spliceIdx)}, $_disposableMarkerName'
+      '${base.substring(spliceIdx)}';
 }
 
-/// Human-readable label for an unsupported [ClassMember], used in error
-/// messages. Avoids leaking the analyzer's `…Impl` runtime type names.
-String _memberKindLabel(ClassMember member) {
-  if (member is MethodDeclaration) {
-    return member.name.lexeme == 'dispose'
-        ? 'existing dispose() method'
-        : 'method "${member.name.lexeme}"';
-  }
-  if (member is ConstructorDeclaration) return 'constructor';
-  return 'member';
+/// Emits a non-annotated user method with the SPEC §5.1 `.value` rewrite
+/// applied to its body — both the same-class branch (bare `SimpleIdentifier`
+/// reads of [reactiveFields]) and the cross-class single-level branch from
+/// [classRegistry] in one AST walk.
+String _rewriteUserMethod(
+  MethodDeclaration method,
+  Set<String> reactiveFields,
+  Map<String, Set<String>> classRegistry,
+  String source,
+) {
+  final result = collectValueEdits(
+    method,
+    reactiveFields,
+    source,
+    classRegistry: classRegistry,
+  );
+  return applyEditsToRange(
+    source.substring(method.offset, method.end),
+    result.edits,
+    method.offset,
+  );
 }

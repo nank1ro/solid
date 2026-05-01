@@ -48,6 +48,11 @@ class SourceEdit {
 /// recorded as tracked reads for SignalBuilder placement (SPEC §4.8 rule 3)
 /// without mutating the call expression itself.
 ///
+/// [classRegistry] is the cross-class reactivity map (class name → reactive
+/// field/getter names). Threaded through to the value-rewrite visitor so
+/// SPEC §5.1's single-level `<param>.<reactiveField>` cross-class rewrite
+/// fires (M6-02). Empty map → no-op for the cross-class branch.
+///
 /// [source] is the full source text of the input file. The returned string
 /// is the rewritten build method (from `@override` through the closing `}`),
 /// ready for the caller to embed into the emitted `State` class.
@@ -56,6 +61,7 @@ String rewriteBuildMethod(
   Set<String> reactiveFields,
   String source, {
   Set<String> queryNames = const {},
+  Map<String, Set<String>> classRegistry = const {},
 }) {
   final methodStart = buildMethod.offset;
   final methodEnd = buildMethod.end;
@@ -66,6 +72,7 @@ String rewriteBuildMethod(
     reactiveFields,
     source,
     queryNames: queryNames,
+    classRegistry: classRegistry,
   );
   final wrapNodes = computeWrapSet(
     buildMethod,
