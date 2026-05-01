@@ -94,6 +94,10 @@ class _SolidBuilder implements Builder {
     // SPEC §3.6 invalid-target guard for `@SolidEnvironment` — mirrors
     // the validators above.
     validateSolidEnvironmentTargets(parsed.unit);
+    // SPEC §3.6 same-class provide-and-consume guard. Must run after the
+    // per-target validator above so any malformed @SolidEnvironment field
+    // is rejected first with its more specific error.
+    validateSolidEnvironmentSameClassProvideAndConsume(parsed.unit);
 
     final annotatedClasses = _collectAnnotatedClasses(parsed.unit, source);
     if (annotatedClasses.every(

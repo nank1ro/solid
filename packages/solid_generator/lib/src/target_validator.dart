@@ -1,4 +1,5 @@
 import 'package:analyzer/dart/ast/ast.dart';
+import 'package:analyzer/dart/ast/visitor.dart';
 import 'package:solid_generator/src/annotation_reader.dart';
 import 'package:solid_generator/src/transformation_error.dart';
 
@@ -393,3 +394,156 @@ void _validateEnvironmentTopLevel(CompilationUnitMember decl) =>
       solidEnvironmentName,
       _rejectEnvironment,
     );
+
+// --- @SolidEnvironment same-class provide-and-consume (SPEC §3.6) ---
+
+/// Rejects classes that both consume a type via `@SolidEnvironment late T x;`
+/// AND provide the same `T` in their own `build` body — via either a
+/// `Provider<T>(...)` constructor call or a `.environment<T>(...)` extension
+/// call. The anti-pattern self-traps at runtime in SwiftUI too; Solid
+/// promotes it to a static build-time error per SPEC §3.6.
+///
+/// Detection is unresolved-AST only: a textual lexeme match between each
+/// `@SolidEnvironment` field's declared `NamedType` and the explicit `<T>`
+/// argument on the matched call. SCOPE LIMIT: `.environment(...)` with an
+/// inferred type argument (no explicit `<T>`) is not detected — resolving
+/// the inferred T requires a fully-resolved AST (per SPEC §3.6 / TODOS.md
+/// note re: "the closure's resolved return type"); no M6-08 fixture
+/// exercises that path. First-match-wins (the rejection-test harness asserts
+/// `result.errors.length == 1`).
+void validateSolidEnvironmentSameClassProvideAndConsume(CompilationUnit unit) {
+  for (final decl in unit.declarations) {
+    if (decl is! ClassDeclaration) continue;
+
+    // Single member walk: collect @SolidEnvironment field types AND record
+    // the instance `build` method in one pass. Non-`NamedType` field shapes
+    // (function-typed, records, etc.) are caught upstream by per-target
+    // validation; here we only care about the lexeme-keyed match.
+    final consumedFieldsByType = <String, String>{};
+    MethodDeclaration? buildMethod;
+    for (final member in decl.members) {
+      if (member is FieldDeclaration) {
+        if (findAnnotationByName(solidEnvironmentName, member.metadata) ==
+            null) {
+          continue;
+        }
+        final type = member.fields.type;
+        if (type is! NamedType) continue;
+        final fieldName = member.fields.variables.first.name.lexeme;
+        consumedFieldsByType[type.name.lexeme] = fieldName;
+      } else if (member is MethodDeclaration &&
+          !member.isStatic &&
+          member.name.lexeme == 'build') {
+        buildMethod = member;
+      }
+    }
+    if (consumedFieldsByType.isEmpty || buildMethod == null) continue;
+
+    final detector = _ProvideConsumeDetector(consumedFieldsByType);
+    buildMethod.body.accept(detector);
+    final match = detector.firstMatch;
+    if (match == null) continue;
+
+    final t = match.typeText;
+    final f = match.fieldName;
+    throw ValidationError(
+      '@SolidEnvironment and Provider for the same type in one class: '
+          "field '$f' (type $t) is consumed via @SolidEnvironment but the "
+          'same class also provides $t in its build() body via '
+          '${match.shape.label(t)}. Move the consumer to a child widget, '
+          'or own the instance locally with @SolidState() late $t $f = '
+          '$t(...); instead. (SPEC §3.6)',
+      '${decl.name.lexeme}.$f',
+      'INVALID_ENVIRONMENT_PROVIDE_AND_CONSUME',
+    );
+  }
+}
+
+/// Shape of a same-class provide-and-consume offending call site, used to
+/// derive the `Provider<T>(...)` vs `.environment<T>(...)` label in the
+/// diagnostic message.
+enum _CallShape {
+  providerCtor,
+  environmentExtension;
+
+  String label(String typeText) => switch (this) {
+    providerCtor => 'Provider<$typeText>(...)',
+    environmentExtension => '.environment<$typeText>(...)',
+  };
+}
+
+class _ProvideConsumeMatch {
+  const _ProvideConsumeMatch({
+    required this.fieldName,
+    required this.typeText,
+    required this.shape,
+  });
+
+  final String fieldName;
+  final String typeText;
+  final _CallShape shape;
+}
+
+/// Walks a `build` body for the first `Provider<T>(...)` constructor call or
+/// `.environment<T>(...)` extension call whose explicit `<T>` lexeme is
+/// keyed in [_consumedFieldsByType]. Descends through nested children, so a
+/// `MultiProvider(providers: [Provider<Counter>(...)])` reaches the inner
+/// `Provider` without a special case.
+class _ProvideConsumeDetector extends RecursiveAstVisitor<void> {
+  _ProvideConsumeDetector(this._consumedFieldsByType);
+
+  final Map<String, String> _consumedFieldsByType;
+  _ProvideConsumeMatch? firstMatch;
+
+  @override
+  void visitInstanceCreationExpression(InstanceCreationExpression node) {
+    if (firstMatch != null) return;
+    final ctorType = node.constructorName.type;
+    if (ctorType.name.lexeme == 'Provider') {
+      // Explicit-keyword `new Provider<T>(...)` / `const Provider<T>(...)`:
+      // the `<T>` lives on the constructor's `NamedType`, NOT on
+      // `node.typeArguments` (a different parse position). The far more
+      // common bare `Provider<T>(...)` parses as `MethodInvocation` — see
+      // [visitMethodInvocation] below.
+      _tryRecord(ctorType.typeArguments?.arguments, _CallShape.providerCtor);
+    }
+    if (firstMatch == null) super.visitInstanceCreationExpression(node);
+  }
+
+  @override
+  void visitMethodInvocation(MethodInvocation node) {
+    if (firstMatch != null) return;
+    final methodName = node.methodName.name;
+    // Bare `Provider<T>(...)` (no `new`/`const`) and `.environment<T>(...)`
+    // both parse as `MethodInvocation` here because resolution hasn't run
+    // (analyzer only upgrades constructors to `InstanceCreationExpression`
+    // during resolution — see `placement_visitor.dart` lines 11–15). The
+    // `target == null` / `target != null` checks distinguish the bare
+    // top-level constructor call from the extension-on-Widget call.
+    // (Opposite invariant from `placement_visitor.dart`'s `SignalBuilder`
+    // check at line 106, which guards the `target == null` shape only.)
+    if (methodName == 'environment' && node.target != null) {
+      _tryRecord(
+        node.typeArguments?.arguments,
+        _CallShape.environmentExtension,
+      );
+    } else if (methodName == 'Provider' && node.target == null) {
+      _tryRecord(node.typeArguments?.arguments, _CallShape.providerCtor);
+    }
+    if (firstMatch == null) super.visitMethodInvocation(node);
+  }
+
+  void _tryRecord(List<TypeAnnotation>? typeArgs, _CallShape shape) {
+    if (typeArgs == null || typeArgs.length != 1) return;
+    final arg = typeArgs.first;
+    if (arg is! NamedType) return;
+    final typeText = arg.name.lexeme;
+    final fieldName = _consumedFieldsByType[typeText];
+    if (fieldName == null) return;
+    firstMatch = _ProvideConsumeMatch(
+      fieldName: fieldName,
+      typeText: typeText,
+      shape: shape,
+    );
+  }
+}
