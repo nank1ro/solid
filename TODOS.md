@@ -1787,7 +1787,7 @@ The `fetchName().when(...)` chain is byte-identical between input and output —
 
 ---
 
-### TODO M5-05 — Rejection: invalid `@SolidQuery` targets
+### DONE M5-05 — Rejection: invalid `@SolidQuery` targets
 
 **Goal:** The generator rejects `@SolidQuery` on every invalid target enumerated in SPEC Section 3.5 with a clear, per-case error message that identifies the offending declaration. Mirror of M4-04.
 
@@ -1817,7 +1817,7 @@ The `fetchName().when(...)` chain is byte-identical between input and output —
 
 **Dependencies:** M5-01.
 
-**Status:** TODO
+**Status:** DONE
 
 ---
 
@@ -1982,5 +1982,483 @@ The `fetchName().when(...)` chain is byte-identical between input and output —
 **Dependencies:** M5-01.
 
 **Status:** DONE
+
+---
+
+## M6 — `@SolidEnvironment`
+
+### TODO M6-01 — `solid_annotations` package amendment: `@SolidEnvironment`, `Disposable`, `.environment<T>()`
+
+**Goal:** Land the user-facing surface of `@SolidEnvironment` in `solid_annotations`. Three additions: (a) the `@SolidEnvironment()` annotation class with `@Target({TargetKind.field})` and no parameters, (b) the `abstract interface class Disposable { void dispose(); }` marker interface (consumed by the generator at M6-02 — the user's source class never declares it), (c) the `.environment<T>()` extension on `Widget`, a one-line pass-through that wraps `this` in `Provider<T>(create: create, dispose: dispose, child: this)`. `solid_annotations` gains `package:provider` as a runtime dep (the extension's body imports it). Users still list `provider` in their own pubspec because their source code uses `Provider<T>` / `context.read<T>()` / `MultiProvider` directly (per the `depend_on_referenced_packages` lint). Also remove `'SolidEnvironment'` from the generator's `_reservedAnnotations` map and migrate the `m1_15_environment` rejection case to a positive (no-op) marker test — same pattern as M4-06 / M5-01. No new generator behavior in this PR; existing plain-class / state-class / stateless-widget rewriters keep treating `@SolidEnvironment` as not-yet-supported until M6-03 lands.
+
+**SPEC references:** Section 3.6 (annotation + `Disposable` interface + `.environment<T>()` extension), Section 9 (provider import-add rule applies per-file in M6-03), Section 14 item 5 (`solid_annotations` package surface amendment).
+
+**Files to create:**
+
+- `packages/solid_annotations/lib/src/disposable.dart` — `abstract interface class Disposable { void dispose(); }`. One file, ~5 lines.
+- `packages/solid_annotations/lib/src/environment_extension.dart` — pass-through extension:
+
+  ```dart
+  import 'package:flutter/widgets.dart';
+  import 'package:provider/provider.dart';
+
+  extension WidgetEnvironment on Widget {
+    Widget environment<T extends Object>(
+      T Function(BuildContext) create, {
+      void Function(BuildContext, T)? dispose,
+    }) {
+      return Provider<T>(create: create, dispose: dispose, child: this);
+    }
+  }
+  ```
+
+  No `is Disposable` runtime check — the marker is invisible to user-source-side reasoning, so the extension does nothing magic with it.
+
+**Files to modify:**
+
+- `packages/solid_annotations/lib/src/annotations.dart` — replace the `SolidEnvironment` placeholder with `@Target({TargetKind.field}) class SolidEnvironment { const SolidEnvironment(); }`. Drop the docstring's "reserved" wording.
+- `packages/solid_annotations/lib/solid_annotations.dart` — re-export `disposable.dart` and `environment_extension.dart`.
+- `packages/solid_annotations/pubspec.yaml` — add `provider: ^6.1.0` (or current major) as a runtime dep. `flutter` is already a runtime dep from M5-01.
+- `packages/solid_generator/lib/src/reserved_annotation_validator.dart` — remove `'SolidEnvironment'` from `_reservedAnnotations`. The map is now empty; document that with a comment ("No annotations are currently reserved-pending. M6 closed the v2 surface.").
+- `packages/solid_generator/test/rejections/m1_15_non_m1_annotations_test.dart` — delete the `m1_15_environment` case. The file's `_cases` list is now empty; replace the test with a marker test that asserts `_reservedAnnotations` is empty (regression fence: any future SPEC addition must update this test).
+- `packages/solid_generator/test/golden/inputs/m1_15_environment.dart` — delete (no longer a rejection input).
+
+**Expected implementation change:** Two small files added under `solid_annotations/lib/src/` (`disposable.dart`, `environment_extension.dart`), two existing files edited (annotations.dart, solid_annotations.dart export list), one pubspec dep added (`provider`). Generator-side change is the reserved-list trim and rejection-test cleanup.
+
+**Acceptance:** `dart analyze packages/solid_annotations` reports zero issues with the new `provider` dep. `dart test --name=m1_15` passes (now an empty-list assertion). `m1_15_environment.dart` no longer exists. The `@SolidEnvironment` annotation class accepts no constructor arguments. The `.environment<T>()` extension typechecks via inference — `widget.environment((_) => Counter())` resolves T = Counter without the `<Counter>` annotation. Existing golden tests still pass (no generator behavior changed for `@SolidState` / `@SolidEffect` / `@SolidQuery`).
+
+**Dependencies:** M5-11 (the previous reserved-list trim landed in M5-01; M6-01 trims the last entry).
+
+**Status:** TODO
+
+---
+
+### TODO M6-02 — Plain-class lowerings synthesize `implements Disposable` + `@override` + dispose-body merge
+
+**Goal:** Every Solid-lowered plain class (`m1_06_plain_class_no_widget` shape and any class with `@SolidState` / `@SolidEffect` / `@SolidQuery` declarations) that gets a synthesized `dispose()` now also gains `implements Disposable` in its class header (merged into any existing implements clause per Section 10) and `@override` on the synthesized `dispose()`. Additionally, the dispose-body merge rule from Section 14 item 4 (existing State<X> behavior) is extended to plain classes: when the source has a user-defined `void dispose()` body AND reactive declarations, the synthesized reactive disposals are PREPENDED to the user's body. This is a regression-fence PR — every existing plain-class golden is regenerated to include the new header and `@override`.
+
+**SPEC references:** Section 8.3 (plain-class lowering — gains `implements Disposable`), Section 10 (`Disposable` marker rule + dispose-body merge), Section 14 item 4 (existing State<X> rule, extended here to plain classes).
+
+**Files to create:**
+
+- `packages/solid_generator/test/golden/inputs/m6_02_implements_existing.dart` — sub-case b: source class with `implements Comparable<Counter>` plus `@SolidState`. Output appends `, Disposable` to the implements list.
+- `packages/solid_generator/test/golden/outputs/m6_02_implements_existing.g.dart`
+- `packages/solid_generator/test/golden/inputs/m6_02_extends_with_implements.dart` — sub-case c: source class with `extends Foo with BarMixin implements Baz` plus `@SolidState`. Output preserves all three; appends `, Disposable` to implements only.
+- `packages/solid_generator/test/golden/outputs/m6_02_extends_with_implements.g.dart`
+- `packages/solid_generator/test/golden/inputs/m6_02_already_disposable.dart` — sub-case d: source class manually writes `implements Disposable`; no `@override` on user side. Output: header unchanged; synthesized dispose still gets `@override`.
+- `packages/solid_generator/test/golden/outputs/m6_02_already_disposable.g.dart`
+- `packages/solid_generator/test/golden/inputs/m6_02_user_dispose_body.dart` — sub-case e: source class has a user-defined `dispose()` body (e.g., `unawaited(_ticker.cancel());`) plus `@SolidState`. Output prepends `value.dispose()` to the user's body.
+- `packages/solid_generator/test/golden/outputs/m6_02_user_dispose_body.g.dart`
+- entries in `packages/solid_generator/test/integration/golden_helpers.dart` `goldenNames` for all four new cases.
+
+**Files to modify:**
+
+- `packages/solid_generator/lib/src/plain_class_rewriter.dart` — extend the lowering to: (1) inspect the source class's `extendsClause` / `withClause` / `implementsClause` and emit `implements Disposable` (or `, Disposable` appended to existing) if `Disposable` is not already named; (2) add `@override` on the synthesized `dispose()`; (3) when the source has a user-defined `dispose()` body, prepend reactive disposals (reverse-declaration order) to the user's body.
+- `packages/solid_generator/lib/src/import_rewriter.dart` (or wherever the canonical solidart import is added) — if the class header gains `implements Disposable`, ensure `Disposable` is imported via `package:solid_annotations`. The existing `solid_annotations` import is already present (the source has `@SolidState` etc.), so this should be a no-op verification.
+- `packages/solid_generator/test/golden/outputs/m1_06_plain_class_no_widget.g.dart` — regenerate. Header becomes `class Counter implements Disposable {`; `dispose()` gains `@override`.
+- `packages/solid_generator/test/golden/outputs/m4_08_effect_on_plain_class.g.dart` — regenerate.
+- `packages/solid_generator/test/golden/outputs/m5_09_query_on_plain_class.g.dart` — regenerate.
+
+**Expected input content (sub-case b — implements merge):**
+
+```dart
+import 'package:solid_annotations/solid_annotations.dart';
+
+class Counter implements Comparable<Counter> {
+  @SolidState()
+  int value = 0;
+
+  @override
+  int compareTo(Counter other) => value - other.value;
+}
+```
+
+**Expected output content (sub-case b):**
+
+```dart
+import 'package:solid_annotations/solid_annotations.dart';
+import 'package:flutter_solidart/flutter_solidart.dart';
+
+class Counter implements Comparable<Counter>, Disposable {
+  final value = Signal<int>(0, name: 'value');
+
+  @override
+  int compareTo(Counter other) => value.value - other.value.value;
+
+  @override
+  void dispose() {
+    value.dispose();
+  }
+}
+```
+
+**Expected input content (sub-case e — user dispose body merge):**
+
+```dart
+import 'dart:async';
+import 'package:solid_annotations/solid_annotations.dart';
+
+class Counter implements Disposable {
+  @SolidState()
+  int value = 0;
+
+  final StreamSubscription<void> _ticker = Stream<void>.periodic(
+    const Duration(seconds: 1),
+  ).listen((_) {});
+
+  @override
+  void dispose() {
+    unawaited(_ticker.cancel());
+    print('counter cleanup');
+  }
+}
+```
+
+**Expected output content (sub-case e):**
+
+```dart
+import 'dart:async';
+import 'package:solid_annotations/solid_annotations.dart';
+import 'package:flutter_solidart/flutter_solidart.dart';
+
+class Counter implements Disposable {
+  final value = Signal<int>(0, name: 'value');
+
+  final StreamSubscription<void> _ticker = Stream<void>.periodic(
+    const Duration(seconds: 1),
+  ).listen((_) {});
+
+  @override
+  void dispose() {
+    value.dispose();
+    unawaited(_ticker.cancel());
+    print('counter cleanup');
+  }
+}
+```
+
+**Acceptance:** `dart test --name=m6_02` passes; all four new sub-case goldens pass; the three regenerated existing plain-class goldens pass; `dart analyze packages/solid_generator/test/golden/outputs/` reports zero issues across all updated files. StatelessWidget→State and existing State<X> goldens are byte-identical to their pre-M6-02 outputs (those classes are not provided via DI, so no `Disposable` is added).
+
+**Dependencies:** M6-01.
+
+**Implementation note:** This PR is purely a regression-fence + amendment to plain-class lowering. It does NOT introduce `@SolidEnvironment`-handling code yet. The new test goldens (b, c, d, e) exist as forward-compat: once M6-04's cross-class type-driven rewrite lands, consumers passing Solid-lowered types via `Provider<T>(dispose: (_, c) => c.dispose())` rely on the lowered class having a `dispose()` method (and `implements Disposable` as the typed contract).
+
+**Status:** TODO
+
+---
+
+### TODO M6-03 — Golden: simple `@SolidEnvironment` on `StatelessWidget` (non-reactive injected type)
+
+**Goal:** First end-to-end golden for `@SolidEnvironment`. The injected type is a plain non-Solid class (no `@SolidState` fields), so the cross-class type-driven rewrite from M6-04 is NOT exercised yet — this golden establishes the `late final ... = context.read<T>();` field synthesis, the StatelessWidget→Stateful split forced by the field, and the `package:provider` import-add. Mirror of M4-01 / M5-01 in role.
+
+**SPEC references:** Section 3.6 (annotation, valid targets, host classes), Section 4.9 (lowering rule), Section 8.1 (StatelessWidget split — `@SolidEnvironment` triggers it just like `@SolidState`), Section 9 (provider import).
+
+**Files to create:**
+
+- `packages/solid_generator/test/golden/inputs/m6_03_simple_environment.dart`
+- `packages/solid_generator/test/golden/outputs/m6_03_simple_environment.g.dart`
+- entry in `packages/solid_generator/test/integration/golden_helpers.dart` `goldenNames`.
+- `packages/solid_generator/lib/src/environment_model.dart` — new model file, parallel to `field_model.dart`. Carries `fieldName`, `typeText` (the `T` in `late <T> <name>;`), `hostClassName`. No `name:` parameter (the annotation has none).
+
+**Files to modify:**
+
+- `packages/solid_generator/lib/src/annotation_reader.dart` — add `EnvironmentModel? readSolidEnvironmentField(FieldDeclaration field, String source)`. Reuses the existing `findAnnotationByName('SolidEnvironment', field.metadata)` helper. Validates: field is `late`, has no initializer, type is non-`SignalBase`, host is widget/state.
+- `packages/solid_generator/lib/src/target_validator.dart` — add `validateSolidEnvironmentTargets(CompilationUnit unit)` mirroring `validateSolidQueryTargets`. Rejects: non-`late` fields, fields with initializer, methods/getters/setters/top-level, `final`/`const`/`static` fields, `SignalBase`-typed fields, plain-class fields.
+- `packages/solid_generator/lib/builder.dart` — extend `_AnnotatedClass` to carry `final List<EnvironmentModel> environments;`; extend `_collectAnnotatedClasses`'s `FieldDeclaration` branch to call `readSolidEnvironmentField` after `readSolidStateField`. Pass `environments` through `_rewriteClass`.
+- `packages/solid_generator/lib/src/signal_emitter.dart` — add `String emitEnvironmentField(EnvironmentModel e)` returning `'late final ${e.fieldName} = context.read<${e.typeText}>();'`. The string is emitted in source-declaration order alongside Signal/Computed/Effect/Resource fields. Environment fields do NOT join the dispose-name list (Section 10).
+- `packages/solid_generator/lib/src/import_rewriter.dart` — when the output references `context.read<T>()`, add `import 'package:provider/provider.dart' show ReadContext;` (only if not already imported).
+- `packages/solid_generator/lib/src/stateless_rewriter.dart` — accept `solidEnvironments`. The presence of `@SolidEnvironment` forces the StatelessWidget→State split (already enforced by the §8.1 rule for `@SolidState`; treat `@SolidEnvironment` identically). Emit env fields interleaved in source order. NO initState splice for env fields.
+- `packages/solid_generator/lib/src/state_class_rewriter.dart` — accept `solidEnvironments`. Same emit shape; existing `initState` body is preserved byte-identically (no env splice).
+- `packages/solid_generator/lib/src/plain_class_rewriter.dart` — reject any `@SolidEnvironment` field with `CodeGenerationError("@SolidEnvironment on plain class is invalid — no BuildContext available")` (Section 3.6 invalid targets).
+
+**Expected input content:**
+
+```dart
+import 'package:solid_annotations/solid_annotations.dart';
+import 'package:flutter/widgets.dart';
+
+class Logger {
+  void log(String message) => print(message);
+}
+
+class HomePage extends StatelessWidget {
+  HomePage({super.key});
+
+  @SolidEnvironment()
+  late Logger logger;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text('hello');
+  }
+}
+```
+
+**Expected output content:**
+
+```dart
+import 'package:solid_annotations/solid_annotations.dart';
+import 'package:flutter/widgets.dart';
+import 'package:provider/provider.dart' show ReadContext;
+
+class Logger {
+  void log(String message) => print(message);
+}
+
+class HomePage extends StatefulWidget {
+  HomePage({super.key});
+
+  @override
+  State<HomePage> createState() => _HomePageState();
+}
+
+class _HomePageState extends State<HomePage> {
+  late final logger = context.read<Logger>();
+
+  @override
+  Widget build(BuildContext context) {
+    return Text('hello');
+  }
+}
+```
+
+**Acceptance:** `dart test --name=m6_03` passes; golden analyzes clean; `_HomePageState` has NO `initState()` override (env fields are lazy — Section 4.9 rule 2); `Logger` round-trips byte-identically (no annotations); `import 'package:provider/provider.dart' show ReadContext;` is added exactly once.
+
+**Dependencies:** M6-01.
+
+**Status:** TODO
+
+---
+
+### TODO M6-04 — Type-driven §5.1 rewrite extension: full-chain cross-class `SignalBase` reads
+
+**Goal:** Implement the §5.1 amendment: any `PrefixedIdentifier` or `PropertyAccess` chain whose resolved static type is `SignalBase<T>` at any prefix position receives a `.value` append at that position. Generalizes the existing same-class identifier rewrite to handle cross-class reads via `@SolidEnvironment`-injected dependencies. Existing same-class goldens are a regression fence — they MUST round-trip unchanged. The new golden exercises a `@SolidEnvironment` consumer reading `injected.value` where the injected type carries `@SolidState int value`.
+
+**SPEC references:** Section 5.1 (chain-aware rewrite — full text), Section 5.4 (no-double-append guard applies per chain position), Section 5.5 (shadowing — applies per chain position via type resolution), Section 7 (SignalBuilder placement records the OUTERMOST tracked position in each chain).
+
+**Files to create:**
+
+- `packages/solid_generator/test/golden/inputs/m6_04_cross_class_value_read.dart` — `@SolidEnvironment late Counter counter;` where `Counter` has `@SolidState int value = 0;`. Build reads `counter.value` (type-driven rewrite produces `counter.value.value`).
+- `packages/solid_generator/test/golden/outputs/m6_04_cross_class_value_read.g.dart`
+- entry in `goldenNames`.
+
+**Files to modify:**
+
+- `packages/solid_generator/lib/src/value_rewriter.dart` — extend the visitor to handle `PrefixedIdentifier` and `PropertyAccess` in addition to `SimpleIdentifier`. Use the analyzer's `staticType` API to check whether the receiver expression resolves to `SignalBase<T>` from `flutter_solidart`. The existing `_isAccessedValueProperty` guard (no-double-append) applies per chain position.
+- The visitor's tracked-read-offset collection records the OUTERMOST `SignalBase` position in each chain so SignalBuilder placement (§7) wraps once, not at every chain hop.
+
+**Expected input content:**
+
+```dart
+import 'package:solid_annotations/solid_annotations.dart';
+import 'package:flutter/widgets.dart';
+
+class Counter {
+  @SolidState()
+  int value = 0;
+}
+
+class CounterDisplay extends StatelessWidget {
+  CounterDisplay({super.key});
+
+  @SolidEnvironment()
+  late Counter counter;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(counter.value.toString());
+  }
+}
+```
+
+**Expected output content:**
+
+```dart
+import 'package:solid_annotations/solid_annotations.dart';
+import 'package:flutter/widgets.dart';
+import 'package:flutter_solidart/flutter_solidart.dart';
+import 'package:provider/provider.dart' show ReadContext;
+
+class Counter implements Disposable {
+  final value = Signal<int>(0, name: 'value');
+
+  @override
+  void dispose() {
+    value.dispose();
+  }
+}
+
+class CounterDisplay extends StatefulWidget {
+  CounterDisplay({super.key});
+
+  @override
+  State<CounterDisplay> createState() => _CounterDisplayState();
+}
+
+class _CounterDisplayState extends State<CounterDisplay> {
+  late final counter = context.read<Counter>();
+
+  @override
+  Widget build(BuildContext context) {
+    return SignalBuilder(
+      builder: (context, child) {
+        return Text(counter.value.value.toString());
+      },
+    );
+  }
+}
+```
+
+**Acceptance:** `dart test --name=m6_04` passes; the cross-class chain `counter.value` becomes `counter.value.value`; `SignalBuilder` wraps the `Text`; every prior same-class golden (M1-01 through M5-11) still passes byte-identically; `dart analyze packages/solid_generator/test/golden/outputs/` zero issues.
+
+**Dependencies:** M6-02 (so `Counter` lowered output has `implements Disposable`), M6-03 (`@SolidEnvironment` lowering must be in place).
+
+**Status:** TODO
+
+---
+
+### TODO M6-05 — Golden: `@SolidEnvironment` on existing `State<X>` class
+
+**Goal:** Mirror of M1-07 / M4-08's State-class path for `@SolidEnvironment`. The existing `initState` body (if any) is byte-identical between input and output (env fields are lazy and never spliced — Section 4.9 rule 2 / Section 14 item 4). The existing `dispose` body (if any) is byte-identical (env fields are not in the dispose-name list — Section 10).
+
+**SPEC references:** Section 4.9 (lowering — same on existing State as on synthesized State), Section 8.2, Section 14 item 4.
+
+**Files to create:**
+
+- `packages/solid_generator/test/golden/inputs/m6_05_environment_on_state_class.dart` — existing `State<HomePage>` with hand-written `initState` (calls `super.initState()` then prints), one `@SolidEnvironment` field, one `@SolidState` field, hand-written `dispose` (cancels a stream subscription, calls `super.dispose()`).
+- `packages/solid_generator/test/golden/outputs/m6_05_environment_on_state_class.g.dart`
+- entry in `goldenNames`.
+
+**Files to modify:** none beyond the per-class reading in M6-03's `state_class_rewriter.dart`.
+
+**Expected output shape:** existing initState body byte-identical (no env splice); existing dispose body has the `@SolidState` field's `.dispose()` prepended (per Section 10's existing rule), but NO env disposal added; `late final counter = context.read<Counter>();` placed in source-declaration order.
+
+**Acceptance:** `dart test --name=m6_05` passes; `initState` body is byte-identical to source; `dispose` body has only `@SolidState` disposals prepended.
+
+**Dependencies:** M6-03.
+
+**Status:** TODO
+
+---
+
+### TODO M6-06 — Golden: multiple `@SolidEnvironment` fields on the same widget
+
+**Goal:** Validate that a widget with two or more `@SolidEnvironment` fields lowers correctly: each becomes a separate `late final ... = context.read<T>();` field in source-declaration order; no initState materialization splices; reads of each in `build` typecheck independently.
+
+**SPEC references:** Section 3.6, Section 4.9.
+
+**Files to create:**
+
+- `packages/solid_generator/test/golden/inputs/m6_06_multi_environment.dart` — `StatelessWidget` with `@SolidEnvironment late Counter counter;` and `@SolidEnvironment late Logger logger;`. Build reads both.
+- `packages/solid_generator/test/golden/outputs/m6_06_multi_environment.g.dart`
+- entry in `goldenNames`.
+
+**Files to modify:** none beyond what M6-03 ships (the multi-environment case is naturally covered by source-declaration-order emission).
+
+**Acceptance:** `dart test --name=m6_06` passes; both env fields appear in source-declaration order; counter (Solid-lowered) gets the cross-class `.value.value` rewrite, logger (non-Solid) is left alone.
+
+**Dependencies:** M6-04.
+
+**Status:** TODO
+
+---
+
+### TODO M6-07 — Rejection: invalid `@SolidEnvironment` targets
+
+**Goal:** The generator rejects every invalid `@SolidEnvironment` target enumerated in Section 3.6 with a clear, per-case error message. Mirror of M5-05 / M4-04.
+
+**SPEC references:** Section 3.6 "Invalid targets".
+
+**Files to create:**
+
+- `packages/solid_generator/test/rejections/m6_07_invalid_environment_targets_test.dart` — parametric test over the cases below.
+- One input file per case under `packages/solid_generator/test/golden/inputs/`:
+  - `m6_07_field_with_initializer.dart` — `@SolidEnvironment() late Counter c = Counter();`
+  - `m6_07_field_without_late.dart` — `@SolidEnvironment() Counter c;`
+  - `m6_07_final_field.dart` — `@SolidEnvironment() final Counter c = Counter();`
+  - `m6_07_static_field.dart` — `@SolidEnvironment() static late Counter c;`
+  - `m6_07_method.dart` — `@SolidEnvironment() void doStuff() {}`
+  - `m6_07_getter.dart` — `@SolidEnvironment() Counter get c => Counter();`
+  - `m6_07_setter.dart` — `@SolidEnvironment() set c(Counter v) {}`
+  - `m6_07_top_level.dart` — top-level `@SolidEnvironment() late Counter c;`
+  - `m6_07_signalbase_typed.dart` — `@SolidEnvironment() late Signal<int> c;`
+  - `m6_07_plain_class.dart` — `@SolidEnvironment` field on a plain (non-Widget, non-State) class.
+
+**Files to modify:**
+
+- `packages/solid_generator/lib/src/target_validator.dart` — add `validateSolidEnvironmentTargets` per the M6-03 plan. Each invalid case produces a `ValidationError` whose message names the target kind and the enclosing class + member.
+
+**Acceptance:** parametric test passes; every case produces a distinct error message that contains the SPEC description of the invalid-target category.
+
+**Dependencies:** M6-03.
+
+**Status:** TODO
+
+---
+
+### TODO M6-08 — Rejection: same-class provide-and-consume
+
+**Goal:** A class that both consumes (`@SolidEnvironment() late T x;`) and provides the same `T` to its own subtree (via a `Provider<T>(...)` constructor call OR a `.environment<T>(...)` extension call inside its `build` body) is rejected at build time with a clear error citing Section 3.6.
+
+**SPEC references:** Section 3.6 "Same-class provide-and-consume rejection".
+
+**Files to create:**
+
+- `packages/solid_generator/test/rejections/m6_08_same_class_provide_consume_test.dart` — two cases: one with `Provider<T>(...)` in build, one with `.environment<T>(...)` in build.
+- `packages/solid_generator/test/golden/inputs/m6_08_provider_widget.dart`
+- `packages/solid_generator/test/golden/inputs/m6_08_environment_extension.dart`
+
+**Files to modify:**
+
+- `packages/solid_generator/lib/src/target_validator.dart` (or a new validator file) — walk the host class's `build` body for `Provider<T>(...)` constructor calls and `.environment(...)` extension calls; resolve each call's type argument (or, for `.environment(...)` with inferred T, the closure's resolved return type); if any matches a `@SolidEnvironment` field's declared type on the same class, emit the rejection error.
+
+**Acceptance:** both cases produce the rejection error; the message names both the env field and the offending Provider/`.environment` call site.
+
+**Dependencies:** M6-03.
+
+**Status:** TODO
+
+---
+
+### TODO M6-09 — Widget test: end-to-end `.environment<T>()` + `@SolidEnvironment` + dispose
+
+**Goal:** End-to-end test in `example/` exercising the full M6 flow. Setup: a test widget tree with `child.environment((_) => Counter(), dispose: (_, c) => c.dispose())` providing a Solid-lowered `Counter` (with `@SolidState int value = 0;` AND a manually-declared `void dispose() {}` source-side stub — required for the source layer's analyzer to resolve `c.dispose()`; the generator merges synthesized reactive disposals into the empty body per Section 10) to a child consumer (`@SolidEnvironment late Counter counter;`). Test scenarios: (a) tap a button → `counter.value++` mutates the Signal → SignalBuilder rebuilds the consumer; (b) tear down the provider scope → assert `Counter.dispose()` was invoked exactly once via the user-passed `dispose:` callback. Parallel to M5-07 / M4-07 / M3-04.
+
+**SPEC references:** Section 3.6 (`.environment<T>()` extension, `Disposable` marker contract, source-side `dispose()` requirement), Section 7 (SignalBuilder placement on cross-class read), Section 10 (synthesized dispose semantics + dispose-body merge for plain classes).
+
+**Files to create:**
+
+- `example/test/m6_09_environment_widget_test.dart`
+- `example/source/m6_09_environment_app.dart` (and the generated `example/lib/m6_09_environment_app.dart`).
+
+**Files to modify:**
+
+- `example/pubspec.yaml` — add `provider: ^6.1.0` (or current major) as a runtime dep. This is the first `example/` use of `provider`; consumer apps follow the same pattern.
+
+**Acceptance:** `flutter test example/test/m6_09_environment_widget_test.dart` passes; pump-and-settle assertions verify both the rebuild count and the dispose count. Test uses `.environment<T>()` form to exercise the extension's pass-through wrapper.
+
+**Dependencies:** M6-04, M6-06.
+
+**Status:** TODO
+
+---
+
+### TODO M6-10 — Documentation cleanup: README, environment.mdx, install instructions
+
+**Goal:** Final cleanup PR. SPEC §13 already drops `@SolidEnvironment` and provider-tree machinery in this PR's SPEC update, but: README still mentions deferred annotations and the install command (it should now mention `provider`); the v1 `docs/src/content/docs/guides/environment.mdx` page still uses v1-flavored `SolidProvider` examples that don't lower correctly under v2. M6-10 brings these in sync.
+
+**SPEC references:** Section 3.6 (the new `@SolidEnvironment` user-facing surface, including the `.environment<T>()` extension and `Disposable` marker), Section 14 item 5 (install command — `flutter pub add solid_annotations flutter_solidart provider`).
+
+**Files to modify:**
+
+- `README.md` — update the annotation list (now four shipped annotations, none deferred). Update the install command to include `provider` (`flutter pub add solid_annotations flutter_solidart provider`).
+- `docs/src/content/docs/guides/environment.mdx` — rewrite examples to v2 idioms: show both the widget form `Provider<Counter>(create: ..., dispose: (_, c) => c.dispose(), child: ...)` from `package:provider` and the extension form `child.environment((_) => Counter(), dispose: (_, c) => c.dispose())` (a one-line pass-through provided by `solid_annotations`). Document that the `Disposable` marker is generator-only — it appears in lowered `lib/` output but not in user source — so users who want `dispose: (_, c) => c.dispose()` to typecheck MUST add an empty `void dispose() {}` stub on their source class (the generator merges synthesized reactive disposals into the empty body per Section 10). Show the minimal source pattern. Document the same-class provide-and-consume restriction. Drop any references to the deprecated v1 `SolidProvider`.
+- `docs/src/content/docs/installation.mdx` (or wherever install steps live) — update install command to list all three runtime deps.
+
+**Acceptance:** docs site builds clean. README's "what ships" matrix lists `@SolidEnvironment` as DONE. Install command shows three runtime deps. Both `.environment<T>()` and `Provider<T>` forms appear in the environment guide.
+
+**Dependencies:** M6-09.
+
+**Status:** TODO
 
 ---

@@ -1,7 +1,7 @@
 # Solid — Product Specification (v2)
 
 **Status:** DRAFT — under review
-**Scope of this SPEC:** defines the user-facing contract for `@SolidState`, `@SolidEffect`, and `@SolidQuery` (M1, M4, and M5 milestones). The remaining annotation shipped before v2 release — `@SolidEnvironment` — is a reserved name only; its full contract lives in a future SPEC revision.
+**Scope of this SPEC:** defines the user-facing contract for `@SolidState`, `@SolidEffect`, `@SolidQuery`, and `@SolidEnvironment` (M1, M4, M5, and M6 milestones). The full v2 annotation surface is specified here.
 
 This document is the single source of truth for what Solid does. Reviewer agents cite this document by section number when judging an implementation. It contains no file names, no class names, no AST details — only what the developer sees and the guarantees they get.
 
@@ -30,7 +30,7 @@ Rules:
 
 - **Input path**: any `.dart` file under `source/` at any depth.
 - **Output path**: same relative path under `lib/`. No suffix change. `source/foo/bar.dart` becomes `lib/foo/bar.dart`.
-- **Transformation vs verbatim copy.** Solid reads every `.dart` file under `source/`. If a file contains at least one `@Solid*` annotation (`@SolidState`, `@SolidEffect`, and `@SolidQuery` today; `@SolidEnvironment` in a later milestone), Solid transforms it. Otherwise the file is copied verbatim to the mirrored path under `lib/`. Non-`.dart` files (assets, configs, etc.) are always copied verbatim. The key is annotation presence, not file extension.
+- **Transformation vs verbatim copy.** Solid reads every `.dart` file under `source/`. If a file contains at least one `@Solid*` annotation (`@SolidState`, `@SolidEffect`, `@SolidQuery`, `@SolidEnvironment`), Solid transforms it. Otherwise the file is copied verbatim to the mirrored path under `lib/`. Non-`.dart` files (assets, configs, etc.) are always copied verbatim. The key is annotation presence, not file extension.
 - **Both are committed to git.** Source is the review artifact for intent. Lib is the review artifact for correctness — every PR that changes `source/` must include the regenerated `lib/` diff so reviewers catch generator regressions.
 - **Solid emits no `.g.dart` files of its own.** Third-party generators (freezed, json_serializable, drift) may emit `.g.dart` or `.freezed.dart` files under `source/`; Solid copies those verbatim to the mirrored path under `lib/`.
 - **The example app's `main.dart`** lives in `lib/` (or `source/` if itself annotated) and imports from `lib/` using normal Flutter imports (`import 'counter.dart';`).
@@ -41,7 +41,7 @@ Rules:
 
 ## 3. Annotations
 
-> **Milestones vs v2.** The v2 public release ships the full annotation set: `@SolidState`, `@SolidEffect`, `@SolidQuery`, `@SolidEnvironment`. Implementation is split into internal milestones. M1 implements `@SolidState`; M4 adds `@SolidEffect`; M5 adds `@SolidQuery`. A later milestone adds `@SolidEnvironment` before v2 ships. The user-facing API of every annotation is fixed in this SPEC; no source-code change is required when a later milestone lands.
+> **Milestones vs v2.** The v2 public release ships the full annotation set: `@SolidState`, `@SolidEffect`, `@SolidQuery`, `@SolidEnvironment`. Implementation is split into internal milestones. M1 implements `@SolidState`; M4 adds `@SolidEffect`; M5 adds `@SolidQuery`; M6 adds `@SolidEnvironment`. The user-facing API of every annotation is fixed in this SPEC.
 
 ### 3.1 M1 scope: `@SolidState`
 
@@ -78,9 +78,7 @@ int counter = 0;
 
 ### 3.2 Later milestones (shipped before v2 release)
 
-The following annotation is part of the v2 public release but lands in a milestone after the SPEC's currently-specified set (`@SolidState` in M1, `@SolidEffect` in M4, `@SolidQuery` in M5). Until it ships, the generator must fail with a clear error that names the annotation and says "not yet implemented; scheduled for a later v2 milestone." Its name is reserved here; the full user-facing contract (parameters, valid targets, transformation rules) will be specified in a future SPEC revision before it lands.
-
-- `@SolidEnvironment` — dependency injection (field)
+All four v2 annotations now have full user-facing contracts in this SPEC: `@SolidState` (Section 3.1), `@SolidEffect` (Section 3.4), `@SolidQuery` (Section 3.5), and `@SolidEnvironment` (Section 3.6). No annotation remains reserved-only.
 
 ### 3.3 Permanent non-goals
 
@@ -260,6 +258,156 @@ The user's source layer never references `Resource<T>` or `ResourceState<T>` dir
 
 Every extension method body throws `Exception('This is just a stub for code generation.')`. The bodies are never executed at runtime because the runtime artifact lives in `lib/`, where `fetchData` is a `Resource<T>` field. The source syntax `fetchData()` survives byte-identical (no body rewrite) — at runtime it invokes the upstream `Resource<T>.call()` operator, which returns `ResourceState<T>`. The trailing `.when(...)` / `.maybeWhen(...)` / `.isRefreshing` chain then resolves to upstream `flutter_solidart` extensions on `ResourceState<T>` directly. The tear-off `fetchData.refresh()` resolves to the upstream `Resource<T>.refresh()` direct instance method. `solid_annotations` exports no extensions on `Resource<T>` or `ResourceState<T>` — the upstream `flutter_solidart` callable + extensions handle the chain.
 
+### 3.6 M6 scope: `@SolidEnvironment`
+
+`@SolidEnvironment` declares a dependency-injection field on a class. The field reads its value once, when the host widget mounts, from the nearest ancestor `Provider<T>` in the widget tree. The semantics mirror SwiftUI's `@Environment` property wrapper: type-keyed, invisible-lookup, and transparent reactivity (the host class never owns or disposes the injected instance — the providing scope does).
+
+The annotation takes no parameters.
+
+```dart
+@SolidEnvironment()
+late Counter counter;
+```
+
+Both `late <T>` and `late final <T>` are accepted in source — they produce the same output:
+
+```dart
+@SolidEnvironment()
+late final Counter counter;
+```
+
+#### Valid target
+
+- Instance field declared `late <T> <name>;` or `late final <T> <name>;` with NO initializer. The type must be a non-nullable, non-`SignalBase` reference type. Optional (`T?`) fields are NOT supported in M6 — the consumer declares a non-null dependency, and a missing provider raises a clear runtime error from `context.read<T>()`.
+- The host class must be either a `StatelessWidget` subclass or a `State<X>` subclass.
+
+#### Invalid targets (the generator must reject with a clear error)
+
+- Field with an initializer (`@SolidEnvironment() late Counter c = Counter();`).
+- Field without `late` (`@SolidEnvironment() Counter counter;`).
+- `final` (without `late`), `const`, or `static` field.
+- Method, getter, setter, top-level declaration, parameter.
+- Field whose type resolves to `SignalBase<T>` or a subtype (ambiguous with `@SolidState`; the generator suggests picking one annotation).
+- Field on a plain (non-Widget, non-State) class — no `BuildContext` available, so the read cannot resolve.
+
+#### Provider side: `Provider<T>` and `.environment<T>()`
+
+The injected instance is provided by `Provider<T>` from `package:provider`. `solid_annotations` ships a thin `.environment<T>()` extension on `Widget` as the SwiftUI-flavored alternative — it just wraps `this` in a `Provider<T>` at runtime.
+
+Users install `package:provider` in their own pubspec because they reference `Provider<T>` / `MultiProvider` / `context.read<T>()` directly in their source code (the `depend_on_referenced_packages` lint requires it):
+
+```bash
+flutter pub add solid_annotations flutter_solidart provider
+```
+
+Two equivalent surfaces:
+
+##### Extension form
+
+```dart
+HomePage().environment((context) => Counter())
+```
+
+The type argument is inferred from the closure's return type. Specify it explicitly only when registering an instance under a supertype (so consumers can read by the abstract type):
+
+```dart
+HomePage().environment<AuthService>((context) => RealAuthService())
+```
+
+`.environment<T>()` is a runtime extension on `Widget` shipped by `solid_annotations`. Its body is a one-line pass-through wrap:
+
+```dart
+extension WidgetEnvironment on Widget {
+  Widget environment<T extends Object>(
+    T Function(BuildContext) create, {
+    void Function(BuildContext, T)? dispose,
+  }) {
+    return Provider<T>(create: create, dispose: dispose, child: this);
+  }
+}
+```
+
+There is NO automatic dispose behavior — the `Disposable` marker (below) is invisible to the user's source layer (it appears only in the generated `lib/` output, added by the generator at Section 10). When the injected type owns resources, the user passes `dispose:` explicitly:
+
+```dart
+HomePage().environment<Counter>(
+  (context) => Counter(),
+  dispose: (_, c) => c.dispose(),
+)
+```
+
+The `c.dispose()` call expression typechecks at the source layer ONLY when the source-side `Counter` class itself declares a `void dispose()` method. The source analyzer cannot see the generator-synthesized `dispose()` (which exists only in lowered `lib/`). To enable this pattern for a Solid-lowered class, the user adds an empty `void dispose()` stub on the source class:
+
+```dart
+class Counter {
+  @SolidState()
+  int value = 0;
+
+  void dispose() {}  // empty; generator merges synthesized reactive disposals
+}
+```
+
+The empty body is appropriate because the Section 10 merge rule prepends the synthesized reactive disposals (`value.dispose();` etc.) to the user's body in the lowered output. Users don't need to write `value.dispose()` themselves; the generator handles it.
+
+If the source-side type already declares `dispose()` (e.g., a `ChangeNotifier` subclass) or some other cleanup method (`close()`, `cancel()`, `shutdown()`), the user wires that method directly: `dispose: (_, c) => c.close()`. Solid does not constrain the cleanup-method name on non-Solid types.
+
+Chained calls nest providers in source-declaration order:
+
+```dart
+HomePage()
+  .environment((_) => Counter(), dispose: (_, c) => c.dispose())
+  .environment((_) => Logger())
+```
+
+##### Widget form (uses `package:provider` directly)
+
+```dart
+Provider<Counter>(
+  create: (context) => Counter(),
+  dispose: (_, c) => c.dispose(),
+  child: HomePage(),
+)
+```
+
+The widget form is `package:provider`'s own surface and follows its conventions verbatim. For composing multiple providers, users import `MultiProvider` from `package:provider`:
+
+```dart
+MultiProvider(
+  providers: [
+    Provider<Counter>(create: (_) => Counter(), dispose: (_, c) => c.dispose()),
+    Provider<Logger>(create: (_) => Logger()),
+  ],
+  child: HomePage(),
+)
+```
+
+Solid does NOT ship its own provider widget or wrapper. Beyond the `.environment<T>()` extension (a one-line pass-through to `Provider<T>`), the DI surface is `package:provider` exactly as documented at <https://pub.dev/packages/provider>.
+
+#### `Disposable` interface
+
+```dart
+abstract interface class Disposable {
+  void dispose();
+}
+```
+
+Exported from `solid_annotations`. The `implements Disposable` clause is added by the generator to every Solid-lowered class with a synthesized `dispose()` (any class carrying `@SolidState` / `@SolidEffect` / `@SolidQuery` declarations) — see Section 10. The marker exists ONLY in the generated `lib/` output, never in the user's `source/` class. Users who write reactive classes in `source/` therefore do NOT see `implements Disposable` on their own definitions — and the source-layer analyzer cannot resolve `c.dispose()` against a Solid-lowered type unless the user manually declares `void dispose()` on the source class (see the Provider-side note above).
+
+Users may implement `Disposable` directly on their own non-Solid classes if they want to signal the same contract for their own dispose helpers (e.g., a runtime `is Disposable` check inside a custom callback). No Solid surface consumes the marker automatically — it is purely a typed contract that documents which generator-emitted classes carry a `dispose()` method.
+
+#### Same-class provide-and-consume rejection
+
+A class that both consumes (`@SolidEnvironment() late T x;`) and provides the same `T` to its own subtree (via a `Provider<T>(...)` constructor call OR a `.environment<T>(...)` extension call in its `build` body) is rejected at build time. The error names both declarations and suggests the SwiftUI-idiomatic resolutions:
+
+- Move the consumer to a child widget.
+- Own the instance locally with `@SolidState() late T x = T(...);` instead.
+
+This matches SwiftUI: `.environment(value)` provides to the modified view's subtree, not the modifying view itself, so a self-read traps at runtime in SwiftUI too. Solid rejects statically.
+
+#### `context.watch<T>()` is not used by Solid
+
+`Provider` is wired into Solid as DI plumbing only. Reactivity is owned by `@SolidState` / `@SolidEffect` / `@SolidQuery` and the SignalBuilder placement rule (Section 7); the generator emits `context.read<T>()` exclusively. Users who specifically want `context.watch<T>()` semantics (rebuild when the providing scope itself replaces the instance) import `package:provider` directly and use it outside the Solid lowering.
+
 ---
 
 ## 4. Transformation Rules
@@ -278,7 +426,9 @@ class Counter extends StatelessWidget {
   int counter = 0;
 
   @override
-  Widget build(BuildContext context) => const Placeholder();
+  Widget build(BuildContext context) {
+    return const Placeholder();
+  }
 }
 ```
 
@@ -369,7 +519,7 @@ late final doubleCounter = Computed<int>(() => counter.value * 2, name: 'doubleC
 Rules:
 
 - The getter body MUST read at least one reactive declaration — any identifier whose resolved static type is `SignalBase<T>` or a subtype. A `Computed` with zero reactive dependencies is rejected: *"getter `<name>` has no reactive dependencies; use `final` or a plain getter instead of `@SolidState`."*
-- In M1 the only source of such a declaration is a `@SolidState` field or getter on the same class. Later milestones add cross-class declarations via `@SolidEnvironment` (Section 13); the rule is stated in terms of resolved type so no SPEC change is required when they land.
+- In M1 the only source of such a declaration is a `@SolidState` field or getter on the same class. M6 adds cross-class declarations via `@SolidEnvironment` (Section 3.6); the rule is stated in terms of resolved type, so the same Computed-body rewrite handles cross-class reads without amendment.
 - Identifiers in the body that resolve to reactive declarations are rewritten with `.value` (see Section 5).
 - The resulting `Computed` field is always declared `late final`, because it references other `final` instance fields whose initialization order is not guaranteed.
 
@@ -559,6 +709,66 @@ Rules:
 
 11. **Disposal.** The `<name>` Resource field always joins the unified ordered dispose list. The `_<name>Source` Record-Computed (when synthesized) is emitted immediately before its Resource and joins the dispose list in that source-declaration position, so reverse-declaration disposal (Section 10) tears the Resource down before the Record-Computed and before any Signals they read.
 
+### 4.9 `@SolidEnvironment` field → `late final` + `context.read<T>()`
+
+Input:
+
+```dart
+class CounterDisplay extends StatelessWidget {
+  CounterDisplay({super.key});
+
+  @SolidEnvironment()
+  late Counter counter;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(counter.value.toString());
+  }
+}
+```
+
+Output (where `Counter` is a separate plain class with a `@SolidState int value = 0;` field — its own lowering follows Sections 4.1 and 8.3 plus the Section 10 `Disposable` marker rule):
+
+```dart
+class CounterDisplay extends StatefulWidget {
+  CounterDisplay({super.key});
+
+  @override
+  State<CounterDisplay> createState() => _CounterDisplayState();
+}
+
+class _CounterDisplayState extends State<CounterDisplay> {
+  late final counter = context.read<Counter>();
+
+  @override
+  Widget build(BuildContext context) {
+    return SignalBuilder(
+      builder: (context, child) {
+        return Text(counter.value.value.toString());
+      },
+    );
+  }
+}
+```
+
+Rules:
+
+1. **`late final ... = context.read<T>()` synthesis.** The annotated `late <T> <name>;` (or `late final <T> <name>;`) field becomes `late final <name> = context.read<<T>>();` on the synthesized State class (or in place on an existing `State<X>`). The type annotation is dropped in the lowered field — Dart infers it from `context.read<T>()`.
+
+2. **No `initState()` materialization splice.** Unlike `@SolidEffect` (Section 4.7), which has no other consumer and is force-materialized in `initState`, an `@SolidEnvironment` field IS the consumed value — any read inside `build`, an `@SolidEffect` body, a `@SolidState` getter (`Computed`) body, or a `@SolidQuery` body naturally triggers the late-final initializer. Lazy initialization is correct; the generator emits no bare-identifier read for the field.
+
+3. **`@SolidEffect` materialization is unchanged.** When the same class hosts both `@SolidEnvironment` and `@SolidEffect` declarations, the existing `@SolidEffect` materialization splice (Section 4.7) is unaffected. When the effect's late-final initializer runs and its body reads the env field, the env's own initializer fires transitively. No special interaction rule.
+
+4. **Class-kind forcing.** `@SolidEnvironment` reads `context`, which is only available on a `State<X>` instance. A source `StatelessWidget` that hosts at least one `@SolidEnvironment` field is split into a `StatefulWidget` + `State<X>` pair, identical to the existing `@SolidState` field-forcing rule in Section 8.1.
+
+5. **No host-side disposal.** The injected instance is owned by the providing `Provider<T>` (its `dispose:` callback). The host class never adds the env field to its dispose-name list (Section 10).
+
+6. **Cross-class reactive reads use the §5.1 type-driven rewrite.** When the consumer body reads `counter.value` where `counter` is a `@SolidEnvironment` field of type `Counter` and `Counter.value` resolves to `Signal<int>`, the chain becomes `counter.value.value` per Section 5.1. The §7 SignalBuilder placement rule wraps the enclosing subtree.
+
+7. **`Provider<T>(...)` and `.environment<T>(...)` calls are NOT rewritten.** When the source uses `Provider<T>(create: ..., child: ...)` directly OR chains `.environment<T>(...)` on a child widget, source and lib are byte-identical for those call expressions. The `.environment<T>()` extension's body is a runtime helper in `solid_annotations` that wraps in `Provider<T>` at call time; no codegen rewrite is needed.
+
+8. **Import-add.** When at least one `@SolidEnvironment` field exists in the output file, the generator emits `import 'package:provider/provider.dart' show ReadContext;`. See Section 9. Users list `provider` in their own pubspec because they reference `Provider<T>` / `MultiProvider` / `context.read<T>()` in their source code (per the `depend_on_referenced_packages` lint).
+
 ---
 
 ## 5. Reactive-Read Rules
@@ -567,11 +777,16 @@ When a generated piece of code (anything under `lib/`) references a reactive val
 
 ### 5.1 Identifier rewrite
 
-A bare `SimpleIdentifier` is rewritten to `<name>.value` if and only if its resolved static type is `SignalBase<T>` (or a subtype: `Signal<T>`, `Computed<T>`, `ReadSignal<T>`) from `package:flutter_solidart`.
+The rewrite is **type-driven and chain-aware**: any expression position whose resolved static type is `SignalBase<T>` or a subtype (`Signal<T>`, `Computed<T>`, `ReadSignal<T>`) from `package:flutter_solidart` receives a `.value` append at that position. The rule applies uniformly to:
 
-In M1 the only way to introduce such an identifier is via `@SolidState` on the enclosing class, but the rule itself is expressed in terms of resolved type so later milestones (`@SolidEnvironment`) work without amendment. `@SolidQuery` (Section 3.5) does NOT introduce a `SignalBase<T>` identifier at the call site: a query is invoked as a method call (`fetchData()`), and the lowered method returns `Resource<T>` (Section 4.8), which the call-site reads via the `.when` / `.maybeWhen` / `.refresh` / `.isRefreshing` extensions on `Resource<T>` from `solid_annotations`. The Section 5.1 `.value` rewrite does not apply to query call expressions.
+- Bare `SimpleIdentifier`s — same-class same-class `@SolidState` reads (M1 case).
+- `PrefixedIdentifier` and `PropertyAccess` chains of arbitrary depth — cross-class reactive reads (M6 case, e.g. an `@SolidEnvironment` field whose type carries `@SolidState` declarations).
 
-Source:
+For a chain `a.b.c.d` where any prefix resolves to a `SignalBase<T>`, the rewriter inserts `.value` at every such position. Example: if `a.b.c` resolves to `Signal<int>`, the chain becomes `a.b.c.value.d` (assuming `.d` is a member on `int`); if `a.b` resolves to `Signal<Foo>` and `Foo.c.d` is a plain non-reactive access, the chain becomes `a.b.value.c.d`.
+
+`@SolidQuery` (Section 3.5) does NOT introduce a `SignalBase<T>` identifier at the call site: a query is invoked as a method call (`fetchData()`), and the lowered method returns `Resource<T>` (Section 4.8), which the call-site reads via the `.when` / `.maybeWhen` / `.refresh` / `.isRefreshing` extensions on `Resource<T>` from `solid_annotations`. The Section 5.1 `.value` rewrite does not apply to query call expressions.
+
+Source (same-class, M1 case):
 
 ```dart
 Text(counter.toString())
@@ -582,6 +797,25 @@ Output (inside a SignalBuilder — see Section 7):
 ```dart
 Text(counter.value.toString())
 ```
+
+Source (cross-class via `@SolidEnvironment`, M6 case):
+
+```dart
+@SolidEnvironment() late Counter counter;
+// where Counter has `@SolidState() int value = 0;`
+// …
+Text(counter.value.toString())
+```
+
+Output:
+
+```dart
+Text(counter.value.value.toString())
+```
+
+The existing no-double-append guard (Section 5.4) prevents `.value.value.value` chains: once any chain position has been rewritten, the outer expression's type is the unboxed payload, so the rule stops applying. The shadowing rule (Section 5.5) applies — a local `value` of type `int` that shadows `counter.value` is not rewritten.
+
+Tracked-read offset collection (Section 7) records the OUTERMOST tracked position in each chain (the last `SignalBase` access), so `SignalBuilder` placement wraps the enclosing subtree as for same-class reads.
 
 ### 5.2 String interpolation rewrite
 
@@ -826,7 +1060,9 @@ If an outer widget and an inner widget both contain tracked reads, only the inne
 
 ## 8. Class-Kind Handling
 
-`@SolidState` can appear on classes of four kinds. Each is transformed differently. If a class has no `@SolidState` annotations, it passes through unchanged.
+`@SolidState`, `@SolidEffect`, `@SolidQuery`, and `@SolidEnvironment` can appear on classes of four kinds. Each is transformed differently. If a class has no Solid annotations, it passes through unchanged.
+
+`@SolidEnvironment` (Section 3.6) constrains the host-class set further: it is valid only on `StatelessWidget` and `State<X>` subclasses (Sections 8.1, 8.2). Plain classes (Section 8.3) are rejected because they lack a `BuildContext`. The `late final ... = context.read<T>();` lowering rule (Section 4.9) applies to whichever of 8.1 or 8.2 hosts the field.
 
 ### 8.1 StatelessWidget with ≥1 `@SolidState`
 
@@ -846,7 +1082,9 @@ class Counter extends StatelessWidget {
   int counter = 0;
 
   @override
-  Widget build(BuildContext context) => Text('$counter');
+  Widget build(BuildContext context) {
+    return Text('$counter');
+  }
 }
 ```
 
@@ -888,7 +1126,7 @@ No class rewriting. Reactive declarations and build rewriting happen in-place on
 
 ### 8.3 Plain class (no Widget superclass) with `@SolidState`
 
-Reactive declarations are applied in-place. A `dispose()` method is synthesized that disposes every generated Signal/Computed. No State wrapper.
+Reactive declarations are applied in-place. A `dispose()` method is synthesized that disposes every generated Signal/Computed. The class header gains `implements Disposable` per the Section 10 merge rule, and the synthesized `dispose()` carries `@override`. No State wrapper.
 
 Source:
 
@@ -902,16 +1140,19 @@ class Counter {
 Output:
 
 ```dart
-class Counter {
+class Counter implements Disposable {
   final value = Signal<int>(0, name: 'value');
 
+  @override
   void dispose() {
     value.dispose();
   }
 }
 ```
 
-If the developer has already declared a `dispose()` method, the generator merges: the generated disposal calls are prepended to the existing body, then `super.dispose()` is emitted if and only if the class's supertype chain contains a `dispose()` method (e.g., `State<T>`, `ChangeNotifier`). The generator determines this via the analyzer's type resolution, not by name matching. For a plain class with no `dispose()` in the supertype chain, `super.dispose()` is omitted.
+If the developer has already declared a `dispose()` method, the generator merges: the generated disposal calls are prepended to the existing body, then `super.dispose()` is emitted if and only if the class's supertype chain contains a `dispose()` method (e.g., `State<T>`, `ChangeNotifier`). The generator determines this via the analyzer's type resolution, not by name matching. For a plain class with no `dispose()` in the supertype chain, `super.dispose()` is omitted. The `Disposable` merge rule from Section 10 also applies to user-defined dispose: the synthesized reactive disposals are prepended; the user's body is preserved verbatim afterwards.
+
+`@SolidEnvironment` is NOT valid on a plain class — see Section 3.6 invalid-targets list.
 
 When the plain class has one or more `@SolidEffect` methods, the generator synthesizes a no-arg constructor whose body reads each Effect field by bare identifier in declaration order — analogue of the State class's `initState()` materialization (§4.7). The synthesized constructor takes the place a widget lifecycle would otherwise serve, activating each `late final` Effect at construction time so its autorun fires once with the initial Signal values and subscribes to subsequent changes. `@SolidQuery` fields are NOT materialized in the synthesized constructor — they are lazy by default and initialize on first thin-accessor invocation (Section 4.8). Plain classes with a user-defined constructor and `@SolidEffect` are not supported in this milestone — the generator rejects with a `CodeGenerationError`.
 
@@ -925,7 +1166,8 @@ Passes through unchanged to `lib/`.
 
 The generated `lib/` file's imports are computed from the source's imports plus what the generator added:
 
-- Add `import 'package:flutter_solidart/flutter_solidart.dart';` if the generated output references any of: `Signal`, `Computed`, `Effect`, `Resource`, `SignalBuilder`, `SolidartConfig`, `untracked`. (Effect, Resource, and `untracked` may appear via later milestones or opt-out rules in Section 6.4; they are listed here so the rule is future-proof.)
+- Add `import 'package:flutter_solidart/flutter_solidart.dart';` if the generated output references any of: `Signal`, `Computed`, `Effect`, `Resource`, `SignalBuilder`, `SolidartConfig`, `untracked`.
+- Add `import 'package:provider/provider.dart' show ReadContext;` if the generated output references any `context.read<T>()` call site — i.e., when at least one `@SolidEnvironment` field exists in the file (Section 4.9). If the source already imports `package:provider`, no second import is added; the existing one already exposes `ReadContext`.
 - Every other import in the source is preserved verbatim, including aliases and `show`/`hide` combinators.
 - Unused imports left behind (e.g., `package:solid_annotations/...` when no annotation references remain in the generated output) are removed by running `dart fix --apply` on the generated file. The generator does NOT try to detect unused imports itself.
 
@@ -940,6 +1182,104 @@ Every generated `Signal`, `Computed`, `Effect`, and `Resource` (including any sy
 Algorithm: if the target class already has a `dispose()` body, prepend one `xxx.dispose()` call per reactive declaration to the top of the body and leave the rest untouched; if no `dispose()` exists, synthesize one. Emit `super.dispose()` at the end if and only if the class's supertype chain contains a `dispose()` method (e.g., `State<T>`, `ChangeNotifier`); the generator determines this via the analyzer's type resolution, not by name matching. For a plain class with no `dispose()` in the supertype chain, omit `super.dispose()`.
 
 Disposal order is **reverse declaration order**: dependents are disposed before their dependencies. Because a `Computed` must always be declared after the `Signal`s it reads, an `Effect` must always be declared after the `Signal`s/`Computed`s it reads, and a `Resource` whose fetcher reads other reactive declarations must be declared after those declarations (those declarations are the dependents' dependencies), reverse declaration order guarantees a dependent (`Effect`, `Computed`, or `Resource`) is disposed first and a dependency (`Signal`, `Computed`, or another `Resource`) is never disposed while a live subscriber still holds a subscription to it. When a synthesized `_<name>Source` Record-Computed is emitted (multi-dep `@SolidQuery` only — see Section 4.8 rule 3), it is emitted immediately before the `_<name>` Resource it feeds, so reverse-order disposal tears the Resource down first, then the source Computed, then the underlying Signals.
+
+`@SolidEnvironment` fields (Section 3.6) are NOT included in the dispose-name list. The host class never owns the injected instance — the providing `Provider<T>` (via its own `dispose:` callback) is responsible for cleanup when the providing scope tears down.
+
+### `Disposable` marker interface (plain classes)
+
+Solid-lowered plain classes (Section 8.3) — every class with reactive declarations that gets a synthesized `dispose()` — declare `implements Disposable` in their lowered output and annotate the synthesized `dispose()` with `@override`. `Disposable` is exported from `solid_annotations` (Section 3.6). The marker is added BY THE GENERATOR: it appears only in the lowered `lib/` output, never in the user's source class. So the user does not see `implements Disposable` on their own source declaration and cannot rely on it for compile-time resolution inside source code.
+
+Practical consequence: a user who wants to wire `Provider<Counter>(dispose: (_, c) => c.dispose())` (or the `.environment<T>()` extension's `dispose:` argument) MUST manually declare a `void dispose()` method on the source-side `Counter` class, because the source-layer analyzer cannot see the generator-synthesized `dispose()`. The empty-body convention is fine — the dispose-body merge rule below prepends the synthesized reactive disposals to whatever the user wrote:
+
+```dart
+// source/
+class Counter {
+  @SolidState()
+  int value = 0;
+
+  void dispose() {}
+}
+```
+
+After lowering, the merged dispose body contains the prepended `value.dispose();` plus the user's empty body. At runtime, calling `c.dispose()` from the Provider callback runs the merged body.
+
+Merge rule for the implements clause:
+
+1. If the source class has NO `implements` clause, the lowering appends `implements Disposable` after any existing `extends` / `with` clauses (and before the class body).
+2. If the source class has an `implements <T1>, <T2>, ...` clause, the lowering appends `, Disposable` to the end of that list.
+3. If the source class already names `Disposable` (by simple identifier match) in its existing implements clause, no change is made; the synthesized `dispose()` still gets `@override`.
+
+Source:
+
+```dart
+class Counter implements Comparable<Counter> {
+  @SolidState() int value = 0;
+
+  @override
+  int compareTo(Counter other) => value - other.value;
+}
+```
+
+Output:
+
+```dart
+class Counter implements Comparable<Counter>, Disposable {
+  final value = Signal<int>(0, name: 'value');
+
+  @override
+  int compareTo(Counter other) => value.value - other.value.value;
+
+  @override
+  void dispose() {
+    value.dispose();
+  }
+}
+```
+
+`extends` and `with` clauses are preserved verbatim; only the `implements` list grows. The `compareTo` body's `value` reads receive the §5.1 same-class `.value` rewrite.
+
+### `dispose()` body merge (plain classes with user-defined dispose)
+
+When the source plain class has reactive declarations AND a user-defined `void dispose()` method, the synthesized reactive disposals (in reverse-declaration order) are PREPENDED to the user's body; the user's body is preserved verbatim afterwards. This parallels Section 14 item 4's existing rule for `State<X>`.
+
+Source:
+
+```dart
+class Counter implements Disposable {
+  @SolidState() int value = 0;
+
+  final StreamSubscription<void> _ticker = Stream<void>.periodic(
+    const Duration(seconds: 1),
+  ).listen((_) {});
+
+  @override
+  void dispose() {
+    unawaited(_ticker.cancel());
+    print('counter cleanup');
+  }
+}
+```
+
+Output:
+
+```dart
+class Counter implements Disposable {
+  final value = Signal<int>(0, name: 'value');
+
+  final StreamSubscription<void> _ticker = Stream<void>.periodic(
+    const Duration(seconds: 1),
+  ).listen((_) {});
+
+  @override
+  void dispose() {
+    value.dispose();
+    unawaited(_ticker.cancel());
+    print('counter cleanup');
+  }
+}
+```
+
+Plain classes have no `super.dispose()` to relocate (no superclass dispose chain unless the user wrote `extends Foo`, in which case the user's body already includes whatever super call they wrote, and the generator preserves it untouched).
 
 ---
 
@@ -989,10 +1329,9 @@ With Option A the developer saves `source/`, waits for build_runner to emit, the
 
 ## 13. Not yet shipped (deferred until later milestones, before v2 release)
 
-These features are part of the v2 public release but land in milestones after the SPEC's currently-specified set (`@SolidState` in M1, `@SolidEffect` in M4, `@SolidQuery` in M5). A build that encounters any of them in source code must fail with a clear error naming the unsupported feature and referencing this section.
+The v2 annotation surface is fully specified by this SPEC: `@SolidState` (M1), `@SolidEffect` (M4), `@SolidQuery` (M5), and `@SolidEnvironment` (M6). No annotation remains deferred.
 
-- `@SolidEnvironment`
-- `SolidProvider` / `InheritedSolidProvider` / `.environment()` widget extension / `context.read` / `context.watch`
+The provider-tree machinery uses `package:provider`'s `Provider<T>` directly (Section 3.6); Solid contributes only the `@SolidEnvironment` annotation, the `Disposable` marker interface, and a thin `.environment<T>()` extension on `Widget` that wraps in `Provider<T>` at runtime. Solid does NOT ship its own `SolidProvider` / `InheritedSolidProvider` widget, and does NOT codegen `context.watch<T>()` (Provider is used purely as DI plumbing — Solid's existing reactivity primitives own rebuild scope). Users install `package:provider` in their own app pubspec because their source code references `Provider<T>` / `MultiProvider` / `context.read<T>()` directly.
 
 Permanent non-goals (never part of Solid) are defined in Section 3.3.
 
@@ -1009,8 +1348,8 @@ These were open questions during SPEC drafting and have been answered by the dev
 1. **Plain (non-Widget) classes with `@SolidState` fields** — supported per Section 8.3.
 2. **Compound-assignment operator list in Section 5.3** — complete.
 3. **`@SolidState` on `final` fields** — rejected with a clear error (wrapping a never-reassigned value in a `Signal` is pointless).
-4. **Custom `initState` / `didUpdateWidget` overrides in an existing State class (Section 8.2)** — preserved untouched, with one carve-out: when one or more `@SolidEffect` methods exist on the class, Effect-materialization reads (`<effectName>;`) are spliced into the existing `initState` body immediately after the `super.initState();` call (or after the opening brace if no super call is detected as the first statement). `@SolidQuery` fields are NOT spliced — they are lazy and materialize on first thin-accessor invocation (Section 4.8). If an existing `dispose()` is present, reactive disposals are merged into its body (this part applies to all `Signal` / `Computed` / `Effect` / `Resource` declarations and to any synthesized `_<name>Source` Computed for query auto-tracking).
-5. **User-facing packages** — two packages. `package:solid_annotations` (runtime dep) hosts the annotation classes (`@SolidState`, `@SolidEffect`, and `@SolidQuery` today; `@SolidEnvironment` in a later milestone). `package:solid_generator` (dev_dep) hosts the build_runner builder. There is no `package:solid` umbrella. Consumers add `solid_annotations` + `flutter_solidart` as runtime deps and `solid_generator` + `build_runner` as dev_deps, then import annotations and `flutter_solidart` primitives directly.
+4. **Custom `initState` / `didUpdateWidget` overrides in an existing State class (Section 8.2)** — preserved untouched, with one carve-out: when one or more `@SolidEffect` methods exist on the class, Effect-materialization reads (`<effectName>;`) are spliced into the existing `initState` body immediately after the `super.initState();` call (or after the opening brace if no super call is detected as the first statement). `@SolidQuery` fields are NOT spliced — they are lazy and materialize on first thin-accessor invocation (Section 4.8). `@SolidEnvironment` fields are NOT spliced either — they are lazy and materialize on first read in `build` / Effect / Computed / Query bodies (Section 4.9). If an existing `dispose()` is present, reactive disposals are merged into its body (this part applies to all `Signal` / `Computed` / `Effect` / `Resource` declarations and to any synthesized `_<name>Source` Computed for query auto-tracking; `@SolidEnvironment` injected instances are NOT in the dispose-name list — Section 10).
+5. **User-facing packages** — two Solid packages plus two third-party runtime deps. `package:solid_annotations` (runtime dep) hosts the four annotation classes (`@SolidState`, `@SolidEffect`, `@SolidQuery`, `@SolidEnvironment`), the `Disposable` marker interface, the `@SolidQuery` source-time stub extensions, and the `.environment<T>()` extension on `Widget`. `package:solid_generator` (dev_dep) hosts the build_runner builder. There is no `package:solid` umbrella. Consumers run `flutter pub add solid_annotations flutter_solidart provider` and `dart pub add --dev solid_generator build_runner`. `flutter_solidart` and `provider` are listed in the user's own pubspec because the user's source code references their symbols directly (per the `depend_on_referenced_packages` lint). `solid_annotations` itself depends on `flutter` (the source-time stubs return `Widget`) and on `package:provider` (the `.environment<T>()` extension's body wraps in `Provider<T>`). It does NOT depend on `flutter_solidart` — the user's source layer never names solidart primitives directly; those types appear only in lowered `lib/` output where `flutter_solidart` is a separate user-listed runtime dep.
 6. **Shadowing rule (Section 5.5)** — handled by type resolution. Because Section 5.1 is type-driven, a shadowed local of a non-`SignalBase` type is never rewritten. A dedicated shadowing test case is required in M1.
 7. **`const` on the public widget constructor (Section 8.1)** — not added by the generator. Constructors round-trip verbatim from source. After the class split removes mutable `@SolidState` fields from the widget, the rewritten widget is usually const-eligible by Dart's own rules; `dart fix --apply` is the trusted lint pass that adds `const` (and removes unused imports — Section 9). The generator never emits `const` on its own.
 
