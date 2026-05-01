@@ -2359,7 +2359,7 @@ class _CounterDisplayState extends State<CounterDisplay> {
 
 **Dependencies:** M6-04.
 
-**Status:** TODO
+**Status:** DONE — golden fixture pair added; `_CounterDisplayState` emits `late final counter = context.read<Counter>();` then `late final logger = context.read<Logger>();` in source-declaration order. Per-field §5.1 cross-class rewrite locks `counter.value` → `counter.value.value` (wrapped in `SignalBuilder` per §7) while `logger.log('build')` is left untouched (non-`SignalBase` prefix). No generator code changes — covered by M6-03's source-order emission and M6-04's `_environmentFields` plumbing in `value_rewriter.dart`.
 
 ---
 

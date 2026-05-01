@@ -66,6 +66,7 @@ const List<String> goldenNames = <String>[
   'm6_03_simple_environment',
   'm6_04_cross_class_value_read',
   'm6_05_environment_on_state_class',
+  'm6_06_multi_environment',
 ];
 
 /// Memoized golden directory resolution. Resolved relative to the package
