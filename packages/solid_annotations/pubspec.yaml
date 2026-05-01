@@ -20,6 +20,7 @@ dependencies:
   flutter:
     sdk: flutter
   meta: ^1.16.0
+  provider: ^6.1.0
 
 dev_dependencies:
   very_good_analysis: ^10.0.0

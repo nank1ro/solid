@@ -12,7 +12,6 @@ dependencies:
   flutter:
     sdk: flutter
   flutter_solidart: ^2.7.3
-  provider: ^6.1.0
   solid_annotations:
     path: ../packages/solid_annotations
 
