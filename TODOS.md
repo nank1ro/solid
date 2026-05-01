@@ -2392,7 +2392,7 @@ class _CounterDisplayState extends State<CounterDisplay> {
 
 **Dependencies:** M6-03.
 
-**Status:** TODO
+**Status:** DONE — parametric rejection suite added at `packages/solid_generator/test/rejections/m6_07_invalid_environment_targets_test.dart` covering all 10 invalid-target cases (field with initializer, non-`late`, `final`-without-`late`, `static`, method, getter, setter, top-level variable, `SignalBase`-typed field, plain-class host). Each case has a minimal input fixture under `packages/solid_generator/test/golden/inputs/m6_07_*.dart`. No production-code changes — `validateSolidEnvironmentTargets` (target_validator.dart §3.6) and the plain-class defense-in-depth guard (plain_class_rewriter.dart) were already wired in M6-03. The `m6_07_final_field` fixture intentionally omits `= Counter()`: `late final` is the valid shape per SPEC §3.6, so the realistic mistake is forgetting `late` (`final Counter c;`); the `final && !isLate` check fires before the initializer check, so no synthetic value is needed. All prior goldens + rejection tests remain byte-identical.
 
 ---
 
