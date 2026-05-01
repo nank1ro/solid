@@ -1,4 +1,7 @@
 import 'package:flutter/widgets.dart';
+// `provider` is supplied by the user's pubspec (SPEC §3.6 install command);
+// `solid_annotations` does not declare it as a runtime dep.
+// ignore: depend_on_referenced_packages
 import 'package:provider/provider.dart';
 
 /// {@template SolidAnnotations.WidgetEnvironment}
