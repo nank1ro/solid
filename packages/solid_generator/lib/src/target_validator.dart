@@ -120,19 +120,57 @@ void _validateTopLevel(CompilationUnitMember decl) {
   }
 }
 
+// --- shared rejection / top-level walk for the article-form validators ---
+
+/// Throws a [ValidationError] for `@<annotationName>` on a [kind] of
+/// declaration. Picks the indefinite article from [kind]'s first letter so
+/// the message reads naturally ("a getter" vs "an abstract method").
+///
+/// Shared by the `@SolidEffect`, `@SolidQuery`, and `@SolidEnvironment`
+/// validators; `@SolidState` uses its own [_reject] helper because its SPEC
+/// §3.1 message form omits the article.
+Never _rejectArticleAnnotation(
+  String annotationName,
+  String codePrefix,
+  String kind,
+  String location,
+) {
+  final article = 'aeiouAEIOU'.contains(kind[0]) ? 'an' : 'a';
+  throw ValidationError(
+    '@$annotationName cannot be applied to $article $kind',
+    location,
+    '${codePrefix}_TARGET_${_kindCode(kind)}',
+  );
+}
+
+/// Shared top-level rejection walk for the article-form validators. Each
+/// one (`@SolidEffect` §3.4, `@SolidQuery` §3.5, `@SolidEnvironment` §3.6)
+/// classifies top-level declarations into variable/getter/setter/function
+/// with identical labels — only the annotation name and reject closure
+/// differ.
+void _validateTopLevelArticleAnnotation(
+  CompilationUnitMember decl,
+  String annotationName,
+  Never Function(String kind, String location) reject,
+) {
+  if (decl is TopLevelVariableDeclaration &&
+      findAnnotationByName(annotationName, decl.metadata) != null) {
+    reject('top-level variable', decl.variables.variables.first.name.lexeme);
+  }
+  if (decl is FunctionDeclaration &&
+      findAnnotationByName(annotationName, decl.metadata) != null) {
+    final name = decl.name.lexeme;
+    if (decl.isGetter) reject('top-level getter', name);
+    if (decl.isSetter) reject('top-level setter', name);
+    reject('top-level function', name);
+  }
+}
+
 // --- @SolidEffect target validator (SPEC §3.4) ---
 
 /// Throws a [ValidationError] for `@SolidEffect` on a [kind] of declaration.
-/// Picks the indefinite article from `kind`'s first letter so the message
-/// reads naturally ("a getter" vs "an abstract method").
-Never _rejectEffect(String kind, String location) {
-  final article = 'aeiouAEIOU'.contains(kind[0]) ? 'an' : 'a';
-  throw ValidationError(
-    '@SolidEffect cannot be applied to $article $kind',
-    location,
-    'INVALID_EFFECT_TARGET_${_kindCode(kind)}',
-  );
-}
+Never _rejectEffect(String kind, String location) =>
+    _rejectArticleAnnotation(solidEffectName, 'INVALID_EFFECT', kind, location);
 
 /// Rejects `@SolidEffect` on any field. The SPEC §3.4 bullet does not
 /// subdivide field kinds, so static and instance fields share the single
@@ -170,26 +208,9 @@ void _validateEffectMethod(MethodDeclaration method, String className) {
   }
 }
 
-/// Rejects `@SolidEffect` on top-level declarations: variables, getters,
-/// setters, and functions. The SPEC §3.4 bullet calls out "top-level function"
-/// — top-level getters/setters/variables share the same fail-fast path with
-/// per-kind labels.
-void _validateEffectTopLevel(CompilationUnitMember decl) {
-  if (decl is TopLevelVariableDeclaration &&
-      findAnnotationByName(solidEffectName, decl.metadata) != null) {
-    _rejectEffect(
-      'top-level variable',
-      decl.variables.variables.first.name.lexeme,
-    );
-  }
-  if (decl is FunctionDeclaration &&
-      findAnnotationByName(solidEffectName, decl.metadata) != null) {
-    final name = decl.name.lexeme;
-    if (decl.isGetter) _rejectEffect('top-level getter', name);
-    if (decl.isSetter) _rejectEffect('top-level setter', name);
-    _rejectEffect('top-level function', name);
-  }
-}
+/// Rejects `@SolidEffect` on top-level declarations (SPEC §3.4).
+void _validateEffectTopLevel(CompilationUnitMember decl) =>
+    _validateTopLevelArticleAnnotation(decl, solidEffectName, _rejectEffect);
 
 // --- @SolidQuery target validator (SPEC §3.5) ---
 
@@ -214,16 +235,8 @@ void validateSolidQueryTargets(CompilationUnit unit) => _walkUnit(
 );
 
 /// Throws a [ValidationError] for `@SolidQuery` on a [kind] of declaration.
-/// Picks the indefinite article from `kind`'s first letter so the message
-/// reads naturally ("a getter" vs "an abstract method").
-Never _rejectQuery(String kind, String location) {
-  final article = 'aeiouAEIOU'.contains(kind[0]) ? 'an' : 'a';
-  throw ValidationError(
-    '@SolidQuery cannot be applied to $article $kind',
-    location,
-    'INVALID_QUERY_TARGET_${_kindCode(kind)}',
-  );
-}
+Never _rejectQuery(String kind, String location) =>
+    _rejectArticleAnnotation(solidQueryName, 'INVALID_QUERY', kind, location);
 
 /// `@SolidQuery` on a class field is a valid target: the field initializer
 /// expression (e.g. `Future.value(0)`) becomes the Resource fetcher closure
@@ -278,23 +291,105 @@ void _validateQueryMethod(MethodDeclaration method, String className) {
   }
 }
 
-/// Rejects `@SolidQuery` on top-level declarations: variables, getters,
-/// setters, and functions. The SPEC §3.5 bullet calls out "top-level function"
-/// — top-level getters/setters/variables share the same fail-fast path with
-/// per-kind labels.
-void _validateQueryTopLevel(CompilationUnitMember decl) {
-  if (decl is TopLevelVariableDeclaration &&
-      findAnnotationByName(solidQueryName, decl.metadata) != null) {
-    _rejectQuery(
-      'top-level variable',
-      decl.variables.variables.first.name.lexeme,
+/// Rejects `@SolidQuery` on top-level declarations (SPEC §3.5).
+void _validateQueryTopLevel(CompilationUnitMember decl) =>
+    _validateTopLevelArticleAnnotation(decl, solidQueryName, _rejectQuery);
+
+// --- @SolidEnvironment target validator (SPEC §3.6) ---
+
+/// Validates every `@SolidEnvironment` annotation in [unit] against the SPEC
+/// Section 3.6 valid-target list. Throws [ValidationError] on the first
+/// invalid placement; returns silently when every annotation targets a
+/// valid declaration (a `late` instance field with no initializer, a
+/// non-`SignalBase` type, on a `StatelessWidget`/`StatefulWidget`/`State<X>`
+/// host).
+///
+/// Runs after [validateSolidQueryTargets] and before transformation so that
+/// misplaced `@SolidEnvironment` annotations (non-`late` fields, fields with
+/// initializers, `final`/`const`/`static` fields, methods/getters/setters,
+/// top-level functions, `SignalBase`-typed fields, plain-class hosts) never
+/// reach `readSolidEnvironmentField`, which would otherwise skip them
+/// silently or produce a confusing downstream error.
+///
+/// **M6-03 scope:** the canonical valid case (`late <T> name;` on a
+/// `StatelessWidget`/`State<X>`) falls through silently; comprehensive
+/// per-case error messages and codes ship in M6-07 (the rejection-test PR).
+/// The function structure is wired up here so M6-07 only needs to add cases.
+void validateSolidEnvironmentTargets(CompilationUnit unit) => _walkUnit(
+  unit,
+  onField: _validateEnvironmentField,
+  onMethod: _validateEnvironmentMethod,
+  onTopLevel: _validateEnvironmentTopLevel,
+);
+
+/// Throws a [ValidationError] for `@SolidEnvironment` on a [kind] of
+/// declaration.
+Never _rejectEnvironment(String kind, String location) =>
+    _rejectArticleAnnotation(
+      solidEnvironmentName,
+      'INVALID_ENVIRONMENT',
+      kind,
+      location,
     );
+
+/// Rejects `@SolidEnvironment` on a class field that is `static`, `const`,
+/// `final`-without-`late`, non-`late`, has an initializer, or is typed as a
+/// `SignalBase` shape (`Signal<…>` / `Computed<…>` / `Effect` / `Resource<…>`).
+/// Plain-class host detection lives separately in `rewritePlainClass`'s
+/// defense-in-depth check (the host-kind check needs the full class context
+/// the validator's `_walkUnit` doesn't provide). Instance non-final non-const
+/// non-static `late` fields with no initializer and a non-`SignalBase` type
+/// fall through silently — they are the canonical SPEC §3.6 valid target.
+///
+/// Order matters per SPEC §3.6 invalid-target enumeration: structural
+/// modifiers (`static` / `const` / `final` / non-`late`) are checked before
+/// initializer presence and type shape. A `static const Signal<int> c = …`
+/// reports as `'static field'` (the dominant placement violation) rather
+/// than `'SignalBase-typed field'`.
+void _validateEnvironmentField(FieldDeclaration field, String className) {
+  if (findAnnotationByName(solidEnvironmentName, field.metadata) == null) {
+    return;
   }
-  if (decl is FunctionDeclaration &&
-      findAnnotationByName(solidQueryName, decl.metadata) != null) {
-    final name = decl.name.lexeme;
-    if (decl.isGetter) _rejectQuery('top-level getter', name);
-    if (decl.isSetter) _rejectQuery('top-level setter', name);
-    _rejectQuery('top-level function', name);
+  final varList = field.fields;
+  final fieldName = varList.variables.first.name.lexeme;
+  final location = '$className.$fieldName';
+  if (field.isStatic) _rejectEnvironment('static field', location);
+  if (varList.isConst) _rejectEnvironment('const field', location);
+  // `late final` is allowed (the SPEC §3.6 bullet allows immutability on the
+  // injected reference); only `final` WITHOUT `late` is rejected.
+  if (varList.isFinal && !varList.isLate) {
+    _rejectEnvironment('final field', location);
+  }
+  if (!varList.isLate) _rejectEnvironment('non-late field', location);
+  final variable = varList.variables.first;
+  if (variable.initializer != null) {
+    _rejectEnvironment('field with initializer', location);
+  }
+  // Textual `SignalBase` detection on the unresolved AST. Per SPEC §3.6's
+  // contract that the user must import `flutter_solidart` to write the type
+  // at all, the lexeme prefix is sufficient at the validator boundary.
+  final type = varList.type;
+  if (type is NamedType && signalBaseTypeNames.contains(type.name.lexeme)) {
+    _rejectEnvironment('SignalBase-typed field', location);
   }
 }
+
+/// Rejects `@SolidEnvironment` on a getter, setter, or method. Static
+/// methods/getters/setters are caught by the same per-kind labels.
+void _validateEnvironmentMethod(MethodDeclaration method, String className) {
+  if (findAnnotationByName(solidEnvironmentName, method.metadata) == null) {
+    return;
+  }
+  final location = '$className.${method.name.lexeme}';
+  if (method.isGetter) _rejectEnvironment('getter', location);
+  if (method.isSetter) _rejectEnvironment('setter', location);
+  _rejectEnvironment('method', location);
+}
+
+/// Rejects `@SolidEnvironment` on top-level declarations (SPEC §3.6).
+void _validateEnvironmentTopLevel(CompilationUnitMember decl) =>
+    _validateTopLevelArticleAnnotation(
+      decl,
+      solidEnvironmentName,
+      _rejectEnvironment,
+    );

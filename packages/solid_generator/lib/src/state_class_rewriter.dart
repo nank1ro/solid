@@ -1,6 +1,7 @@
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:solid_generator/src/build_rewriter.dart';
 import 'package:solid_generator/src/effect_model.dart';
+import 'package:solid_generator/src/environment_model.dart';
 import 'package:solid_generator/src/field_model.dart';
 import 'package:solid_generator/src/getter_model.dart';
 import 'package:solid_generator/src/import_rewriter.dart';
@@ -40,6 +41,7 @@ RewriteResult rewriteStateClass(
   List<GetterModel> solidGetters,
   List<EffectModel> solidEffects,
   List<QueryModel> solidQueries,
+  List<EnvironmentModel> solidEnvironments,
   Map<String, Set<String>> classRegistry,
   String source,
 ) {
@@ -59,6 +61,9 @@ RewriteResult rewriteStateClass(
   // [solidQueries]; re-parsing here would double the annotation-reader cost
   // per file.
   final modelByName = {for (final f in solidFields) f.fieldName: f};
+  final envByName = {
+    for (final e in solidEnvironments) e.fieldName: e,
+  };
   final effectByName = {for (final e in solidEffects) e.methodName: e};
   final queryByName = {for (final q in solidQueries) q.methodName: q};
   final reactiveNames = modelByName.keys.toSet();
@@ -97,9 +102,19 @@ RewriteResult rewriteStateClass(
       if (model != null) {
         pieces.add(emitSignalField(model));
         disposeNames.add(model.fieldName);
-      } else {
-        pieces.add(source.substring(member.offset, member.end));
+        continue;
       }
+      final env = envByName[varName];
+      if (env != null) {
+        // Env fields lower to `late final … = context.read<T>();` in source-
+        // declaration order. They are NOT added to `disposeNames` (SPEC §10
+        // — host never owns disposal of injected instances) and NOT added to
+        // `effectNames` (SPEC §4.9 rule 2 — env fields are lazy and need no
+        // initState materialization).
+        pieces.add(emitEnvironmentField(env));
+        continue;
+      }
+      pieces.add(source.substring(member.offset, member.end));
       continue;
     }
     if (member is MethodDeclaration) {
@@ -175,7 +190,11 @@ RewriteResult rewriteStateClass(
   return (
     text: '$header{\n${pieces.join('\n\n')}\n}',
     solidartNames: <String>{
-      'Signal',
+      // SPEC §9 import-add gate: `Signal` is only emitted when the class
+      // has at least one `@SolidState` field. An env-only host (M6-05) has
+      // no Signal reference in lowered output and so does NOT pull in
+      // `flutter_solidart`.
+      if (solidFields.isNotEmpty) 'Signal',
       if (effectNames.isNotEmpty) 'Effect',
       // Queries emit `Resource<T>(...)` fields; their `<query>().when(...)`
       // call sites in `build` are wrapped in `SignalBuilder` by

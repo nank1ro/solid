@@ -1,5 +1,6 @@
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:solid_generator/src/effect_model.dart';
+import 'package:solid_generator/src/environment_model.dart';
 import 'package:solid_generator/src/field_model.dart';
 import 'package:solid_generator/src/getter_model.dart';
 import 'package:solid_generator/src/query_model.dart';
@@ -120,6 +121,14 @@ String emitResourceField(QueryModel q) {
     "name: '$debugName'",
   ].join(', ');
   return '  late final ${q.methodName} = $ctorName($args);';
+}
+
+/// Emits one `late final <fieldName> = context.read<<T>>();` line per
+/// `@SolidEnvironment` field (SPEC §4.9). Env fields are NEVER added to the
+/// dispose-name list (SPEC §10 — the providing `Provider<T>` owns disposal)
+/// and NEVER materialized in `initState` (SPEC §4.9 rule 2 — they're lazy).
+String emitEnvironmentField(EnvironmentModel e) {
+  return '  late final ${e.fieldName} = context.read<${e.typeText}>();';
 }
 
 /// Emits the synthesized Record-Computed source field for an `@SolidQuery`

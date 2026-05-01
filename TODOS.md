@@ -2166,7 +2166,7 @@ class Counter implements Disposable {
 - `packages/solid_generator/lib/src/target_validator.dart` — add `validateSolidEnvironmentTargets(CompilationUnit unit)` mirroring `validateSolidQueryTargets`. Rejects: non-`late` fields, fields with initializer, methods/getters/setters/top-level, `final`/`const`/`static` fields, `SignalBase`-typed fields, plain-class fields.
 - `packages/solid_generator/lib/builder.dart` — extend `_AnnotatedClass` to carry `final List<EnvironmentModel> environments;`; extend `_collectAnnotatedClasses`'s `FieldDeclaration` branch to call `readSolidEnvironmentField` after `readSolidStateField`. Pass `environments` through `_rewriteClass`.
 - `packages/solid_generator/lib/src/signal_emitter.dart` — add `String emitEnvironmentField(EnvironmentModel e)` returning `'late final ${e.fieldName} = context.read<${e.typeText}>();'`. The string is emitted in source-declaration order alongside Signal/Computed/Effect/Resource fields. Environment fields do NOT join the dispose-name list (Section 10).
-- `packages/solid_generator/lib/src/import_rewriter.dart` — when the output references `context.read<T>()`, add `import 'package:provider/provider.dart' show ReadContext;` (only if not already imported).
+- `packages/solid_generator/lib/src/import_rewriter.dart` — when the output references `context.read<T>()`, add `import 'package:provider/provider.dart';` (only if not already imported). The full library is imported (no `show` clause) so consumers can also call other provider APIs (`Provider<T>` / `MultiProvider` / `context.watch<T>()`) in the same file without a duplicate-import.
 - `packages/solid_generator/lib/src/stateless_rewriter.dart` — accept `solidEnvironments`. The presence of `@SolidEnvironment` forces the StatelessWidget→State split (already enforced by the §8.1 rule for `@SolidState`; treat `@SolidEnvironment` identically). Emit env fields interleaved in source order. NO initState splice for env fields.
 - `packages/solid_generator/lib/src/state_class_rewriter.dart` — accept `solidEnvironments`. Same emit shape; existing `initState` body is preserved byte-identically (no env splice).
 - `packages/solid_generator/lib/src/plain_class_rewriter.dart` — reject any `@SolidEnvironment` field with `CodeGenerationError("@SolidEnvironment on plain class is invalid — no BuildContext available")` (Section 3.6 invalid targets).
@@ -2199,7 +2199,7 @@ class HomePage extends StatelessWidget {
 ```dart
 import 'package:solid_annotations/solid_annotations.dart';
 import 'package:flutter/widgets.dart';
-import 'package:provider/provider.dart' show ReadContext;
+import 'package:provider/provider.dart';
 
 class Logger {
   void log(String message) => print(message);
@@ -2222,11 +2222,11 @@ class _HomePageState extends State<HomePage> {
 }
 ```
 
-**Acceptance:** `dart test --name=m6_03` passes; golden analyzes clean; `_HomePageState` has NO `initState()` override (env fields are lazy — Section 4.9 rule 2); `Logger` round-trips byte-identically (no annotations); `import 'package:provider/provider.dart' show ReadContext;` is added exactly once.
+**Acceptance:** `dart test --name=m6_03` passes; golden analyzes clean; `_HomePageState` has NO `initState()` override (env fields are lazy — Section 4.9 rule 2); `Logger` round-trips byte-identically (no annotations); `import 'package:provider/provider.dart';` is added exactly once (no `show` clause — full library imported so consumers can reference `Provider<T>` / `MultiProvider` / etc. in the same file without a duplicate-import).
 
 **Dependencies:** M6-01.
 
-**Status:** TODO
+**Status:** DONE
 
 ---
 

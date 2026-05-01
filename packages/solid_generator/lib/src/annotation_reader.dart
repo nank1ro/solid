@@ -1,5 +1,6 @@
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:solid_generator/src/effect_model.dart';
+import 'package:solid_generator/src/environment_model.dart';
 import 'package:solid_generator/src/field_model.dart';
 import 'package:solid_generator/src/getter_model.dart';
 import 'package:solid_generator/src/query_model.dart';
@@ -24,6 +25,23 @@ const String solidEffectName = 'SolidEffect';
 /// Name of the `@SolidQuery` annotation class. Same matching contract as
 /// [solidStateName] (textual on unresolved AST).
 const String solidQueryName = 'SolidQuery';
+
+/// Name of the `@SolidEnvironment` annotation class. Same matching contract
+/// as [solidStateName] (textual on unresolved AST).
+const String solidEnvironmentName = 'SolidEnvironment';
+
+/// Lexemes of the `flutter_solidart` types whose runtime classes extend
+/// `SignalBase<T>`. Matched textually on the unresolved AST per the
+/// [solidStateName] contract. Consumed by the target validator (rejecting
+/// `@SolidEnvironment` fields typed as one of these — SPEC §3.6) and by the
+/// M6-04 cross-class `.value` rewrite. Excludes `SignalBuilder` /
+/// `SolidartConfig` (those are non-`SignalBase` solidart names).
+const Set<String> signalBaseTypeNames = {
+  'Signal',
+  'Computed',
+  'Effect',
+  'Resource',
+};
 
 /// Lexeme of the `Future` return-type identifier on a `@SolidQuery` method.
 /// Matched textually on the unresolved AST per the same contract as
@@ -64,6 +82,29 @@ FieldModel? readSolidStateField(FieldDeclaration decl, String source) {
     // correctly classifies nested-nullable types like `List<int?>` as
     // non-nullable at the outer level (SPEC Section 4.3).
     isNullable: type?.question != null,
+  );
+}
+
+/// Reads a `@SolidEnvironment()` annotation on [decl] and returns an
+/// [EnvironmentModel], or `null` if no `@SolidEnvironment` annotation is
+/// present. Validation (`late` required, no initializer, non-`SignalBase`
+/// type, widget/state host) runs upstream in
+/// `validateSolidEnvironmentTargets`; this reader only extracts the textual
+/// name and type for `emitEnvironmentField` (SPEC §3.6 / §4.9).
+EnvironmentModel? readSolidEnvironmentField(
+  FieldDeclaration decl,
+  String source,
+) {
+  final annotation = findAnnotationByName(solidEnvironmentName, decl.metadata);
+  if (annotation == null) return null;
+
+  final varList = decl.fields;
+  final type = varList.type;
+  final variable = varList.variables.first;
+
+  return EnvironmentModel(
+    fieldName: variable.name.lexeme,
+    typeText: type == null ? '' : source.substring(type.offset, type.end),
   );
 }
 

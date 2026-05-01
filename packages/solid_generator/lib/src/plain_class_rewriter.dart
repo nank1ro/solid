@@ -1,5 +1,6 @@
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:solid_generator/src/effect_model.dart';
+import 'package:solid_generator/src/environment_model.dart';
 import 'package:solid_generator/src/field_model.dart';
 import 'package:solid_generator/src/getter_model.dart';
 import 'package:solid_generator/src/import_rewriter.dart';
@@ -60,6 +61,7 @@ RewriteResult rewritePlainClass(
   List<GetterModel> solidGetters,
   List<EffectModel> solidEffects,
   List<QueryModel> solidQueries,
+  List<EnvironmentModel> solidEnvironments,
   Map<String, Set<String>> classRegistry,
   String source,
 ) {
@@ -67,6 +69,19 @@ RewriteResult rewritePlainClass(
   // M2-01 ships getter→Computed for `StatelessWidget` only; reject here so
   // M1-14's valid-target pass isn't silently undone.
   rejectIfGettersNotYetSupported(solidGetters, 'plain class', className);
+  // SPEC §3.6: `@SolidEnvironment` requires a `BuildContext`, which only
+  // widget/state hosts provide — plain classes cannot resolve `context.read`.
+  // The user-facing rejection comes from `validateSolidEnvironmentTargets`;
+  // this is defense-in-depth to catch any path that bypasses validation
+  // (mirrors `readSolidEffectMethod`'s defensive `decl.isStatic` skip).
+  if (solidEnvironments.isNotEmpty) {
+    throw CodeGenerationError(
+      '@SolidEnvironment on plain class is invalid — '
+      'no BuildContext available',
+      null,
+      className,
+    );
+  }
   // Source-ordered emission so Signal fields, Effect fields, and Resource
   // fields interleave by declaration order — required by SPEC §10's
   // reverse-disposal rule (an Effect or Resource must be declared after the
