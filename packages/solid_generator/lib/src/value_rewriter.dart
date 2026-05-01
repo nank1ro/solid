@@ -89,6 +89,15 @@ bool _isOnPrefixedCallbackName(String name) {
 /// byte-identical because the lowered `<name>()` resolves through
 /// `Resource<T>.call() => state` to upstream extensions on `ResourceState<T>`.
 ///
+/// [classRegistry] is the cross-class reactivity map (class name → reactive
+/// field/getter names). M6-02 ships a single-level slice of SPEC §5.1's
+/// chain-aware rule: `<param>.<reactiveField>` shapes where `<param>` is a
+/// method parameter declared with a typed annotation that names a class in
+/// [classRegistry] receive a trailing `.value`. Full chains and arbitrary
+/// receivers (locals, fields, method-call results) are M6-04 — they require
+/// the resolved-AST migration mandated by SPEC §5.4. Empty registry =
+/// no-op for the new path; existing same-class behavior unchanged.
+///
 /// [node] is typically the `build()` `MethodDeclaration` (the M1-05 path) or
 /// the body expression of a `@SolidState` getter (the M2-01 path). Both share
 /// the same identifier-rewrite contract; only `build()` consumes
@@ -105,8 +114,13 @@ ValueRewriteResult collectValueEdits(
   Set<String> reactiveFields,
   String source, {
   Set<String> queryNames = const {},
+  Map<String, Set<String>> classRegistry = const {},
 }) {
-  final visitor = _ValueRewriteVisitor(reactiveFields, queryNames);
+  final visitor = _ValueRewriteVisitor(
+    reactiveFields,
+    queryNames,
+    classRegistry,
+  );
   node.accept(visitor);
   return ValueRewriteResult(
     visitor.edits,
@@ -149,7 +163,11 @@ const String _untrackedValueGetterName = 'untrackedValue';
 /// enclosing block. M3-09 replaces this heuristic with type-driven
 /// shadowing resolution.
 class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
-  _ValueRewriteVisitor(this._reactiveFields, this._queryNames);
+  _ValueRewriteVisitor(
+    this._reactiveFields,
+    this._queryNames,
+    this._classRegistry,
+  );
 
   final Set<String> _reactiveFields;
 
@@ -157,6 +175,11 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
   /// for a non-`build` body (M5-01 query-call detection only fires on
   /// `build`'s body, where SignalBuilder placement consumes the offsets).
   final Set<String> _queryNames;
+
+  /// Cross-class reactivity map (class name → reactive field/getter names).
+  /// Drives the single-level cross-class rewrite in [visitPrefixedIdentifier]
+  /// (M6-02 slice of SPEC §5.1). Empty map → cross-class branch no-ops.
+  final Map<String, Set<String>> _classRegistry;
   final List<ValueEdit> edits = [];
   final List<int> trackedReadOffsets = [];
 
@@ -259,7 +282,69 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
       // to the prefix, corrupting the replacement just emitted.
       return;
     }
+    // SPEC §5.1 cross-class single-level slice (M6-02): if the prefix is a
+    // method-parameter `SimpleIdentifier` whose declared type names a class
+    // in [_classRegistry] AND the suffix matches a reactive field on that
+    // class, append `.value`. M6-04 promotes this to the full type-driven
+    // chain rewrite via the resolved-AST migration. We keep this branch
+    // conservative — only `<param>.<field>` shapes — so the existing
+    // same-class goldens stay byte-identical.
+    if (_classRegistry.isNotEmpty) {
+      _maybeRewriteCrossClass(node);
+    }
     super.visitPrefixedIdentifier(node);
+  }
+
+  /// Single-level `<param>.<reactiveField>` cross-class rewrite — the M6-02
+  /// slice of SPEC §5.1's chain-aware rule. Appends `.value` when the prefix
+  /// is a method-parameter `SimpleIdentifier` whose declared type names a
+  /// class in [_classRegistry] AND the suffix matches a reactive field on
+  /// that class AND no shadow is in scope AND the no-double-append guard
+  /// (SPEC §5.4) does not fire. Records the chain's outermost offset as a
+  /// tracked read.
+  void _maybeRewriteCrossClass(PrefixedIdentifier node) {
+    if (_isShadowed(node.prefix.name)) return;
+    if (_isAccessedValueProperty(node.identifier)) return;
+    final declaredTypeName = _resolveParameterTypeName(node.prefix);
+    if (declaredTypeName == null) return;
+    final fieldsOfType = _classRegistry[declaredTypeName];
+    if (fieldsOfType == null) return;
+    if (!fieldsOfType.contains(node.identifier.name)) return;
+    edits.add(ValueEdit(node.end, node.end, '.value'));
+    if (_untrackedDepth == 0) {
+      trackedReadOffsets.add(node.offset);
+    }
+  }
+
+  /// If [prefix] resolves to a method/function parameter declared with a
+  /// [NamedType] annotation, returns that type's simple name (e.g. `'Counter'`
+  /// for `Counter other`). Returns `null` for parameter shapes the visitor
+  /// cannot reason about in parsed AST: function-typed parameters,
+  /// `var`-typed parameters, generic type-parameter receivers, and identifiers
+  /// that do not resolve to a parameter at all (locals, fields, etc.).
+  ///
+  /// M6-04 will replace this with a `staticType` lookup on the resolved AST
+  /// (SPEC §5.4 — "Name-matching, regex, or string heuristics are not
+  /// acceptable"). The parameter-only fallback ships M6-02's sub-case b
+  /// without dragging the resolved-AST migration into this PR.
+  String? _resolveParameterTypeName(SimpleIdentifier prefix) {
+    final method = prefix.thisOrAncestorOfType<MethodDeclaration>();
+    final fn = prefix.thisOrAncestorOfType<FunctionExpression>();
+    final params = method?.parameters?.parameters ?? fn?.parameters?.parameters;
+    if (params == null) return null;
+    for (final param in params) {
+      final inner = param is DefaultFormalParameter ? param.parameter : param;
+      if (inner.name?.lexeme != prefix.name) continue;
+      if (inner is SimpleFormalParameter) {
+        final type = inner.type;
+        if (type is NamedType) return type.name.lexeme;
+      }
+      // FieldFormalParameter (`this.foo`), FunctionTypedFormalParameter,
+      // and SuperFormalParameter (`super.foo`) all fall through — M6-02
+      // does not need them; M6-04 widens this when resolved AST lands.
+      return null;
+    }
+    return null;
   }
 
   @override

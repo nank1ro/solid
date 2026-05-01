@@ -1,3 +1,4 @@
+import 'package:analyzer/dart/ast/ast.dart';
 import 'package:solid_generator/src/effect_model.dart';
 import 'package:solid_generator/src/field_model.dart';
 import 'package:solid_generator/src/getter_model.dart';
@@ -212,28 +213,83 @@ void emitQueryFields(
 /// declared after the `Signal`s it reads) ahead of their dependencies in the
 /// dispose body.
 ///
-/// [inheritsDispose] is `true` when the owning class's supertype chain
-/// contains a `dispose()` method (e.g. `State<T>`, `ChangeNotifier`); the
-/// emitted method is then `@override` and ends with `super.dispose();`. For
-/// a plain class whose supertype is `Object`, pass `false` — neither
-/// annotation nor super-call is emitted (SPEC §8.3).
+/// [emitOverride] gates the `@override` annotation. Pass `true` when the
+/// emitted `dispose()` overrides a supertype declaration — either `State<T>`
+/// (whose supertype chain has `dispose()`) or `Disposable` (the
+/// `solid_annotations` marker interface that lowered plain classes implement
+/// per SPEC §10).
+///
+/// [emitSuperCall] gates the trailing `super.dispose();` line. Pass `true`
+/// only when the class's supertype chain actually contains a `dispose()`
+/// method to forward to (e.g. `State<T>`, `ChangeNotifier`). For a plain
+/// class whose supertype is `Object` and which `implements Disposable`,
+/// pass `false` — there is no super-`dispose()` to call.
 String emitDispose(
   List<String> disposeNamesInDeclarationOrder, {
-  required bool inheritsDispose,
+  required bool emitOverride,
+  required bool emitSuperCall,
 }) {
   final buffer = StringBuffer();
-  if (inheritsDispose) {
+  if (emitOverride) {
     buffer.writeln('  @override');
   }
   buffer.writeln('  void dispose() {');
   for (final name in disposeNamesInDeclarationOrder.reversed) {
     buffer.writeln('    $name.dispose();');
   }
-  if (inheritsDispose) {
+  if (emitSuperCall) {
     buffer.writeln('    super.dispose();');
   }
   buffer.write('  }');
   return buffer.toString();
+}
+
+/// Prepends one `<name>.dispose();` call per reactive declaration to the
+/// existing `dispose()` body's leading boundary, leaving the rest of the body
+/// untouched (SPEC §10 / §14 item 4).
+///
+/// Shared by `state_class_rewriter` and `plain_class_rewriter` so the
+/// dispose-body merge contract stays single-sourced. The user's source body
+/// — including any `@override` annotation, return type, and existing
+/// statements (e.g. `unawaited(_subscription.cancel());`) — is sliced
+/// verbatim from `source.substring(method.offset, method.end)` and a single
+/// `\n<disposals>` block is spliced immediately after the body's opening
+/// brace.
+///
+/// [disposeNamesInDeclarationOrder] is the unified, source-ordered list of
+/// reactive declarations (Signal field + Effect method + Resource query).
+/// Reverse-iterating it puts dependents (Effects, Resources) ahead of their
+/// dependencies (Signals, Computeds) in the merged dispose body — matching
+/// the unmerged [emitDispose] case.
+///
+/// Throws [CodeGenerationError] if the existing `dispose()` uses an
+/// expression body (`=> …`) — the merge is only well-defined for a block.
+String mergeDispose(
+  MethodDeclaration method,
+  List<String> disposeNamesInDeclarationOrder,
+  String source,
+  String className,
+) {
+  final body = method.body;
+  if (body is! BlockFunctionBody) {
+    throw CodeGenerationError(
+      'existing dispose() must have a block body for reactive merge',
+      null,
+      className,
+    );
+  }
+  final lbrace = body.block.leftBracket.offset;
+  // The original source after `{` already begins with `\n` (the body's first
+  // line break) on every reasonable formatting; prepending `\n<disposals>`
+  // yields a single blank-line-free splice, leaving the rest of the body
+  // byte-identical to the source. The `DartFormatter` pass normalises any
+  // residual whitespace.
+  final disposals = disposeNamesInDeclarationOrder.reversed
+      .map((name) => '    $name.dispose();')
+      .join('\n');
+  return '${source.substring(method.offset, lbrace + 1)}'
+      '\n$disposals'
+      '${source.substring(lbrace + 1, method.end)}';
 }
 
 /// Emits an `initState()` method that materializes every `late final` Effect

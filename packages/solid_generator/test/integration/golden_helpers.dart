@@ -58,6 +58,10 @@ const List<String> goldenNames = <String>[
   'm5_11_query_with_debounce',
   'm5_11_query_with_use_refreshing_false',
   'm5_11_query_with_debounce_and_use_refreshing_false',
+  'm6_02_implements_existing',
+  'm6_02_extends_with_implements',
+  'm6_02_already_disposable',
+  'm6_02_user_dispose_body',
 ];
 
 /// Memoized golden directory resolution. Resolved relative to the package
