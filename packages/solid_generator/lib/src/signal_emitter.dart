@@ -254,7 +254,11 @@ String emitDispose(
 /// statements (e.g. `unawaited(_subscription.cancel());`) — is sliced
 /// verbatim from `source.substring(method.offset, method.end)` and a single
 /// `\n<disposals>` block is spliced immediately after the body's opening
-/// brace.
+/// brace. When the user's source `dispose()` lacks `@override`, the
+/// generator prepends one: the merged dispose always overrides — either
+/// `Disposable.dispose()` (plain class — SPEC §10 marker rule) or the
+/// supertype's `dispose()` (`State<X>` — SPEC §14 item 4) — so the lowered
+/// output is lint-clean against `annotate_overrides`.
 ///
 /// [disposeNamesInDeclarationOrder] is the unified, source-ordered list of
 /// reactive declarations (Signal field + Effect method + Resource query).
@@ -287,7 +291,11 @@ String mergeDispose(
   final disposals = disposeNamesInDeclarationOrder.reversed
       .map((name) => '    $name.dispose();')
       .join('\n');
-  return '${source.substring(method.offset, lbrace + 1)}'
+  // Auto-add `@override` if the user omitted it — see the function-level
+  // doc comment for the SPEC contract.
+  final hasOverride = method.metadata.any((a) => a.name.name == 'override');
+  final overridePrefix = hasOverride ? '' : '@override\n  ';
+  return '$overridePrefix${source.substring(method.offset, lbrace + 1)}'
       '\n$disposals'
       '${source.substring(lbrace + 1, method.end)}';
 }

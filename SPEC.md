@@ -1242,6 +1242,8 @@ class Counter implements Comparable<Counter>, Disposable {
 
 When the source plain class has reactive declarations AND a user-defined `void dispose()` method, the synthesized reactive disposals (in reverse-declaration order) are PREPENDED to the user's body; the user's body is preserved verbatim afterwards. This parallels Section 14 item 4's existing rule for `State<X>`.
 
+When the user's source `dispose()` lacks an `@override` annotation, the generator prepends one — the merged dispose always overrides `Disposable.dispose()` (plain class) or the supertype's `dispose()` (`State<X>`). The typical user pattern is to write a plain `void dispose() { … }` in source (no `@override`, no `implements Disposable`); the generator adds both during lowering.
+
 Source:
 
 ```dart
