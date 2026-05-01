@@ -1,21 +1,25 @@
-// Rejection suite for M1-15: reserved annotations from SPEC §3.2 + §13.
-// Each case asserts that placing `@SolidEnvironment` anywhere in a source
-// file produces a build-time error quoting the SPEC §3.2 phrase verbatim.
-// `@SolidEffect` shipped in M4 and is no longer reserved (M4-06 /
-// pulled-into-M4-01); `@SolidQuery` shipped in M5 and is no longer reserved
-// (M5-01) — the former rejection case migrated to a positive M5-01 golden.
+// Marker test for M1-15 / M6-01: every shipped `@Solid*` annotation passes
+// `validateReservedAnnotations` without raising. If a future SPEC revision
+// re-reserves an annotation, the corresponding case here must be moved.
 
-import '../integration/golden_helpers.dart';
-
-const List<({String name, String errorContains})> _cases = [
-  (
-    name: 'm1_15_environment',
-    errorContains:
-        '@SolidEnvironment is not yet implemented; '
-        'scheduled for a later v2 milestone',
-  ),
-];
+import 'package:analyzer/dart/analysis/utilities.dart';
+import 'package:solid_generator/src/reserved_annotation_validator.dart';
+import 'package:test/test.dart';
 
 void main() {
-  runRejectionCases('m1_15 reserved annotations rejection', _cases);
+  group('m1_15', () {
+    test('shipped @Solid* annotations are not reserved', () {
+      final unit = parseString(
+        content: '''
+class Counter {
+  @SolidState() int n = 0;
+  @SolidEffect() void log() {}
+  @SolidQuery() Future<int> fetch() async => 0;
+  @SolidEnvironment() late int injected;
+}
+''',
+      ).unit;
+      expect(() => validateReservedAnnotations(unit), returnsNormally);
+    });
+  });
 }

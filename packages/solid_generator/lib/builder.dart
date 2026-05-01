@@ -72,10 +72,8 @@ class _SolidBuilder implements Builder {
       );
     }
 
-    // SPEC §3.2 + §13: reject reserved annotations (`@SolidQuery`,
-    // `@SolidEnvironment`) before any other pass so the user gets a fail-fast
-    // error instead of a silent passthrough. `@SolidEffect` shipped in M4 and
-    // is no longer reserved.
+    // SPEC §3.2 + §13 reserved-annotation guard. No-op at M6-01; preserved
+    // as a regression fence for future SPEC revisions.
     validateReservedAnnotations(parsed.unit);
     // SPEC §3.1 invalid-target guard. Must run before
     // `_collectAnnotatedClasses`; rejected targets (final / const / static
