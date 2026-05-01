@@ -65,9 +65,15 @@ class SolidQuery {
 }
 
 /// {@template SolidAnnotations.SolidEnvironment}
-/// Reserved. Full contract deferred to a later SPEC revision;
-/// see SPEC Section 3.2.
+/// Marks a `late` instance field as a dependency-injection binding.
+/// See SPEC Section 3.6.
+///
+/// The generator lowers `@SolidEnvironment() late T name;` to
+/// `late final name = context.read<T>();` in the produced `lib/` output.
+/// The host class must be a `StatelessWidget` or `State<X>` subclass.
+/// The annotation takes no parameters.
 /// {@endtemplate}
+@Target({TargetKind.field})
 class SolidEnvironment {
   /// {@macro SolidAnnotations.SolidEnvironment}
   const SolidEnvironment();

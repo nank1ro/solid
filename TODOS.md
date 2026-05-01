@@ -2029,7 +2029,7 @@ The `fetchName().when(...)` chain is byte-identical between input and output —
 
 **Dependencies:** M5-11 (the previous reserved-list trim landed in M5-01; M6-01 trims the last entry).
 
-**Status:** TODO
+**Status:** DONE
 
 ---
 
