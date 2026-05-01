@@ -53,6 +53,12 @@ class SourceEdit {
 /// SPEC §5.1's single-level `<param>.<reactiveField>` cross-class rewrite
 /// fires (M6-02). Empty map → no-op for the cross-class branch.
 ///
+/// [environmentFields] is the host class's `@SolidEnvironment` field map
+/// (`fieldName -> typeText`). Threaded through to the value-rewrite visitor
+/// so SPEC §5.1's M6-04 sibling slice fires for `<envField>.<reactiveField>`
+/// shapes when the env field's declared type names a class in
+/// [classRegistry]. Empty map → no-op for the env-field branch.
+///
 /// [source] is the full source text of the input file. The returned string
 /// is the rewritten build method (from `@override` through the closing `}`),
 /// ready for the caller to embed into the emitted `State` class.
@@ -62,6 +68,7 @@ String rewriteBuildMethod(
   String source, {
   Set<String> queryNames = const {},
   Map<String, Set<String>> classRegistry = const {},
+  Map<String, String> environmentFields = const {},
 }) {
   final methodStart = buildMethod.offset;
   final methodEnd = buildMethod.end;
@@ -73,6 +80,7 @@ String rewriteBuildMethod(
     source,
     queryNames: queryNames,
     classRegistry: classRegistry,
+    environmentFields: environmentFields,
   );
   final wrapNodes = computeWrapSet(
     buildMethod,

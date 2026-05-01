@@ -93,10 +93,16 @@ bool _isOnPrefixedCallbackName(String name) {
 /// field/getter names). M6-02 ships a single-level slice of SPEC §5.1's
 /// chain-aware rule: `<param>.<reactiveField>` shapes where `<param>` is a
 /// method parameter declared with a typed annotation that names a class in
-/// [classRegistry] receive a trailing `.value`. Full chains and arbitrary
-/// receivers (locals, fields, method-call results) are M6-04 — they require
-/// the resolved-AST migration mandated by SPEC §5.4. Empty registry =
-/// no-op for the new path; existing same-class behavior unchanged.
+/// [classRegistry] receive a trailing `.value`. M6-04 widens the receiver
+/// shape to also include `@SolidEnvironment late T name;` host-class fields
+/// via [environmentFields]. Full chains (`a.b.c.d` per SPEC §5.1) and
+/// arbitrary receivers (locals, method-call results) still require the
+/// resolved-AST migration mandated by SPEC §5.4 and remain deferred. Empty
+/// registry = no-op for the new path; existing same-class behavior unchanged.
+///
+/// [environmentFields] is the host class's `@SolidEnvironment` field map
+/// (`fieldName -> typeText`) — the M6-04 sibling slice of SPEC §5.1's
+/// cross-class rewrite. Empty map → no-op for the env-field branch.
 ///
 /// [node] is typically the `build()` `MethodDeclaration` (the M1-05 path) or
 /// the body expression of a `@SolidState` getter (the M2-01 path). Both share
@@ -115,11 +121,13 @@ ValueRewriteResult collectValueEdits(
   String source, {
   Set<String> queryNames = const {},
   Map<String, Set<String>> classRegistry = const {},
+  Map<String, String> environmentFields = const {},
 }) {
   final visitor = _ValueRewriteVisitor(
     reactiveFields,
     queryNames,
     classRegistry,
+    environmentFields,
   );
   node.accept(visitor);
   return ValueRewriteResult(
@@ -167,6 +175,7 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
     this._reactiveFields,
     this._queryNames,
     this._classRegistry,
+    this._environmentFields,
   );
 
   final Set<String> _reactiveFields;
@@ -180,6 +189,15 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
   /// Drives the single-level cross-class rewrite in [visitPrefixedIdentifier]
   /// (M6-02 slice of SPEC §5.1). Empty map → cross-class branch no-ops.
   final Map<String, Set<String>> _classRegistry;
+
+  /// Host-class `@SolidEnvironment` field map (`fieldName -> typeText`).
+  /// Drives the M6-04 sibling slice of SPEC §5.1: when the prefix of a
+  /// `<id>.<reactiveField>` chain is not a method parameter but matches an
+  /// env-field name on the enclosing class, the env field's declared type is
+  /// looked up in [_classRegistry] for the cross-class `.value` append.
+  /// Empty map → env-field branch no-ops; existing parameter-receiver
+  /// behavior (m6_02_*) is unchanged.
+  final Map<String, String> _environmentFields;
   final List<ValueEdit> edits = [];
   final List<int> trackedReadOffsets = [];
 
@@ -282,30 +300,35 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
       // to the prefix, corrupting the replacement just emitted.
       return;
     }
-    // SPEC §5.1 cross-class single-level slice (M6-02): if the prefix is a
-    // method-parameter `SimpleIdentifier` whose declared type names a class
-    // in [_classRegistry] AND the suffix matches a reactive field on that
-    // class, append `.value`. M6-04 promotes this to the full type-driven
-    // chain rewrite via the resolved-AST migration. We keep this branch
-    // conservative — only `<param>.<field>` shapes — so the existing
-    // same-class goldens stay byte-identical.
+    // SPEC §5.1 cross-class single-level slice (M6-02 + M6-04): if the prefix
+    // is a `SimpleIdentifier` resolving to either a method parameter (M6-02)
+    // OR a host-class `@SolidEnvironment` field (M6-04) whose declared type
+    // names a class in [_classRegistry] AND the suffix matches a reactive
+    // field on that class, append `.value`. Full type-driven chain support
+    // (`a.b.c.d` per SPEC §5.1) still requires the resolved-AST migration
+    // mandated by SPEC §5.4. We keep this branch conservative — only single
+    // `<receiver>.<field>` shapes — so the existing same-class goldens stay
+    // byte-identical.
     if (_classRegistry.isNotEmpty) {
       _maybeRewriteCrossClass(node);
     }
     super.visitPrefixedIdentifier(node);
   }
 
-  /// Single-level `<param>.<reactiveField>` cross-class rewrite — the M6-02
-  /// slice of SPEC §5.1's chain-aware rule. Appends `.value` when the prefix
-  /// is a method-parameter `SimpleIdentifier` whose declared type names a
-  /// class in [_classRegistry] AND the suffix matches a reactive field on
-  /// that class AND no shadow is in scope AND the no-double-append guard
-  /// (SPEC §5.4) does not fire. Records the chain's outermost offset as a
-  /// tracked read.
+  /// Single-level `<receiver>.<reactiveField>` cross-class rewrite — the
+  /// shipped slice of SPEC §5.1's chain-aware rule. The receiver type
+  /// resolves via [_resolveParameterTypeName] (M6-02 — method parameter)
+  /// then [_environmentFields] (M6-04 — `@SolidEnvironment` host-class
+  /// field); parameter wins because method parameters shadow host-class
+  /// fields in Dart and are not tracked by [_isShadowed] (which covers only
+  /// `visitFunctionExpression` and block-local declarations), so the lookup
+  /// ORDER carries the parameter-vs-field shadowing semantics here.
   void _maybeRewriteCrossClass(PrefixedIdentifier node) {
     if (_isShadowed(node.prefix.name)) return;
     if (_isAccessedValueProperty(node.identifier)) return;
-    final declaredTypeName = _resolveParameterTypeName(node.prefix);
+    final declaredTypeName =
+        _resolveParameterTypeName(node.prefix) ??
+        _environmentFields[node.prefix.name];
     if (declaredTypeName == null) return;
     final fieldsOfType = _classRegistry[declaredTypeName];
     if (fieldsOfType == null) return;
@@ -321,12 +344,18 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
   /// for `Counter other`). Returns `null` for parameter shapes the visitor
   /// cannot reason about in parsed AST: function-typed parameters,
   /// `var`-typed parameters, generic type-parameter receivers, and identifiers
-  /// that do not resolve to a parameter at all (locals, fields, etc.).
+  /// that do not resolve to a parameter at all (locals, fields, etc.). For
+  /// the host-class-field case (the M6-04 `@SolidEnvironment` shape), see
+  /// the sibling [_environmentFields] lookup in [_maybeRewriteCrossClass] —
+  /// kept as a separate branch so the parameter-vs-field resolution order
+  /// matches Dart's natural shadowing.
   ///
-  /// M6-04 will replace this with a `staticType` lookup on the resolved AST
-  /// (SPEC §5.4 — "Name-matching, regex, or string heuristics are not
-  /// acceptable"). The parameter-only fallback ships M6-02's sub-case b
-  /// without dragging the resolved-AST migration into this PR.
+  /// A future PR will replace this with a `staticType` lookup on the resolved
+  /// AST (SPEC §5.4 — "Name-matching, regex, or string heuristics are not
+  /// acceptable"). The parameter-only resolver ships M6-02's sub-case b
+  /// without dragging the resolved-AST migration into this PR; M6-04 widens
+  /// the receiver shape via [_environmentFields] without requiring resolved
+  /// AST either.
   String? _resolveParameterTypeName(SimpleIdentifier prefix) {
     final method = prefix.thisOrAncestorOfType<MethodDeclaration>();
     final fn = prefix.thisOrAncestorOfType<FunctionExpression>();

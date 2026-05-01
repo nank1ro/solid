@@ -2313,7 +2313,7 @@ class _CounterDisplayState extends State<CounterDisplay> {
 
 **Dependencies:** M6-02 (so `Counter` lowered output has `implements Disposable`), M6-03 (`@SolidEnvironment` lowering must be in place).
 
-**Status:** TODO
+**Status:** DONE — extends `_maybeRewriteCrossClass` in `value_rewriter.dart` with an `_environmentFields` fallback after `_resolveParameterTypeName`; threads the env-field map (`fieldName -> typeText`) from `stateless_rewriter.dart` / `state_class_rewriter.dart` through `rewriteBuildMethod` → `collectValueEdits`. Implementation stays name-based (consistent with M6-02's parameter-resolution slice); SPEC §5.4's full resolved-AST migration remains deferred. Golden `m6_04_cross_class_value_read` produces the SPEC §5.1 example (`counter.value` → `counter.value.value` wrapped in `SignalBuilder`); every prior golden + idempotency test stays byte-identical.
 
 ---
 

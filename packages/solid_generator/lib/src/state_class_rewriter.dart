@@ -79,6 +79,10 @@ RewriteResult rewriteStateClass(
   final queryNames = solidQueries.isEmpty
       ? const <String>{}
       : {for (final q in solidQueries) q.methodName};
+  // SPEC §5.1 M6-04 cross-class env-field receiver type map.
+  final environmentFields = solidEnvironments.isEmpty
+      ? const <String, String>{}
+      : {for (final e in solidEnvironments) e.fieldName: e.typeText};
   // Built incrementally during the walk so Signal field names, Effect method
   // names, and Query method names interleave in source-declaration order —
   // the contract `emitDispose` relies on for reverse-disposal correctness
@@ -127,6 +131,7 @@ RewriteResult rewriteStateClass(
             source,
             queryNames: queryNames,
             classRegistry: classRegistry,
+            environmentFields: environmentFields,
           ),
         );
       } else if (name == 'initState') {
