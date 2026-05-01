@@ -58,12 +58,17 @@ RewriteResult rewriteStatelessWidget(
     source,
   );
   final ctorsBlock = _emitCtors(members.ctors, source);
+  // SPEC §5.1 M6-04 cross-class env-field receiver type map.
+  final environmentFields = solidEnvironments.isEmpty
+      ? const <String, String>{}
+      : {for (final e in solidEnvironments) e.fieldName: e.typeText};
   final buildMethodText = rewriteBuildMethod(
     members.buildMethod,
     reactiveNames,
     source,
     queryNames: queryNames,
     classRegistry: classRegistry,
+    environmentFields: environmentFields,
   );
 
   final reactiveBlock = _emitReactiveBlock(
