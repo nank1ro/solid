@@ -1989,14 +1989,30 @@ The `fetchName().when(...)` chain is byte-identical between input and output —
 
 ### TODO M6-01 — `solid_annotations` package amendment: `@SolidEnvironment`, `Disposable`, `.environment<T>()`
 
-**Goal:** Land the user-facing surface of `@SolidEnvironment` in `solid_annotations`. Three additions: (a) the `@SolidEnvironment()` annotation class with `@Target({TargetKind.field})` and no parameters, (b) the `abstract interface class Disposable { void dispose(); }` marker interface, (c) the `.environment<T>()` extension on `Widget` that wraps `this` in `Provider<T>(create: ..., dispose: <auto>, child: this)`. Also remove `'SolidEnvironment'` from the generator's `_reservedAnnotations` map and migrate the `m1_15_environment` rejection case to a positive (no-op) golden — same pattern as M4-06 / M5-01. No new generator behavior in this PR; existing plain-class / state-class / stateless-widget rewriters keep treating `@SolidEnvironment` as not-yet-supported until M6-03 lands.
+**Goal:** Land the user-facing surface of `@SolidEnvironment` in `solid_annotations`. Three additions: (a) the `@SolidEnvironment()` annotation class with `@Target({TargetKind.field})` and no parameters, (b) the `abstract interface class Disposable { void dispose(); }` marker interface (consumed by the generator at M6-02 — the user's source class never declares it), (c) the `.environment<T>()` extension on `Widget`, a one-line pass-through that wraps `this` in `Provider<T>(create: create, dispose: dispose, child: this)`. `solid_annotations` gains `package:provider` as a runtime dep (the extension's body imports it). Users still list `provider` in their own pubspec because their source code uses `Provider<T>` / `context.read<T>()` / `MultiProvider` directly (per the `depend_on_referenced_packages` lint). Also remove `'SolidEnvironment'` from the generator's `_reservedAnnotations` map and migrate the `m1_15_environment` rejection case to a positive (no-op) marker test — same pattern as M4-06 / M5-01. No new generator behavior in this PR; existing plain-class / state-class / stateless-widget rewriters keep treating `@SolidEnvironment` as not-yet-supported until M6-03 lands.
 
-**SPEC references:** Section 3.6 (annotation, `Disposable` interface, `.environment<T>()` extension), Section 9 (no canonical-list change — `provider` is added per-file in M6-03), Section 14 item 5 (`solid_annotations` package surface amendment).
+**SPEC references:** Section 3.6 (annotation + `Disposable` interface + `.environment<T>()` extension), Section 9 (provider import-add rule applies per-file in M6-03), Section 14 item 5 (`solid_annotations` package surface amendment).
 
 **Files to create:**
 
 - `packages/solid_annotations/lib/src/disposable.dart` — `abstract interface class Disposable { void dispose(); }`. One file, ~5 lines.
-- `packages/solid_annotations/lib/src/environment_extension.dart` — `extension WidgetEnvironment on Widget { Widget environment<T extends Object>(T Function(BuildContext) create, {void Function(BuildContext, T)? dispose}) { return Provider<T>(create: create, dispose: dispose ?? (_, value) { if (value is Disposable) value.dispose(); }, child: this); } }`.
+- `packages/solid_annotations/lib/src/environment_extension.dart` — pass-through extension:
+
+  ```dart
+  import 'package:flutter/widgets.dart';
+  import 'package:provider/provider.dart';
+
+  extension WidgetEnvironment on Widget {
+    Widget environment<T extends Object>(
+      T Function(BuildContext) create, {
+      void Function(BuildContext, T)? dispose,
+    }) {
+      return Provider<T>(create: create, dispose: dispose, child: this);
+    }
+  }
+  ```
+
+  No `is Disposable` runtime check — the marker is invisible to user-source-side reasoning, so the extension does nothing magic with it.
 
 **Files to modify:**
 
@@ -2007,7 +2023,7 @@ The `fetchName().when(...)` chain is byte-identical between input and output —
 - `packages/solid_generator/test/rejections/m1_15_non_m1_annotations_test.dart` — delete the `m1_15_environment` case. The file's `_cases` list is now empty; replace the test with a marker test that asserts `_reservedAnnotations` is empty (regression fence: any future SPEC addition must update this test).
 - `packages/solid_generator/test/golden/inputs/m1_15_environment.dart` — delete (no longer a rejection input).
 
-**Expected implementation change:** Three small files added under `solid_annotations/lib/src/`, two existing files edited (annotations.dart, solid_annotations.dart export list), one pubspec dep added. Generator-side change is the reserved-list trim and rejection-test cleanup.
+**Expected implementation change:** Two small files added under `solid_annotations/lib/src/` (`disposable.dart`, `environment_extension.dart`), two existing files edited (annotations.dart, solid_annotations.dart export list), one pubspec dep added (`provider`). Generator-side change is the reserved-list trim and rejection-test cleanup.
 
 **Acceptance:** `dart analyze packages/solid_annotations` reports zero issues with the new `provider` dep. `dart test --name=m1_15` passes (now an empty-list assertion). `m1_15_environment.dart` no longer exists. The `@SolidEnvironment` annotation class accepts no constructor arguments. The `.environment<T>()` extension typechecks via inference — `widget.environment((_) => Counter())` resolves T = Counter without the `<Counter>` annotation. Existing golden tests still pass (no generator behavior changed for `@SolidState` / `@SolidEffect` / `@SolidQuery`).
 
@@ -2125,7 +2141,7 @@ class Counter implements Disposable {
 
 **Dependencies:** M6-01.
 
-**Implementation note:** This PR is purely a regression-fence + amendment to plain-class lowering. It does NOT introduce `@SolidEnvironment`-handling code yet. The new test goldens (b, c, d, e) exist as forward-compat for M6-04's auto-dispose flow.
+**Implementation note:** This PR is purely a regression-fence + amendment to plain-class lowering. It does NOT introduce `@SolidEnvironment`-handling code yet. The new test goldens (b, c, d, e) exist as forward-compat: once M6-04's cross-class type-driven rewrite lands, consumers passing Solid-lowered types via `Provider<T>(dispose: (_, c) => c.dispose())` rely on the lowered class having a `dispose()` method (and `implements Disposable` as the typed contract).
 
 **Status:** TODO
 
@@ -2376,7 +2392,7 @@ class _CounterDisplayState extends State<CounterDisplay> {
 
 ### TODO M6-08 — Rejection: same-class provide-and-consume
 
-**Goal:** A class that both consumes (`@SolidEnvironment() late T x;`) and provides the same `T` to its own subtree (via `Provider<T>` constructor or `.environment<T>()` extension call inside `build`) is rejected at build time with a clear error citing Section 3.6.
+**Goal:** A class that both consumes (`@SolidEnvironment() late T x;`) and provides the same `T` to its own subtree (via a `Provider<T>(...)` constructor call OR a `.environment<T>(...)` extension call inside its `build` body) is rejected at build time with a clear error citing Section 3.6.
 
 **SPEC references:** Section 3.6 "Same-class provide-and-consume rejection".
 
@@ -2388,7 +2404,7 @@ class _CounterDisplayState extends State<CounterDisplay> {
 
 **Files to modify:**
 
-- `packages/solid_generator/lib/src/target_validator.dart` (or a new validator file) — walk the host class's `build` body for `Provider<T>(...)` constructor calls and `.environment(...)` extension calls; resolve each call's type argument (or inferred return type of the closure); if any matches a `@SolidEnvironment` field's declared type on the same class, emit the rejection error.
+- `packages/solid_generator/lib/src/target_validator.dart` (or a new validator file) — walk the host class's `build` body for `Provider<T>(...)` constructor calls and `.environment(...)` extension calls; resolve each call's type argument (or, for `.environment(...)` with inferred T, the closure's resolved return type); if any matches a `@SolidEnvironment` field's declared type on the same class, emit the rejection error.
 
 **Acceptance:** both cases produce the rejection error; the message names both the env field and the offending Provider/`.environment` call site.
 
@@ -2398,20 +2414,22 @@ class _CounterDisplayState extends State<CounterDisplay> {
 
 ---
 
-### TODO M6-09 — Widget test: end-to-end `.environment<T>()` + `@SolidEnvironment` + auto-dispose
+### TODO M6-09 — Widget test: end-to-end `.environment<T>()` + `@SolidEnvironment` + dispose
 
-**Goal:** End-to-end test in `example/` exercising the full M6 flow. Setup: a test widget tree with `MyApp().environment((_) => Counter())` providing a Solid-lowered `Counter` (with `@SolidState int value = 0;`) to a child consumer (`@SolidEnvironment late Counter counter;`). Test scenarios: (a) tap a button → `counter.value++` mutates the Signal → SignalBuilder rebuilds the consumer; (b) navigate away from the provider scope → assert `Counter.dispose()` was invoked exactly once via the `Disposable` marker auto-dispose path. Parallel to M5-07 / M4-07 / M3-04.
+**Goal:** End-to-end test in `example/` exercising the full M6 flow. Setup: a test widget tree with `child.environment((_) => Counter(), dispose: (_, c) => c.dispose())` providing a Solid-lowered `Counter` (with `@SolidState int value = 0;` AND a manually-declared `void dispose() {}` source-side stub — required for the source layer's analyzer to resolve `c.dispose()`; the generator merges synthesized reactive disposals into the empty body per Section 10) to a child consumer (`@SolidEnvironment late Counter counter;`). Test scenarios: (a) tap a button → `counter.value++` mutates the Signal → SignalBuilder rebuilds the consumer; (b) tear down the provider scope → assert `Counter.dispose()` was invoked exactly once via the user-passed `dispose:` callback. Parallel to M5-07 / M4-07 / M3-04.
 
-**SPEC references:** Section 3.6 (`.environment<T>()` auto-dispose), Section 7 (SignalBuilder placement on cross-class read), Section 10 (`Disposable` marker semantics).
+**SPEC references:** Section 3.6 (`.environment<T>()` extension, `Disposable` marker contract, source-side `dispose()` requirement), Section 7 (SignalBuilder placement on cross-class read), Section 10 (synthesized dispose semantics + dispose-body merge for plain classes).
 
 **Files to create:**
 
 - `example/test/m6_09_environment_widget_test.dart`
 - `example/source/m6_09_environment_app.dart` (and the generated `example/lib/m6_09_environment_app.dart`).
 
-**Files to modify:** none.
+**Files to modify:**
 
-**Acceptance:** `flutter test example/test/m6_09_environment_widget_test.dart` passes; pump-and-settle assertions verify both the rebuild count and the dispose count.
+- `example/pubspec.yaml` — add `provider: ^6.1.0` (or current major) as a runtime dep. This is the first `example/` use of `provider`; consumer apps follow the same pattern.
+
+**Acceptance:** `flutter test example/test/m6_09_environment_widget_test.dart` passes; pump-and-settle assertions verify both the rebuild count and the dispose count. Test uses `.environment<T>()` form to exercise the extension's pass-through wrapper.
 
 **Dependencies:** M6-04, M6-06.
 
@@ -2419,18 +2437,19 @@ class _CounterDisplayState extends State<CounterDisplay> {
 
 ---
 
-### TODO M6-10 — Documentation cleanup: SPEC §13, README, environment.mdx
+### TODO M6-10 — Documentation cleanup: README, environment.mdx, install instructions
 
-**Goal:** Final cleanup PR. SPEC §13 already drops `@SolidEnvironment` and provider-tree machinery in this PR's SPEC update, but: README still mentions deferred annotations; the v1 `docs/src/content/docs/guides/environment.mdx` page still uses v1-flavored `SolidProvider` examples that don't lower correctly under v2. M6-10 brings these in sync.
+**Goal:** Final cleanup PR. SPEC §13 already drops `@SolidEnvironment` and provider-tree machinery in this PR's SPEC update, but: README still mentions deferred annotations and the install command (it should now mention `provider`); the v1 `docs/src/content/docs/guides/environment.mdx` page still uses v1-flavored `SolidProvider` examples that don't lower correctly under v2. M6-10 brings these in sync.
 
-**SPEC references:** Section 3.6 (the new `@SolidEnvironment` user-facing surface) — anchor for the docs rewrite.
+**SPEC references:** Section 3.6 (the new `@SolidEnvironment` user-facing surface, including the `.environment<T>()` extension and `Disposable` marker), Section 14 item 5 (install command — `flutter pub add solid_annotations flutter_solidart provider`).
 
 **Files to modify:**
 
-- `README.md` — update the annotation list (now four shipped annotations, none deferred).
-- `docs/src/content/docs/guides/environment.mdx` — rewrite examples to use v2 idioms: `Provider<Counter>(create: ...)` instead of `SolidProvider`, `.environment<T>()` extension with type inference, the `Disposable` marker for auto-dispose, the same-class provide-and-consume restriction.
+- `README.md` — update the annotation list (now four shipped annotations, none deferred). Update the install command to include `provider` (`flutter pub add solid_annotations flutter_solidart provider`).
+- `docs/src/content/docs/guides/environment.mdx` — rewrite examples to v2 idioms: show both the widget form `Provider<Counter>(create: ..., dispose: (_, c) => c.dispose(), child: ...)` from `package:provider` and the extension form `child.environment((_) => Counter(), dispose: (_, c) => c.dispose())` (a one-line pass-through provided by `solid_annotations`). Document that the `Disposable` marker is generator-only — it appears in lowered `lib/` output but not in user source — so users who want `dispose: (_, c) => c.dispose()` to typecheck MUST add an empty `void dispose() {}` stub on their source class (the generator merges synthesized reactive disposals into the empty body per Section 10). Show the minimal source pattern. Document the same-class provide-and-consume restriction. Drop any references to the deprecated v1 `SolidProvider`.
+- `docs/src/content/docs/installation.mdx` (or wherever install steps live) — update install command to list all three runtime deps.
 
-**Acceptance:** docs site builds clean. README's "what ships" matrix lists `@SolidEnvironment` as DONE.
+**Acceptance:** docs site builds clean. README's "what ships" matrix lists `@SolidEnvironment` as DONE. Install command shows three runtime deps. Both `.environment<T>()` and `Provider<T>` forms appear in the environment guide.
 
 **Dependencies:** M6-09.
 
