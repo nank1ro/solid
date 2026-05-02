@@ -6,67 +6,123 @@ sidebar:
 ---
 import { Aside } from '@astrojs/starlight/components';
 
-The `@SolidEnvironment()` annotation will inject a provider from the widget tree into your Solid widget. It's pure dependency injection managed by Solid.
+The `@SolidEnvironment()` annotation injects a value from the widget tree into your widget. It mirrors SwiftUI's `@Environment` property wrapper: type-keyed, lookup happens on first access, and any reactive `@SolidState` fields on the injected type stay reactive in your `build` method.
 
 ## Usage
 
-To work, you've to provide an instance of the class you want to allow to be injected using the `SolidProvider` widget.
+Annotate a `late` field with `@SolidEnvironment()` on a `StatelessWidget` or an existing `State<X>`:
 
-```dart {6-9} title="source/environment_example.dart"
-class EnvironmentExample extends StatelessWidget {
-  const EnvironmentExample({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return SolidProvider(
-      create: (context) => Counter(),
-      child: EnvironmentInjectionExample(),
-    );
-  }
-}
-```
-
-Alternatively, you can use the `environment` extension (like SwiftUI) to provide the instance:
-
-```dart {6} title="source/environment_example.dart"
-class EnvironmentExample extends StatelessWidget {
-  const EnvironmentExample({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return EnvironmentInjectionExample.environment((context) => Counter());
-  }
-}
-```
-
-Then you can inject the instance (from a descendant) in your widget using the `@Environment()` annotation:
-
-```dart {4-5} title="source/environment_example.dart"
-class EnvironmentInjectionExample extends StatelessWidget {
-  EnvironmentInjectionExample({super.key});
+```dart {4-5} title="source/counter_display.dart"
+class CounterDisplay extends StatelessWidget {
+  CounterDisplay({super.key});
 
   @SolidEnvironment()
   late Counter counter;
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Environment')),
-      body: Center(child: Text(counter.value.toString())),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => counter.value++,
-        child: const Icon(Icons.add),
+    return Center(child: Text('Counter is ${counter.value}'));
+  }
+}
+```
+
+`counter` is bound to the nearest ancestor `Provider<Counter>` in the widget tree on first access. Because `Counter.value` is a `@SolidState` field, the read is reactive: only the `Text` widget rebuilds when `counter.value` changes — the same fine-grained reactivity you'd get from a same-class `@SolidState` read.
+
+<Aside type="tip">
+The lookup is lazy. The field initializer runs the first time the field is read, so it works inside `build`, an `@SolidEffect`, an `@SolidQuery` body, or any other reactive context — no `initState` boilerplate.
+</Aside>
+
+## Providing the instance
+
+Two equivalent surfaces. The SwiftUI-flavoured `.environment<T>()` extension on `Widget`, shipped by `solid_annotations`:
+
+```dart {7-10} title="source/main.dart"
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      home: CounterDisplay().environment(
+        (_) => Counter(),
+        dispose: (_, c) => c.dispose(),
       ),
     );
   }
 }
 ```
 
-For instance the code for `Counter` is:
+The type argument is inferred from the closure's return type. Pass it explicitly only when you want consumers to read by a supertype:
 
-```dart title="source/environment_example.dart"
+```dart
+HomePage().environment<AuthService>((_) => RealAuthService())
+```
+
+Chained calls nest providers in declaration order:
+
+```dart
+HomePage()
+  .environment((_) => Counter(), dispose: (_, c) => c.dispose())
+  .environment((_) => Logger())
+```
+
+---
+
+Or `Provider<T>` directly from `package:provider`:
+
+```dart {9-13} title="source/main.dart"
+import 'package:provider/provider.dart';
+
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      home: Provider<Counter>(
+        create: (_) => Counter(),
+        dispose: (_, c) => c.dispose(),
+        child: CounterDisplay(),
+      ),
+    );
+  }
+}
+```
+
+To compose multiple providers, use `MultiProvider` from `package:provider`:
+
+```dart
+MultiProvider(
+  providers: [
+    Provider<Counter>(create: (_) => Counter(), dispose: (_, c) => c.dispose()),
+    Provider<Logger>(create: (_) => Logger()),
+  ],
+  child: CounterDisplay(),
+)
+```
+
+## Disposing the injected instance
+
+The host widget never disposes the injected instance — the providing scope owns disposal via the `dispose:` callback you pass to `.environment<T>()` or `Provider<T>`.
+
+Solid-generated classes implement a `Disposable` interface in the generated `lib/` output, so a synthesized `dispose()` is always available at runtime. But that interface is not visible from your `source/` files — Dart's analyzer only sees what you wrote in `source/`. To make `dispose: (_, c) => c.dispose()` typecheck, your source class needs to declare `void dispose()` itself.
+
+The minimal source pattern is an empty `void dispose() {}` stub. Solid merges the disposal of every reactive declaration on the class (`value.dispose();`, etc.) into the body in the generated output — you never write `value.dispose()` yourself.
+
+```dart {4} title="source/counter.dart"
 class Counter {
   @SolidState()
   int value = 0;
+  void dispose() {}
 }
+```
+
+<Aside type="note">
+If your dependency already has a cleanup method with a different name (`close()`, `cancel()`, `shutdown()`), wire that directly: `dispose: (_, c) => c.close()`. Solid does not constrain the cleanup-method name on non-Solid types.
+</Aside>
+
+Most apps never reference `Disposable` directly — it's a marker that documents which generated classes carry a `dispose()` method. If you want to consume it (for example, a runtime `is Disposable` check inside your own helper), import it from `solid_annotations`:
+
+```dart
+import 'package:solid_annotations/solid_annotations.dart' show Disposable;
 ```

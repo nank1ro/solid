@@ -23,10 +23,10 @@ import { Steps } from '@astrojs/starlight/components';
 2. Then, add the dependencies needed by running this command in your Flutter project
 
    ```bash
-   flutter pub add solid_annotations flutter_solidart 
+   flutter pub add solid_annotations flutter_solidart provider
    ```
    
-   [flutter_solidart](https://pub.dev/packages/flutter_solidart) is the state management library used by Solid, but you don't have to learn how to use it, Solid will generate all the boilerplate code for you.
+   [flutter_solidart](https://pub.dev/packages/flutter_solidart) is the state-management runtime that backs Solid's reactive primitives, and [provider](https://pub.dev/packages/provider) is the dependency-injection plumbing for `@SolidEnvironment`. You don't have to learn either directly — Solid generates the boilerplate that uses them — but they appear in the generated `lib/` output, so they need to be in your pubspec.
 
 3. I'd also suggest installing the [very_good_analysis](https://pub.dev/packages/very_good_analysis) package to get amazing linting rules for your Flutter project.
 

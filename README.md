@@ -18,6 +18,17 @@ The benefits of using Solid include:
 2. **No state management/dependency injection manual work**: Solid has built-in state management and dependency injection. Just annotate your variables and Solid takes care of the rest.
 3. **Fine-grained reactivity**: Solid's reactivity system is inspired by SolidJS, allowing for efficient and fine-grained updates to your UI. Only the parts of the UI that depend on changed state are updated, leading to better performance. And the best is that you don't have to think about it, Solid does it for you automatically.
 
+## Installation
+
+Add Solid's runtime deps to your Flutter app and install the generator:
+
+```bash
+flutter pub add solid_annotations flutter_solidart provider
+dart pub global activate solid_generator
+```
+
+See the [Getting Started Guide](https://solid.mariuti.com/guides/getting-started) for the full setup including recommended lints.
+
 ## Example
 
 You write this code, without any boilerplate and manual state management:
@@ -60,6 +71,15 @@ You get this result, with real fine-grained reactivity:
 As you can see, the `DateTime.now()` text does not update when the counter changes, only the `Counter is X` text updates. This is because Solid tracks which parts of the UI depend on which state, and only updates those parts when the state changes, without any manual work from you.
 
 If this sounds interesting, check out the [Getting Started Guide](https://solid.mariuti.com/guides/getting-started) to learn how to set up Solid in your Flutter project!
+
+## Annotations
+
+Solid ships four annotations:
+
+- **`@SolidState`** — declares reactive state on a field, or a derived value on a getter. See [State](https://solid.mariuti.com/guides/state).
+- **`@SolidEffect`** — runs a side effect whenever its tracked dependencies change. See [Effect](https://solid.mariuti.com/guides/effect).
+- **`@SolidQuery`** — wraps an async or stream call as a reactive resource with `.when(...)` UI states and refresh control. See [Query](https://solid.mariuti.com/guides/query).
+- **`@SolidEnvironment`** — injects a dependency from the nearest ancestor `Provider<T>` in the widget tree, SwiftUI `@Environment` style. See [Environment](https://solid.mariuti.com/guides/environment).
 
 ## License
 

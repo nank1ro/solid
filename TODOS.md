@@ -2443,6 +2443,6 @@ The static rejection conflated the legitimate override case (ancestor `Provider<
 
 **Dependencies:** M6-09.
 
-**Status:** TODO
+**Status:** DONE — README gains an `## Installation` block (`flutter pub add solid_annotations flutter_solidart provider` plus `dart pub global activate solid_generator`) and an `## Annotations` bullet list naming all four shipped annotations with deep links to their guides; `getting-started.mdx` step 2 install command extended to include `provider` with a one-line rationale paragraph; `environment.mdx` rewritten end-to-end (drops the v1 `SolidProvider` examples, fixes the `@Environment()` typo, restructures into three sections — `## Usage`, `## Providing the instance` showing both the `.environment<T>()` extension and `Provider<T>` widget forms with explicit `dispose:` callbacks plus a `MultiProvider` snippet, and a new `## Disposing the injected instance` section documenting the generated-only `Disposable` marker contract and the empty `void dispose() {}` source-stub pattern). User-facing docs contain no SPEC or milestone references. No code changes; SPEC §3.6 / §13 / §14 item 5 unchanged.
 
 ---
