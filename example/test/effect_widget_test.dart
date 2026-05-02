@@ -111,6 +111,10 @@ class _EffectCounterPageState extends State<_EffectCounterPage> {
   @override
   void initState() {
     super.initState();
+    // Materializes the `late final` Effect — the generator emits this exact
+    // pattern (SPEC §3.4 force-materialize) for late-final Effects. The
+    // statement is intentional even though the analyzer cannot tell.
+    // ignore: unnecessary_statements
     recordHistory;
   }
 
