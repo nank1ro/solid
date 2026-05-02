@@ -1,6 +1,5 @@
 ## 2.0.0
 
-- **FEAT**: Lowering for all four v2 annotations (`@SolidState`, `@SolidEffect`, `@SolidQuery`, `@SolidEnvironment`).
 - **FEAT**: SignalBuilder placement, `.value` rewrite, dispose synthesis, StatelessWidget→StatefulWidget split.
 - **FEAT**: Computed synthesis from getter form of `@SolidState`.
 - **FEAT**: Fine-grained reactivity with untracked-read semantics (`.untracked`).
