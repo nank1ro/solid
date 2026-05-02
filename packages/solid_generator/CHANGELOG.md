@@ -1,3 +1,12 @@
+## 2.0.0
+
+- **FEAT**: SignalBuilder placement, `.value` rewrite, dispose synthesis, StatelessWidget→StatefulWidget split.
+- **FEAT**: Computed synthesis from getter form of `@SolidState`.
+- **FEAT**: Fine-grained reactivity with untracked-read semantics (`.untracked`).
+- **FEAT**: Effect lowering with `initState` materialization for State and plain-class targets.
+- **FEAT**: Resource lowering for Future/Stream with `.when()` / `.refresh()` call-site preservation.
+- **FEAT**: Environment field synthesis with Provider-backed DI and cross-class chain rewrites.
+
 ## 1.0.3
 
 - **FIX**: Missing `flutter_solidart` import in generated `main.dart` file, if no reactive annotations are used.

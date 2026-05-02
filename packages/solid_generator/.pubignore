@@ -1,0 +1,7 @@
+# Exclude test fixtures and goldens from the published archive.
+# The golden outputs under test/golden/outputs/ are expected-output snapshots
+# of generator runs and intentionally import flutter / flutter_solidart, which
+# are not declared as deps of solid_generator (they belong to consumer apps).
+# Shipping them would trigger pub.dev import-validation warnings without
+# adding any value for downstream users — they don't run the generator's tests.
+test/
