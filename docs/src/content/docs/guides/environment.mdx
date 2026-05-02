@@ -76,7 +76,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      home: Provider<Counter>(
+      home: Provider(
         create: (_) => Counter(),
         child: CounterDisplay(),
       ),
@@ -90,8 +90,8 @@ To compose multiple providers, use `MultiProvider` from `package:provider`:
 ```dart
 MultiProvider(
   providers: [
-    Provider<Counter>(create: (_) => Counter()),
-    Provider<Logger>(create: (_) => Logger()),
+    Provider(create: (_) => Counter()),
+    Provider(create: (_) => Logger()),
   ],
   child: CounterDisplay(),
 )
