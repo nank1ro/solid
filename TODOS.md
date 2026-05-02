@@ -2396,27 +2396,11 @@ class _CounterDisplayState extends State<CounterDisplay> {
 
 ---
 
-### TODO M6-08 — Rejection: same-class provide-and-consume
+### TODO M6-08 — DROPPED: same-class provide-and-consume is allowed
 
-**Goal:** A class that both consumes (`@SolidEnvironment() late T x;`) and provides the same `T` to its own subtree (via a `Provider<T>(...)` constructor call OR a `.environment<T>(...)` extension call inside its `build` body) is rejected at build time with a clear error citing Section 3.6.
+**Status:** DROPPED. Originally a rejection of any class that both consumes a type via `@SolidEnvironment late T x;` AND provides the same `T` in its own `build` body (via `Provider<T>(...)` or `.environment<T>(...)`). Re-evaluated against Flutter's actual provider semantics: `context.read<T>()` walks **ancestors only**, so a class's own `build`-body `Provider<T>` is part of its **subtree** (an override exposed to descendants), never visible to the class's own consumer. The pattern is the standard Flutter scoped-override idiom — wrapper widgets that consume a parent theme/service and expose a localized variant to children, scoped service mocks in tests, etc. Legitimate, not a self-trap.
 
-**SPEC references:** Section 3.6 "Same-class provide-and-consume rejection".
-
-**Files to create:**
-
-- `packages/solid_generator/test/rejections/m6_08_same_class_provide_consume_test.dart` — two cases: one with `Provider<T>(...)` in build, one with `.environment<T>(...)` in build.
-- `packages/solid_generator/test/golden/inputs/m6_08_provider_widget.dart`
-- `packages/solid_generator/test/golden/inputs/m6_08_environment_extension.dart`
-
-**Files to modify:**
-
-- `packages/solid_generator/lib/src/target_validator.dart` (or a new validator file) — walk the host class's `build` body for `Provider<T>(...)` constructor calls and `.environment(...)` extension calls; resolve each call's type argument (or, for `.environment(...)` with inferred T, the closure's resolved return type); if any matches a `@SolidEnvironment` field's declared type on the same class, emit the rejection error.
-
-**Acceptance:** both cases produce the rejection error; the message names both the env field and the offending Provider/`.environment` call site.
-
-**Dependencies:** M6-03.
-
-**Status:** TODO
+The static rejection conflated the legitimate override case (ancestor `Provider<T>` exists; consumer reads ancestor; `build`-body `Provider<T>` overrides the subtree) with the no-ancestor case (no ancestor; consumer trips `ProviderNotFoundException` at runtime). The validator cannot distinguish the two without resolved widget-tree context, so blanket-rejecting both was an over-restriction. SPEC §3.6's "Same-class provide-and-consume rejection" subsection was rewritten to "Same-class provide-and-consume is allowed" with a note about the runtime trap when no ancestor exists. Test driver `m6_08_same_class_provide_consume_test.dart` and both input fixtures (`m6_08_provider_widget.dart`, `m6_08_environment_extension.dart`) deleted; `validateSolidEnvironmentSameClassProvideAndConsume` and the `_ProvideConsumeDetector` visitor reverted out of `target_validator.dart`; the call site in `builder.dart` reverted. M6-09 and M6-10 do not depend on M6-08 and remain on track.
 
 ---
 
@@ -2452,7 +2436,7 @@ class _CounterDisplayState extends State<CounterDisplay> {
 **Files to modify:**
 
 - `README.md` — update the annotation list (now four shipped annotations, none deferred). Update the install command to include `provider` (`flutter pub add solid_annotations flutter_solidart provider`).
-- `docs/src/content/docs/guides/environment.mdx` — rewrite examples to v2 idioms: show both the widget form `Provider<Counter>(create: ..., dispose: (_, c) => c.dispose(), child: ...)` from `package:provider` and the extension form `child.environment((_) => Counter(), dispose: (_, c) => c.dispose())` (a one-line pass-through provided by `solid_annotations`). Document that the `Disposable` marker is generator-only — it appears in lowered `lib/` output but not in user source — so users who want `dispose: (_, c) => c.dispose()` to typecheck MUST add an empty `void dispose() {}` stub on their source class (the generator merges synthesized reactive disposals into the empty body per Section 10). Show the minimal source pattern. Document the same-class provide-and-consume restriction. Drop any references to the deprecated v1 `SolidProvider`.
+- `docs/src/content/docs/guides/environment.mdx` — rewrite examples to v2 idioms: show both the widget form `Provider<Counter>(create: ..., dispose: (_, c) => c.dispose(), child: ...)` from `package:provider` and the extension form `child.environment((_) => Counter(), dispose: (_, c) => c.dispose())` (a one-line pass-through provided by `solid_annotations`). Document that the `Disposable` marker is generator-only — it appears in lowered `lib/` output but not in user source — so users who want `dispose: (_, c) => c.dispose()` to typecheck MUST add an empty `void dispose() {}` stub on their source class (the generator merges synthesized reactive disposals into the empty body per Section 10). Show the minimal source pattern. Drop any references to the deprecated v1 `SolidProvider`.
 - `docs/src/content/docs/installation.mdx` (or wherever install steps live) — update install command to list all three runtime deps.
 
 **Acceptance:** docs site builds clean. README's "what ships" matrix lists `@SolidEnvironment` as DONE. Install command shows three runtime deps. Both `.environment<T>()` and `Provider<T>` forms appear in the environment guide.
