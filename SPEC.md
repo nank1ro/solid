@@ -395,14 +395,11 @@ Exported from `solid_annotations`. The `implements Disposable` clause is added b
 
 Users may implement `Disposable` directly on their own non-Solid classes if they want to signal the same contract for their own dispose helpers (e.g., a runtime `is Disposable` check inside a custom callback). No Solid surface consumes the marker automatically — it is purely a typed contract that documents which generator-emitted classes carry a `dispose()` method.
 
-#### Same-class provide-and-consume rejection
+#### Same-class provide-and-consume is allowed
 
-A class that both consumes (`@SolidEnvironment() late T x;`) and provides the same `T` to its own subtree (via a `Provider<T>(...)` constructor call OR a `.environment<T>(...)` extension call in its `build` body) is rejected at build time. The error names both declarations and suggests the SwiftUI-idiomatic resolutions:
+A class may both consume a type (`@SolidEnvironment() late T x;`) and provide the same `T` to its own subtree (via `Provider<T>(...)` or `.environment<T>(...)` in its `build` body). The consumer reads the nearest **ancestor** `Provider<T>` (not the one this class returns from `build`, which is part of its subtree); the class's own `Provider<T>` overrides `T` for its descendants only. This is the standard Flutter override pattern (e.g., a wrapper that consumes a global theme/service and exposes a localized variant to its children) and matches `package:provider`'s scoping semantics.
 
-- Move the consumer to a child widget.
-- Own the instance locally with `@SolidState() late T x = T(...);` instead.
-
-This matches SwiftUI: `.environment(value)` provides to the modified view's subtree, not the modifying view itself, so a self-read traps at runtime in SwiftUI too. Solid rejects statically.
+If no ancestor `Provider<T>` exists, the consumer's `context.read<T>()` raises `ProviderNotFoundException` at runtime. The generator does not statically reject this shape: the fix is "ensure an ancestor exists" or "switch to `@SolidState() late T x = T(...);`" — neither of which can be inferred at the validator boundary without resolved widget-tree context.
 
 #### `context.watch<T>()` is not used by Solid
 
