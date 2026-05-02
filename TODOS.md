@@ -2446,3 +2446,32 @@ The static rejection conflated the legitimate override case (ancestor `Provider<
 **Status:** DONE — README gains an `## Installation` block (`flutter pub add solid_annotations flutter_solidart provider` plus `dart pub global activate solid_generator`) and an `## Annotations` bullet list naming all four shipped annotations with deep links to their guides; `getting-started.mdx` step 2 install command extended to include `provider` with a one-line rationale paragraph; `environment.mdx` rewritten end-to-end (drops the v1 `SolidProvider` examples, fixes the `@Environment()` typo, restructures into three sections — `## Usage`, `## Providing the instance` showing both the `.environment<T>()` extension and `Provider<T>` widget forms with explicit `dispose:` callbacks plus a `MultiProvider` snippet, and a new `## Disposing the injected instance` section documenting the generated-only `Disposable` marker contract and the empty `void dispose() {}` source-stub pattern). User-facing docs contain no SPEC or milestone references. No code changes; SPEC §3.6 / §13 / §14 item 5 unchanged.
 
 ---
+
+## M7 — Operational: CI workflow
+
+M7 ships the operational scaffolding deferred from SPEC §13. The v2 annotation surface (M1, M4, M5, M6) is closed; M7 adds the CI safety net that runs the M6 exit-criteria verification commands on every PR and every push to `main`.
+
+---
+
+### TODO M7-01 — GitHub Actions CI workflow with cached Flutter SDK
+
+**Goal:** Port the six M6-environment.md exit-criteria verification commands into `.github/workflows/ci.yml`. Single `build` job on `ubuntu-latest`. Triggers: `pull_request` (any branch) and `push` to `main`, both filtered by `paths-ignore: ["**.md"]` so doc-only commits skip CI. Concurrency block (`group: ${{ github.head_ref || github.run_id }}`, `cancel-in-progress: true`) cancels superseded runs on the same PR. Flutter SDK + pub cache restored on subsequent runs via `subosito/flutter-action@v2`'s `cache: true`. Both `dart-lang/setup-dart@v1` and `subosito/flutter-action@v2` installed (mirrors the developer-supplied reference workflow). Test reporter `-r github` on `dart test` and `flutter test` for inline GitHub annotations on failures; `--fail-fast` on `dart test` (`flutter test` does not accept the flag). No coverage / Codecov.
+
+**SPEC references:** Section 13 (CI workflow — the only deferred operational concern; "until GitHub Actions budget permits" — `nank1ro/solid` is public, Actions unmetered, budget non-issue).
+
+**Files to create:**
+
+- `.github/workflows/ci.yml`
+- `plans/features/m7-ci.md`
+
+**Files to modify:**
+
+- `TODOS.md` — add this `## M7` section + this M7-01 entry; flip Status to DONE in the same PR.
+
+**Acceptance:** Workflow file present and parses cleanly. A representative PR shows the `CI / build` check green with all seven step lines passing. Second push to the same PR shows `Cache hit: true` on the `Setup Flutter` step (setup completes in <10s vs ~60s on first run). Pure-`.md` commit on a separate branch does NOT trigger the workflow. Two commits pushed in quick succession on the same PR branch result in the first run being cancelled and only the second completing. Six M6 verification commands (`dart format --set-exit-if-changed .`, `dart analyze --fatal-infos`, `dart analyze packages/solid_generator/test/golden/outputs/`, `dart analyze packages/solid_annotations`, `dart test packages/solid_generator/`, `flutter test example/`) all run as workflow steps.
+
+**Dependencies:** M6-10.
+
+**Status:** DONE — `.github/workflows/ci.yml` ships with one `build` job on `ubuntu-latest`, both `dart-lang/setup-dart@v1` and `subosito/flutter-action@v2` (`channel: "stable"`, `cache: true`) installed. Triggers: `pull_request` (any branch) and `push` to `main`, both filtered with `paths-ignore: ["**.md"]`. `concurrency` block keys on `${{ github.head_ref || github.run_id }}` with `cancel-in-progress: true`. Steps run `flutter pub get` then the six M6 exit-criteria commands: `dart format --set-exit-if-changed .`, three `dart analyze` invocations (root with `--fatal-infos`, `packages/solid_generator/test/golden/outputs/`, `packages/solid_annotations`), `dart test packages/solid_generator/ -r github --fail-fast`, and `flutter test example/ -r github`. Plan doc lives at `plans/features/m7-ci.md` with M7-02 (docs build) and M7-03 (CONTRIBUTING + dependabot + status badge) flagged as candidate follow-ups. Pre-existing `unnecessary_statements` lint on `example/test/effect_widget_test.dart:114` (force-materialize pattern for late-final Effect, mirroring the generator's emitted form) suppressed in-place with `// ignore: unnecessary_statements` and an explanatory comment so `--fatal-infos` reports zero issues.
+
+---
