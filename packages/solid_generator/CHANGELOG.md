@@ -1,11 +1,9 @@
 ## 2.0.0
 
-- **BREAKING CHANGE**: New source-to-lib transformer architecture. Annotated source under `source/` is transformed into runnable Flutter code under `lib/`, replacing the v1 in-place generator model.
-- **BREAKING CHANGE**: Bumps `solid_annotations` constraint to `^2.0.0`.
 - **FEAT**: Lowering for all four v2 annotations (`@SolidState`, `@SolidEffect`, `@SolidQuery`, `@SolidEnvironment`).
 - **FEAT**: SignalBuilder placement, `.value` rewrite, dispose synthesis, StatelessWidget→StatefulWidget split.
 - **FEAT**: Computed synthesis from getter form of `@SolidState`.
-- **FEAT**: Fine-grained reactivity with untracked-read semantics (`peek`).
+- **FEAT**: Fine-grained reactivity with untracked-read semantics (`.untracked`).
 - **FEAT**: Effect lowering with `initState` materialization for State and plain-class targets.
 - **FEAT**: Resource lowering for Future/Stream with `.when()` / `.refresh()` call-site preservation.
 - **FEAT**: Environment field synthesis with Provider-backed DI and cross-class chain rewrites.
