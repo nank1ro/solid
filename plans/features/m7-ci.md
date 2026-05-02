@@ -22,11 +22,12 @@ A developer after M7-01 can:
 ## TODO sequence
 
 - **M7-01** — `.github/workflows/ci.yml` with a single `build` job on `ubuntu-latest`. Triggers: `pull_request` (any branch) + `push` to `main`, both filtered by `paths-ignore: ["**.md"]`. Steps: checkout, setup-dart, flutter-action with `cache: true`, `flutter pub get`, then the six M6-exit-criteria commands. `-r github` reporter on test runs; `--fail-fast` on `dart test`. No coverage / Codecov.
+- **M7-02** — Release prep for v2.0.0 publication. Both workspace packages (`solid_annotations`, `solid_generator`) bumped from `2.0.0-dev.1` to `2.0.0`. `publish_to: 'none'` removed from `solid_generator`. `solid_generator` swaps its path dep on `solid_annotations` for `^2.0.0`. Both pubspecs gain `issue_tracker:`; `solid_generator` gains a `topics:` block. Non-standard `documentation:` field dropped from `solid_annotations`. Both CHANGELOGs gain a `## 2.0.0` block in Conventional Commits style. Validated locally via `dart pub publish --dry-run` for both packages; the manual `dart pub publish` runs after merge.
 
 ## Candidate follow-ups (not yet committed to)
 
-- **M7-02** — `.github/workflows/docs.yml` building the Astro site under `docs/` on every PR + push to `main`. Different toolchain (Node + `npm ci && npm run build`); cleaner as its own item with `actions/setup-node@v4` and `cache: npm`.
-- **M7-03** — `CONTRIBUTING.md`, `dependabot.yml` for Dart + GitHub Actions deps, CI status badge in README.
+- **M7-03** — `.github/workflows/docs.yml` building the Astro site under `docs/` on every PR + push to `main`. Different toolchain (Node + `npm ci && npm run build`); cleaner as its own item with `actions/setup-node@v4` and `cache: npm`. (Was previously slotted as M7-02 before that slot was re-used for release prep.)
+- **M7-04** — `CONTRIBUTING.md`, `dependabot.yml` for Dart + GitHub Actions deps, CI status badge in README. (Was previously slotted as M7-03.)
 
 These are listed for visibility, not scoped or estimated. They land only when the user requests them.
 
