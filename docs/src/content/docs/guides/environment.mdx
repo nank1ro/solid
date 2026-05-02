@@ -36,17 +36,14 @@ The lookup is lazy. The field initializer runs the first time the field is read,
 
 Two equivalent surfaces. The SwiftUI-flavoured `.environment<T>()` extension on `Widget`, shipped by `solid_annotations`:
 
-```dart {7-10} title="source/main.dart"
+```dart {7} title="source/main.dart"
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      home: CounterDisplay().environment(
-        (_) => Counter(),
-        dispose: (_, c) => c.dispose(),
-      ),
+      home: CounterDisplay().environment((_) => Counter()),
     );
   }
 }
@@ -62,7 +59,7 @@ Chained calls nest providers in declaration order:
 
 ```dart
 HomePage()
-  .environment((_) => Counter(), dispose: (_, c) => c.dispose())
+  .environment((_) => Counter())
   .environment((_) => Logger())
 ```
 
@@ -70,7 +67,7 @@ HomePage()
 
 Or `Provider<T>` directly from `package:provider`:
 
-```dart {9-13} title="source/main.dart"
+```dart {9-12} title="source/main.dart"
 import 'package:provider/provider.dart';
 
 class MyApp extends StatelessWidget {
@@ -81,7 +78,6 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       home: Provider<Counter>(
         create: (_) => Counter(),
-        dispose: (_, c) => c.dispose(),
         child: CounterDisplay(),
       ),
     );
@@ -94,12 +90,14 @@ To compose multiple providers, use `MultiProvider` from `package:provider`:
 ```dart
 MultiProvider(
   providers: [
-    Provider<Counter>(create: (_) => Counter(), dispose: (_, c) => c.dispose()),
+    Provider<Counter>(create: (_) => Counter()),
     Provider<Logger>(create: (_) => Logger()),
   ],
   child: CounterDisplay(),
 )
 ```
+
+Pass `dispose:` to either form when the injected instance owns resources that need to be torn down — see the next section.
 
 ## Disposing the injected instance
 
