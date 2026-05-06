@@ -1,6 +1,7 @@
 // Unit tests for `computeOutputImports`. M8-01 added the
-// `referencesSolidAnnotations` parameter; the integration suite covers the
-// builder-level scan that produces it.
+// `referencesSolidAnnotations` parameter; M8-02 added the `dart:` →
+// `package:` → relative alphabetical sort. The integration suite covers the
+// builder-level scan that produces `referencesSolidAnnotations`.
 
 import 'package:solid_generator/src/import_rewriter.dart';
 import 'package:test/test.dart';
@@ -34,6 +35,7 @@ void main() {
           addSolidart: false,
           referencesSolidAnnotations: true,
         );
+        // `flutter/...` < `solid_annotations/...` alphabetically.
         expect(result, [
           'package:flutter/material.dart',
           _solidAnnotationsUri,
@@ -42,8 +44,8 @@ void main() {
     );
 
     test(
-      'preserves non-solid_annotations URIs and appends flutter_solidart / '
-      'provider per their flags',
+      'preserves non-solid_annotations URIs and sorts appended flutter_solidart'
+      ' / provider into alpha position',
       () {
         final result = computeOutputImports(
           const [
@@ -55,6 +57,9 @@ void main() {
           addProvider: true,
           referencesSolidAnnotations: false,
         );
+        // solid_annotations dropped; the remaining four URIs come out in
+        // group-then-alpha order, with the appended flutter_solidart /
+        // provider sorted into position rather than appended at the tail.
         expect(result, [
           'dart:async',
           'package:flutter/material.dart',
@@ -63,5 +68,77 @@ void main() {
         ]);
       },
     );
+  });
+
+  group('computeOutputImports alphabetical sort (SPEC §9)', () {
+    List<String> sortOnly(List<String> uris) => computeOutputImports(
+      uris,
+      addSolidart: false,
+      referencesSolidAnnotations: false,
+    );
+
+    test('orders dart: before package: regardless of source order', () {
+      expect(
+        sortOnly(const ['package:foo/foo.dart', 'dart:async']),
+        ['dart:async', 'package:foo/foo.dart'],
+      );
+    });
+
+    test('orders package: alphabetically by full URI', () {
+      expect(
+        sortOnly(const [
+          'package:provider/provider.dart',
+          'package:flutter/material.dart',
+          'package:flutter_solidart/flutter_solidart.dart',
+        ]),
+        [
+          'package:flutter/material.dart',
+          'package:flutter_solidart/flutter_solidart.dart',
+          'package:provider/provider.dart',
+        ],
+      );
+    });
+
+    test(
+      'sorts package:flutter/... before package:flutter_solidart/...',
+      () {
+        expect(
+          sortOnly(const [
+            'package:flutter_solidart/flutter_solidart.dart',
+            'package:flutter/material.dart',
+          ]),
+          [
+            'package:flutter/material.dart',
+            'package:flutter_solidart/flutter_solidart.dart',
+          ],
+        );
+      },
+    );
+
+    test('places relative imports after package: imports', () {
+      expect(
+        sortOnly(const [
+          'src/local.dart',
+          'package:foo/foo.dart',
+          'dart:async',
+        ]),
+        ['dart:async', 'package:foo/foo.dart', 'src/local.dart'],
+      );
+    });
+
+    test('appended flutter_solidart and provider land in alpha slot, not at '
+        'the tail', () {
+      final result = computeOutputImports(
+        const ['package:zzz/zzz.dart'],
+        addSolidart: true,
+        addProvider: true,
+        referencesSolidAnnotations: false,
+      );
+      expect(result, [
+        flutterSolidartUri,
+        providerUri,
+        'package:zzz/zzz.dart',
+      ]);
+    });
   });
 }

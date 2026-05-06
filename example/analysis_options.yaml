@@ -4,10 +4,6 @@ analyzer:
     must_be_immutable: ignore
     always_put_required_named_parameters_first: ignore
     invalid_annotation_target: ignore
-    # The generator preserves source import order verbatim (SPEC §9). Source
-    # files put `solid_annotations` first because it is the user-facing
-    # annotation; alphabetical reordering is a `dart fix` concern.
-    directives_ordering: ignore
 linter:
   rules:
     public_member_api_docs: false

@@ -1,5 +1,5 @@
-import 'package:solid_annotations/solid_annotations.dart';
 import 'package:flutter/material.dart';
+import 'package:solid_annotations/solid_annotations.dart';
 
 class CounterPage extends StatelessWidget {
   CounterPage({super.key});

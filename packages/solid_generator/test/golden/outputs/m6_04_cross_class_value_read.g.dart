@@ -1,7 +1,7 @@
-import 'package:solid_annotations/solid_annotations.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
 import 'package:provider/provider.dart';
+import 'package:solid_annotations/solid_annotations.dart';
 
 class Counter implements Disposable {
   final value = Signal<int>(0, name: 'value');

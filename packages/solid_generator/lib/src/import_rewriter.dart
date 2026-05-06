@@ -21,6 +21,9 @@ const String providerUri = 'package:provider/provider.dart';
 /// `.environment<T>()`.
 const String solidAnnotationsUriPrefix = 'package:solid_annotations/';
 
+const String _dartScheme = 'dart:';
+const String _packageScheme = 'package:';
+
 /// Canonical set of identifiers exported by `flutter_solidart` whose presence
 /// in generated output triggers the import-add rule (SPEC Section 9).
 ///
@@ -54,11 +57,14 @@ typedef RewriteResult = ({
 /// Returns the import URIs that should appear at the top of the generated
 /// `lib/` file.
 ///
-/// Source imports are preserved verbatim and in original order per SPEC
-/// Section 9. If [addSolidart] is true and `flutter_solidart` is not already
-/// present in [sourceImports], it is appended. If [addProvider] is true and
-/// `package:provider/provider.dart` is not already present, it is appended
-/// after `flutter_solidart` (SPEC §3.6 / §9 — env fields lower to
+/// Imports are emitted in three groups — `dart:`, then `package:`, then
+/// relative — alphabetically by full URI within each group, matching the
+/// analyzer's `directives_ordering` rule (SPEC §9). Appended `flutter_solidart`
+/// and `provider` URIs are sorted into position alongside source imports
+/// rather than appended at the tail. If [addSolidart] is true and
+/// `flutter_solidart` is not already present in [sourceImports], it is added.
+/// If [addProvider] is true and `package:provider/provider.dart` is not
+/// already present, it is added (SPEC §3.6 / §9 — env fields lower to
 /// `context.read<T>()`).
 ///
 /// `package:solid_annotations/...` imports are dropped from the result unless
@@ -88,5 +94,23 @@ List<String> computeOutputImports(
   if (addProvider && !result.contains(providerUri)) {
     result.add(providerUri);
   }
+  result.sort(_compareImportUris);
   return result;
+}
+
+/// Comparator implementing the SPEC §9 emit order: `dart:` group first, then
+/// `package:`, then relative; alphabetical (full-URI string compare) within
+/// each group. Matches the analyzer's `directives_ordering` lint exactly —
+/// `package:flutter/material.dart` sorts before
+/// `package:flutter_solidart/flutter_solidart.dart` because `/` (0x2F) < `_`
+/// (0x5F) in ASCII.
+int _compareImportUris(String a, String b) {
+  int rank(String uri) {
+    if (uri.startsWith(_dartScheme)) return 0;
+    if (uri.startsWith(_packageScheme)) return 1;
+    return 2;
+  }
+
+  final groupOrder = rank(a).compareTo(rank(b));
+  return groupOrder != 0 ? groupOrder : a.compareTo(b);
 }
