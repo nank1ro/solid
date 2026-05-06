@@ -235,6 +235,13 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
   bool _isTrackedField(String name) =>
       _reactiveFields.contains(name) && !_isShadowed(name);
 
+  /// True if [name] is a widget-bound field that the rewriter should
+  /// `widget.`-prefix at this site — known widget-bound name AND not
+  /// shadowed by a local. SPEC §8.1 scope-shift counterpart of
+  /// [_isTrackedField].
+  bool _isWidgetBoundIdentifier(String name) =>
+      _widgetBoundFields.contains(name) && !_isShadowed(name);
+
   @override
   void visitBlock(Block node) {
     _scopeStack.add(<String>{});
@@ -394,39 +401,27 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
   void visitInterpolationExpression(InterpolationExpression node) {
     final expr = node.expression;
     final isShortForm = node.leftBracket.lexeme == r'$';
-    if (isShortForm && expr is SimpleIdentifier && _isTrackedField(expr.name)) {
-      // Expand `$name` → `${name.value}` as a single edit. Do not descend
-      // — the inner SimpleIdentifier is already handled by this rewrite.
-      edits.add(
-        ValueEdit(
-          node.offset,
-          node.end,
-          '\${${expr.name}.value}',
-        ),
-      );
+    if (!isShortForm || expr is! SimpleIdentifier) {
+      super.visitInterpolationExpression(node);
+      return;
+    }
+    final name = expr.name;
+    // Expand `$name` → `${name.value}` as a single edit. Do not descend —
+    // the inner SimpleIdentifier is already handled by this rewrite.
+    if (_isTrackedField(name)) {
+      edits.add(ValueEdit(node.offset, node.end, '\${$name.value}'));
       if (_untrackedDepth == 0) {
         trackedReadOffsets.add(expr.offset);
-        _recordTrackedReadName(expr.name);
+        _recordTrackedReadName(name);
       }
       return;
     }
-    // SPEC §8.1 widget-bound field inside short-form interpolation:
-    // `$label` must expand to `${widget.label}` because `$widget.label`
-    // would parse as `${widget}.label` (interpolating the State's `widget`
-    // getter, then concatenating literal `.label`). Emit as a single
-    // replacement edit and stop descent so the inner SimpleIdentifier
-    // doesn't also get a `widget.` prefix.
-    if (isShortForm &&
-        expr is SimpleIdentifier &&
-        _widgetBoundFields.contains(expr.name) &&
-        !_isShadowed(expr.name)) {
-      edits.add(
-        ValueEdit(
-          node.offset,
-          node.end,
-          '\${widget.${expr.name}}',
-        ),
-      );
+    // SPEC §8.1 widget-bound short-form interpolation: `$label` must
+    // expand to `${widget.label}` because `$widget.label` parses as
+    // `${widget}.label` (interpolating the State's `widget` getter, then
+    // concatenating literal `.label`).
+    if (_isWidgetBoundIdentifier(name)) {
+      edits.add(ValueEdit(node.offset, node.end, '\${widget.$name}'));
       return;
     }
     super.visitInterpolationExpression(node);
@@ -456,9 +451,10 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
     // SPEC §8.1: bare reference to a widget-bound field inside a body that
     // moves into the State class (build, effects, computed, dispose, …).
     // The State accesses widget-config props through its `widget` getter.
-    if (_widgetBoundFields.contains(name) && !_isShadowed(name)) {
+    if (_isWidgetBoundIdentifier(name)) {
       if (!_isBareReferenceToField(node)) return;
       edits.add(ValueEdit(node.offset, node.offset, 'widget.'));
+      return;
     }
   }
 
