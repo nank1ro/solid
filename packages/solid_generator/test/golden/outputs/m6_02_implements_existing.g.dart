@@ -1,5 +1,5 @@
-import 'package:solid_annotations/solid_annotations.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
+import 'package:solid_annotations/solid_annotations.dart';
 
 class Counter implements Comparable<Counter>, Disposable {
   final value = Signal<int>(0, name: 'value');
