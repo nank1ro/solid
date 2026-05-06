@@ -71,6 +71,14 @@ RewriteResult rewriteStatelessWidget(
   final environmentFields = solidEnvironments.isEmpty
       ? const <String, String>{}
       : {for (final e in solidEnvironments) e.fieldName: e.typeText};
+  // SPEC §8.1 widget→State scope shift: bare references inside `build` to
+  // a widget-bound non-`@SolidState` field need a `widget.` prefix so the
+  // State class resolves them through the widget config object. Subtract
+  // `partitionExcludeNames` so reactive / env-field names (which leave
+  // the widget half) are not mis-prefixed.
+  final widgetBoundForBuild = widgetBoundNames.difference(
+    partitionExcludeNames,
+  );
   final buildMethodText = rewriteBuildMethod(
     members.buildMethod,
     reactiveNames,
@@ -78,6 +86,7 @@ RewriteResult rewriteStatelessWidget(
     queryNames: queryNames,
     classRegistry: classRegistry,
     environmentFields: environmentFields,
+    widgetBoundFields: widgetBoundForBuild,
   );
 
   final reactiveBlock = _emitReactiveBlock(

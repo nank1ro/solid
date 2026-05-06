@@ -23,7 +23,7 @@ class _GreeterState extends State<Greeter> {
   Widget build(BuildContext context) {
     return SignalBuilder(
       builder: (context, child) {
-        return Text('$label ${counter.value}');
+        return Text('${widget.label} ${counter.value}');
       },
     );
   }
