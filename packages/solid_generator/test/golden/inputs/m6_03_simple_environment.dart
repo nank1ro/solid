@@ -1,8 +1,9 @@
 // SPEC §3.6 uses a non-Solid `Logger` as the canonical injected type for
 // the simple-environment lowering example. `Logger.log` calls `print` for
 // minimal noise; `Text('hello')` is intentionally non-const so the build
-// body round-trips byte-identical (the generator never const-ifies — that's
-// `dart fix --apply`'s job at the consumer-app level).
+// body round-trips byte-identical (the generator preserves user expressions
+// in build bodies verbatim — M8-03's `const` insertion only targets the
+// public widget constructor, not body expressions).
 // ignore_for_file: avoid_print, prefer_const_constructors
 
 import 'package:solid_annotations/solid_annotations.dart';

@@ -7,12 +7,16 @@
 # depend on. Both are suppressed here.
 #
 # Outputs are byte-comparison fixtures for builder output, not shippable lib
-# code. Per SPEC Section 9 the generator does NOT prune unused imports or
-# const-ify constructors — both are `dart fix --apply`'s job at the
-# consumer-app level. The fixtures therefore appear pre-`dart fix` and would
-# trip several lints (`unused_import`, `prefer_const_constructors_in_immutables`).
-# Rather than suppress each lint individually we exclude outputs/ from
-# analysis altogether.
+# code. Per SPEC Section 9 and Section 14 item 7 the generator emits clean
+# post-cleanup output: imports are alphabetized within each group, unused
+# `solid_annotations` is pruned when not referenced, and `const` is
+# prefixed on eligible widget constructors. M8 absorbed all three formerly-
+# delegated cleanups into the generator after the build_runner maintainer
+# confirmed there is no post-build hook.
+#
+# Outputs are still excluded from analysis here because they import runtime
+# packages (`package:flutter/...`, `package:flutter_solidart/...`) that the
+# generator package itself does not declare as dependencies.
 include: package:very_good_analysis/analysis_options.yaml
 analyzer:
   exclude:

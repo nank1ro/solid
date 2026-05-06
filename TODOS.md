@@ -184,7 +184,7 @@ class Counter extends StatelessWidget {
 }
 ```
 
-**Expected output content:** (The generator preserves every source import verbatim per SPEC Section 9 and appends `flutter_solidart`; `dart fix --apply` prunes the now-unused `solid_annotations` import at the consumer-app level.)
+**Expected output content:**
 
 ```dart
 import 'package:solid_annotations/solid_annotations.dart';
@@ -262,7 +262,7 @@ class Greeting extends StatelessWidget {
 }
 ```
 
-**Expected output content:** (The generator preserves every source import verbatim per SPEC Section 9 and appends `flutter_solidart`; `dart fix --apply` prunes the now-unused `solid_annotations` import at the consumer-app level.)
+**Expected output content:**
 
 ```dart
 import 'package:solid_annotations/solid_annotations.dart';
@@ -527,8 +527,6 @@ class Counter {
 }
 ```
 
-(Per SPEC §9 the generator preserves every source import verbatim and never prunes; unused-import cleanup is `dart fix --apply`'s job.)
-
 **Expected implementation change:** Class-kind dispatch adds "plain class" branch (Section 8.3). Dispose synthesis uses reverse declaration order (Section 10) and omits `super.dispose()` when the supertype chain has no `dispose()` method.
 
 **Acceptance:** `dart test --name=m1_06` passes; golden analyzes clean.
@@ -647,7 +645,7 @@ class _CounterState extends State<Counter> {
 
 ### TODO M1-08 — Golden: import rewrite (issue #8)
 
-**Goal:** The generator adds `package:flutter_solidart/flutter_solidart.dart` to the output whenever any of its names are emitted, and relies on `dart fix --apply` to prune the unused `solid_annotations` import.
+**Goal:** The generator adds `package:flutter_solidart/flutter_solidart.dart` to the output whenever any of its names are emitted. (At M1-08 time the rewriter preserved every other source import verbatim, including unused `solid_annotations`; M8-01 later updated the contract to prune `solid_annotations` from the output unless the lowered code references the `Disposable` marker or the `.environment<T>()` extension.)
 
 **SPEC references:** Section 9, Section 16 (#8).
 
@@ -659,7 +657,7 @@ class _CounterState extends State<Counter> {
 
 **Expected input content:** Any class with a `@SolidState` field + an explicit `import 'package:solid_annotations/solid_annotations.dart';` in the source.
 
-**Expected output content:** Output adds the `flutter_solidart` import. The `solid_annotations` import stays in the raw generator output — this test asserts the raw output. A sibling test (or a `dart fix --apply` invocation in the example app) verifies the end-state cleanup.
+**Expected output content:** Output adds the `flutter_solidart` import. (M1-08's golden also kept the source's `solid_annotations` import; M8-01 later changed the contract — the import is now retained only when the lowered code references `Disposable` or `.environment<T>()`. m1_08's current golden keeps it via the `Disposable` keep-path.)
 
 **Expected implementation change:** Import analysis in the generator: collect every identifier in the emitted AST, check each against the Section 9 list; if any match, prepend the import.
 
@@ -780,7 +778,7 @@ class Hello extends StatelessWidget {
 - `packages/solid_generator/test/golden/outputs/m1_13_multiple_constructors.g.dart` — all three constructors preserved verbatim on the rewritten `StatefulWidget`; `final String title;` stays on the widget; `counter` becomes the only Signal on the State class.
 - entry in `golden_helpers.dart`.
 
-**Expected implementation change:** The stateless rewriter walks **every** `ConstructorDeclaration` on the source class (not just the unnamed) and emits each one verbatim. `this.X` field parameters and `: field = expr` initializer-list assignments are unioned across every generative constructor (factory ctors are skipped — they construct via a body, never bind). Every non-`@SolidState` field is then partitioned: widget-bound (name in the union) → kept on the widget verbatim; everything else → moved to the State class. The generator does NOT add or remove `const` on any constructor; per SPEC §9, `dart fix --apply` is the trusted lint pass that adds `const` after the class split removes mutable fields from the widget. Goldens are accordingly pre-`dart fix`; `prefer_const_constructors_in_immutables` is suppressed in `test/golden/analysis_options.yaml` for the same reason `unused_import` is.
+**Expected implementation change:** The stateless rewriter walks **every** `ConstructorDeclaration` on the source class (not just the unnamed) and emits each one verbatim. `this.X` field parameters and `: field = expr` initializer-list assignments are unioned across every generative constructor (factory ctors are skipped — they construct via a body, never bind). Every non-`@SolidState` field is then partitioned: widget-bound (name in the union) → kept on the widget verbatim; everything else → moved to the State class. (At M1-13 time the generator did not add or remove `const` on any constructor; M8-03 later added `const`-on-eligible-widget-ctor emission per SPEC §14 item 7.)
 
 **Acceptance:** `dart test --name=m1_13_multiple_constructors` passes; `dart analyze --fatal-infos packages/solid_generator/` reports zero issues.
 
@@ -2423,7 +2421,7 @@ The static rejection conflated the legitimate override case (ancestor `Provider<
 
 **Dependencies:** M6-04, M6-06.
 
-**Status:** TODO
+**Status:** DONE — shipped via PR #78 (commit a0cd331), 4 files / 181 insertions. `example/source/m6_09_environment_app.dart` defines a `Counter` source app with `@SolidState int value = 0;` plus a hand-written empty `void dispose() {}` stub (SPEC §3.6 source-side resolution requirement so `c.dispose()` typechecks at the source layer) and a `CounterDisplay` consumer with `@SolidEnvironment late Counter counter;` reading `counter.value` cross-class. `example/lib/m6_09_environment_app.dart` is the generator-lowered output: `class Counter implements Disposable` with the synthesized `value.dispose()` reactive disposal merged into the user's empty `dispose()` body per SPEC §10, and `_CounterDisplayState.build` wraps the `counter.value` read in a `SignalBuilder` per SPEC §7 cross-class placement. `example/test/m6_09_environment_widget_test.dart` is the first widget test that runs against actual generated `lib/` code (M1-10 / M3-04 / M4-07 / M5-07 all inline a test-local mirror of the lowered shape) — two `testWidgets` scenarios: (a) FAB tap mutates `counter.value` → SignalBuilder rebuilds the consumer, asserted across three pumps via `find.text('Counter is ${i + 1}')`; (b) provider scope teardown fires the user-passed `dispose:` callback exactly once, asserted via a closure-counted callback in the test (the internal-Signal-disposal path is fenced separately by the M6-02 user-dispose merge golden + M1-11's runtime onDispose test). `example/pubspec.yaml` gained `provider: ^6.1.0` as a runtime dep — first `example/` use of `provider`, matches the SPEC §3.6 install command pattern. Acceptance verified: `flutter test example/test/m6_09_environment_widget_test.dart` passes; the broader `flutter test example/ -r github` reports 9 tests passing (referenced from M8-01's status block at the time).
 
 ---
 
