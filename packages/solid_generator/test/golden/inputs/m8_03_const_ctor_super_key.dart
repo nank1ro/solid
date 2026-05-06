@@ -14,5 +14,7 @@ class Widget1 extends StatelessWidget {
   int counter = 0;
 
   @override
-  Widget build(BuildContext context) => Text('$counter');
+  Widget build(BuildContext context) {
+    return Text('$counter');
+  }
 }

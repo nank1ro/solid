@@ -18,9 +18,11 @@ class _Widget1State extends State<Widget1> {
   }
 
   @override
-  Widget build(BuildContext context) => SignalBuilder(
-    builder: (context, child) {
-      return Text('${counter.value}');
-    },
-  );
+  Widget build(BuildContext context) {
+    return SignalBuilder(
+      builder: (context, child) {
+        return Text('${counter.value}');
+      },
+    );
+  }
 }

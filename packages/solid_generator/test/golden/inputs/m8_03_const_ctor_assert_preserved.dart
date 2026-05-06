@@ -18,5 +18,7 @@ class Greeter extends StatelessWidget {
   int counter = 0;
 
   @override
-  Widget build(BuildContext context) => Text('$label $counter');
+  Widget build(BuildContext context) {
+    return Text('$label $counter');
+  }
 }
