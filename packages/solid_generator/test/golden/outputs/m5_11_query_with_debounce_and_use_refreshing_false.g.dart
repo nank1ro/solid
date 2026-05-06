@@ -2,7 +2,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
 
 class Combined extends StatefulWidget {
-  Combined({super.key});
+  const Combined({super.key});
 
   @override
   State<Combined> createState() => _CombinedState();

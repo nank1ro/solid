@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
 
 class UserScreen extends StatefulWidget {
-  UserScreen({super.key});
+  const UserScreen({super.key});
 
   @override
   State<UserScreen> createState() => _UserScreenState();

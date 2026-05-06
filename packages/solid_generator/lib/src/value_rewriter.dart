@@ -122,12 +122,14 @@ ValueRewriteResult collectValueEdits(
   Set<String> queryNames = const {},
   Map<String, Set<String>> classRegistry = const {},
   Map<String, String> environmentFields = const {},
+  Set<String> widgetBoundFields = const {},
 }) {
   final visitor = _ValueRewriteVisitor(
     reactiveFields,
     queryNames,
     classRegistry,
     environmentFields,
+    widgetBoundFields,
   );
   node.accept(visitor);
   return ValueRewriteResult(
@@ -176,6 +178,7 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
     this._queryNames,
     this._classRegistry,
     this._environmentFields,
+    this._widgetBoundFields,
   );
 
   final Set<String> _reactiveFields;
@@ -198,6 +201,17 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
   /// Empty map → env-field branch no-ops; existing parameter-receiver
   /// behavior (m6_02_*) is unchanged.
   final Map<String, String> _environmentFields;
+
+  /// Names of widget-bound non-`@SolidState` fields on the host class.
+  /// After the SPEC §8.1 StatelessWidget→StatefulWidget split, the body
+  /// being rewritten lives on the State class while these fields stay on
+  /// the widget instance, so a bare reference (`label`) must be prefixed
+  /// with `widget.` for the State to see them as `widget.label`. Disjoint
+  /// from `_reactiveFields` by construction (the caller subtracts the
+  /// reactive set before passing). Empty for callers that do NOT move
+  /// bodies between scopes (state-class rewriter, plain-class rewriter).
+  final Set<String> _widgetBoundFields;
+
   final List<ValueEdit> edits = [];
   final List<int> trackedReadOffsets = [];
 
@@ -396,26 +410,55 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
       }
       return;
     }
+    // SPEC §8.1 widget-bound field inside short-form interpolation:
+    // `$label` must expand to `${widget.label}` because `$widget.label`
+    // would parse as `${widget}.label` (interpolating the State's `widget`
+    // getter, then concatenating literal `.label`). Emit as a single
+    // replacement edit and stop descent so the inner SimpleIdentifier
+    // doesn't also get a `widget.` prefix.
+    if (isShortForm &&
+        expr is SimpleIdentifier &&
+        _widgetBoundFields.contains(expr.name) &&
+        !_isShadowed(expr.name)) {
+      edits.add(
+        ValueEdit(
+          node.offset,
+          node.end,
+          '\${widget.${expr.name}}',
+        ),
+      );
+      return;
+    }
     super.visitInterpolationExpression(node);
   }
 
   @override
   void visitSimpleIdentifier(SimpleIdentifier node) {
     final name = node.name;
-    if (!_isTrackedField(name)) return;
-    if (_isAccessedValueProperty(node)) return;
-    if (!_isBareReferenceToField(node)) return;
+    if (_isTrackedField(name)) {
+      if (_isAccessedValueProperty(node)) return;
+      if (!_isBareReferenceToField(node)) return;
 
-    edits.add(ValueEdit(node.end, node.end, '.value'));
+      edits.add(ValueEdit(node.end, node.end, '.value'));
 
-    final isGet = node.inGetterContext();
-    final isSet = node.inSetterContext();
-    // A compound write (`+=`, `++`, etc.) is getter+setter; SPEC 6.0 says
-    // writes never subscribe, so both pure writes and compound writes are
-    // excluded from tracked reads.
-    if (isGet && !isSet && _untrackedDepth == 0) {
-      trackedReadOffsets.add(node.offset);
-      _recordTrackedReadName(name);
+      final isGet = node.inGetterContext();
+      final isSet = node.inSetterContext();
+      // A compound write (`+=`, `++`, etc.) is getter+setter; SPEC 6.0 says
+      // writes never subscribe, so both pure writes and compound writes are
+      // excluded from tracked reads.
+      if (isGet && !isSet && _untrackedDepth == 0) {
+        trackedReadOffsets.add(node.offset);
+        _recordTrackedReadName(name);
+      }
+      return;
+    }
+
+    // SPEC §8.1: bare reference to a widget-bound field inside a body that
+    // moves into the State class (build, effects, computed, dispose, …).
+    // The State accesses widget-config props through its `widget` getter.
+    if (_widgetBoundFields.contains(name) && !_isShadowed(name)) {
+      if (!_isBareReferenceToField(node)) return;
+      edits.add(ValueEdit(node.offset, node.offset, 'widget.'));
     }
   }
 

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
 
 class SearchBox extends StatefulWidget {
-  SearchBox({super.key});
+  const SearchBox({super.key});
 
   @override
   State<SearchBox> createState() => _SearchBoxState();

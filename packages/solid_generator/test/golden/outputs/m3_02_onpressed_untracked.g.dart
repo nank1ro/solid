@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
 
 class CounterButton extends StatefulWidget {
-  CounterButton({super.key});
+  const CounterButton({super.key});
 
   @override
   State<CounterButton> createState() => _CounterButtonState();

@@ -1,14 +1,14 @@
 import 'package:flutter/widgets.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
 
-class Greeting extends StatefulWidget {
-  const Greeting({super.key});
+class Widget1 extends StatefulWidget {
+  const Widget1({super.key});
 
   @override
-  State<Greeting> createState() => _GreetingState();
+  State<Widget1> createState() => _Widget1State();
 }
 
-class _GreetingState extends State<Greeting> {
+class _Widget1State extends State<Widget1> {
   final counter = Signal<int>(0, name: 'counter');
 
   @override
@@ -21,7 +21,7 @@ class _GreetingState extends State<Greeting> {
   Widget build(BuildContext context) {
     return SignalBuilder(
       builder: (context, child) {
-        return Text('counter is ${counter.value}');
+        return Text('${counter.value}');
       },
     );
   }

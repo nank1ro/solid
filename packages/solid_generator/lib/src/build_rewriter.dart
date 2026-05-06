@@ -59,6 +59,13 @@ class SourceEdit {
 /// shapes when the env field's declared type names a class in
 /// [classRegistry]. Empty map → no-op for the env-field branch.
 ///
+/// [widgetBoundFields] is the set of widget-bound non-`@SolidState` field
+/// names on the enclosing class (only populated by the StatelessWidget→
+/// StatefulWidget rewriter — SPEC §8.1). Bare references in `build` are
+/// prefixed with `widget.` so the lowered State class resolves them
+/// through the widget config object. Empty set → no-op for callers whose
+/// `build` body does not change scope (state-class / plain-class).
+///
 /// [source] is the full source text of the input file. The returned string
 /// is the rewritten build method (from `@override` through the closing `}`),
 /// ready for the caller to embed into the emitted `State` class.
@@ -69,6 +76,7 @@ String rewriteBuildMethod(
   Set<String> queryNames = const {},
   Map<String, Set<String>> classRegistry = const {},
   Map<String, String> environmentFields = const {},
+  Set<String> widgetBoundFields = const {},
 }) {
   final methodStart = buildMethod.offset;
   final methodEnd = buildMethod.end;
@@ -81,6 +89,7 @@ String rewriteBuildMethod(
     queryNames: queryNames,
     classRegistry: classRegistry,
     environmentFields: environmentFields,
+    widgetBoundFields: widgetBoundFields,
   );
   final wrapNodes = computeWrapSet(
     buildMethod,

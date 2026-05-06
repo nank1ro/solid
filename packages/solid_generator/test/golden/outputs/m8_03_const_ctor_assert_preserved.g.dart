@@ -1,14 +1,17 @@
 import 'package:flutter/widgets.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
 
-class Greeting extends StatefulWidget {
-  const Greeting({super.key});
+class Greeter extends StatefulWidget {
+  Greeter({super.key, required this.label})
+    : assert(label.isNotEmpty, 'label must not be empty');
+
+  final String label;
 
   @override
-  State<Greeting> createState() => _GreetingState();
+  State<Greeter> createState() => _GreeterState();
 }
 
-class _GreetingState extends State<Greeting> {
+class _GreeterState extends State<Greeter> {
   final counter = Signal<int>(0, name: 'counter');
 
   @override
@@ -21,7 +24,7 @@ class _GreetingState extends State<Greeting> {
   Widget build(BuildContext context) {
     return SignalBuilder(
       builder: (context, child) {
-        return Text('counter is ${counter.value}');
+        return Text('${widget.label} ${counter.value}');
       },
     );
   }

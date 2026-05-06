@@ -7,7 +7,7 @@ class Counter {
 }
 
 class App extends StatefulWidget {
-  App({super.key});
+  const App({super.key});
 
   @override
   State<App> createState() => _AppState();

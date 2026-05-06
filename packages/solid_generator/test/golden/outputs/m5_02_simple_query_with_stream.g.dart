@@ -2,7 +2,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
 
 class Ticker extends StatefulWidget {
-  Ticker({super.key});
+  const Ticker({super.key});
 
   @override
   State<Ticker> createState() => _TickerState();

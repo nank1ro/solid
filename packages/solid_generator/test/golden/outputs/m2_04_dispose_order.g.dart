@@ -2,7 +2,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
 
 class DisposeOrder extends StatefulWidget {
-  DisposeOrder({super.key});
+  const DisposeOrder({super.key});
 
   @override
   State<DisposeOrder> createState() => _DisposeOrderState();
