@@ -272,6 +272,7 @@ String _renderOutput(
       return (
         text: source.substring(c.decl.offset, c.decl.end),
         solidartNames: const <String>{},
+        emitsDisposable: false,
       );
     }
     return _rewriteClass(
@@ -286,17 +287,28 @@ String _renderOutput(
     );
   }).toList();
 
+  final body = results.map((r) => r.text).join('\n\n');
+  // SPEC §9 bullet 4: keep `solid_annotations` only when the lowered code
+  // references `Disposable` (structurally tracked on `RewriteResult`) or
+  // `.environment<T>()` (the providing extension survives verbatim from
+  // user widget code, so detected via textual scan). The `\b` after
+  // `\.environment` matches both `.environment(` and `.environment<` —
+  // accepted false-positive: a user method literally named `environment`
+  // keeps the import live.
+  final referencesSolidAnnotations =
+      results.any((r) => r.emitsDisposable) ||
+      RegExp(r'\.environment\b').hasMatch(body);
   final imports = computeOutputImports(
     unit.directives.whereType<ImportDirective>().map(_importUri).toList(),
     addSolidart: results.any(
       (r) => r.solidartNames.any(solidartNames.contains),
     ),
     addProvider: annotatedClasses.any((c) => c.environments.isNotEmpty),
+    referencesSolidAnnotations: referencesSolidAnnotations,
   );
   final importBlock = imports.map((u) => "import '$u';").join('\n');
 
-  final combined =
-      '$importBlock\n\n${results.map((r) => r.text).join('\n\n')}\n';
+  final combined = '$importBlock\n\n$body\n';
   return _formatter.format(combined);
 }
 

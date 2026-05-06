@@ -196,6 +196,7 @@ RewriteResult rewritePlainClass(
       // requiring `Computed` in the import set.
       if (solidQueries.any((q) => q.needsSourceComputed)) 'Computed',
     },
+    emitsDisposable: true,
   );
 }
 

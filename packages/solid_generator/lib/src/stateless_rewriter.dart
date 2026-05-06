@@ -122,6 +122,7 @@ RewriteResult rewriteStatelessWidget(
   return (
     text: '$widgetClass\n\n$stateClass\n',
     solidartNames: solidartNames,
+    emitsDisposable: false,
   );
 }
 

@@ -211,6 +211,7 @@ RewriteResult rewriteStateClass(
       // `@SolidState` getter.
       if (solidQueries.any((q) => q.needsSourceComputed)) 'Computed',
     },
+    emitsDisposable: false,
   );
 }
 
