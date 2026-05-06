@@ -15,6 +15,12 @@ const String flutterSolidartUri =
 /// without a duplicate-import.
 const String providerUri = 'package:provider/provider.dart';
 
+/// URI prefix matched when pruning `solid_annotations` imports from generator
+/// output (SPEC §9 bullet 4). Any source URI starting with this prefix is
+/// dropped unless the lowered code references `Disposable` or
+/// `.environment<T>()`.
+const String solidAnnotationsUriPrefix = 'package:solid_annotations/';
+
 /// Canonical set of identifiers exported by `flutter_solidart` whose presence
 /// in generated output triggers the import-add rule (SPEC Section 9).
 ///
@@ -36,9 +42,9 @@ const Set<String> solidartNames = {
 /// enumerates which [solidartNames] identifiers `text` references, used by the
 /// builder to decide whether to add the `flutter_solidart` import.
 /// `emitsDisposable` is true when the rewriter spliced `implements Disposable`
-/// into the lowered class header (SPEC §10 marker rule — only emitted by the
-/// plain-class rewriter today). The builder unions this flag across results
-/// to decide whether to keep the `solid_annotations` import.
+/// into the lowered class header (SPEC §10 marker rule). The builder unions
+/// this flag across results to decide whether to keep the `solid_annotations`
+/// import.
 typedef RewriteResult = ({
   String text,
   Set<String> solidartNames,
@@ -73,7 +79,7 @@ List<String> computeOutputImports(
   final result = [
     for (final uri in sourceImports)
       if (referencesSolidAnnotations ||
-          !uri.startsWith('package:solid_annotations/'))
+          !uri.startsWith(solidAnnotationsUriPrefix))
         uri,
   ];
   if (addSolidart && !result.contains(flutterSolidartUri)) {

@@ -5,14 +5,6 @@
 // extension call is user-written widget code that round-trips verbatim, so
 // the builder cannot detect it via `RewriteResult.emitsDisposable` and
 // instead scans the assembled body for `.environment\b`.
-//
-// Shape: an `@SolidState`-bearing `StatelessWidget` whose build body wraps
-// a child in `.environment<Counter>(...)`. The Stateless→Stateful split
-// runs (so `emitsDisposable` is FALSE), and the only reason
-// `solid_annotations` survives in the output is the regex hit on the
-// `.environment<` text inside `_AppState.build`. `Counter` is an
-// unannotated plain class included only to give the extension a concrete
-// type argument.
 
 import 'package:solid_annotations/solid_annotations.dart';
 import 'package:flutter/widgets.dart';

@@ -6,7 +6,7 @@ import 'package:solid_generator/src/import_rewriter.dart';
 import 'package:test/test.dart';
 
 const String _solidAnnotationsUri =
-    'package:solid_annotations/solid_annotations.dart';
+    '${solidAnnotationsUriPrefix}solid_annotations.dart';
 
 void main() {
   group('computeOutputImports', () {

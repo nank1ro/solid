@@ -35,6 +35,11 @@ final DartFormatter _formatter = DartFormatter(
   languageVersion: DartFormatter.latestLanguageVersion,
 );
 
+/// Pattern matching `.environment(` and `.environment<` call sites in lowered
+/// output (SPEC §9 bullet 4 keep path). Hoisted for the same reason as
+/// [_formatter] — `RegExp` compiles its pattern on construction.
+final RegExp _environmentExtensionRef = RegExp(r'\.environment\b');
+
 class _SolidBuilder implements Builder {
   @override
   final Map<String, List<String>> buildExtensions = const {
@@ -288,16 +293,14 @@ String _renderOutput(
   }).toList();
 
   final body = results.map((r) => r.text).join('\n\n');
-  // SPEC §9 bullet 4: keep `solid_annotations` only when the lowered code
-  // references `Disposable` (structurally tracked on `RewriteResult`) or
-  // `.environment<T>()` (the providing extension survives verbatim from
-  // user widget code, so detected via textual scan). The `\b` after
-  // `\.environment` matches both `.environment(` and `.environment<` —
-  // accepted false-positive: a user method literally named `environment`
+  // SPEC §9 bullet 4: `Disposable` is tracked structurally on the rewriter
+  // result (precise); `.environment<T>()` is detected by textual scan
+  // because the call site survives verbatim from user widget code.
+  // Accepted false-positive: a user method literally named `environment`
   // keeps the import live.
   final referencesSolidAnnotations =
       results.any((r) => r.emitsDisposable) ||
-      RegExp(r'\.environment\b').hasMatch(body);
+      _environmentExtensionRef.hasMatch(body);
   final imports = computeOutputImports(
     unit.directives.whereType<ImportDirective>().map(_importUri).toList(),
     addSolidart: results.any(
