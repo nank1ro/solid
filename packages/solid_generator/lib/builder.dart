@@ -35,6 +35,11 @@ final DartFormatter _formatter = DartFormatter(
   languageVersion: DartFormatter.latestLanguageVersion,
 );
 
+/// Pattern matching `.environment(` and `.environment<` call sites in lowered
+/// output (SPEC §9 bullet 4 keep path). Hoisted for the same reason as
+/// [_formatter] — `RegExp` compiles its pattern on construction.
+final RegExp _environmentExtensionRef = RegExp(r'\.environment\b');
+
 class _SolidBuilder implements Builder {
   @override
   final Map<String, List<String>> buildExtensions = const {
@@ -272,6 +277,7 @@ String _renderOutput(
       return (
         text: source.substring(c.decl.offset, c.decl.end),
         solidartNames: const <String>{},
+        emitsDisposable: false,
       );
     }
     return _rewriteClass(
@@ -286,17 +292,26 @@ String _renderOutput(
     );
   }).toList();
 
+  final body = results.map((r) => r.text).join('\n\n');
+  // SPEC §9 bullet 4: `Disposable` is tracked structurally on the rewriter
+  // result (precise); `.environment<T>()` is detected by textual scan
+  // because the call site survives verbatim from user widget code.
+  // Accepted false-positive: a user method literally named `environment`
+  // keeps the import live.
+  final referencesSolidAnnotations =
+      results.any((r) => r.emitsDisposable) ||
+      _environmentExtensionRef.hasMatch(body);
   final imports = computeOutputImports(
     unit.directives.whereType<ImportDirective>().map(_importUri).toList(),
     addSolidart: results.any(
       (r) => r.solidartNames.any(solidartNames.contains),
     ),
     addProvider: annotatedClasses.any((c) => c.environments.isNotEmpty),
+    referencesSolidAnnotations: referencesSolidAnnotations,
   );
   final importBlock = imports.map((u) => "import '$u';").join('\n');
 
-  final combined =
-      '$importBlock\n\n${results.map((r) => r.text).join('\n\n')}\n';
+  final combined = '$importBlock\n\n$body\n';
   return _formatter.format(combined);
 }
 

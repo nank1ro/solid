@@ -1,4 +1,3 @@
-import 'package:solid_annotations/solid_annotations.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
 

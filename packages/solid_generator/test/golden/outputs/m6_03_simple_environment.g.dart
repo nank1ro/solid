@@ -1,4 +1,3 @@
-import 'package:solid_annotations/solid_annotations.dart';
 import 'package:flutter/widgets.dart';
 import 'package:provider/provider.dart';
 
