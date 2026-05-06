@@ -2504,3 +2504,76 @@ This re-uses the M7-02 slot. The earlier candidate "M7-02 = docs CI workflow" li
 **Status:** DONE — both pubspecs flipped to `version: 2.0.0`. `publish_to: 'none'` removed from `solid_generator/pubspec.yaml`; the `solid_annotations` dep there switched from `path: ../solid_annotations` to `^2.0.0` (resolves locally via the workspace member at 2.0.0). Both pubspecs gained `issue_tracker: https://github.com/nank1ro/solid/issues`; the existing `documentation: https://solid.mariuti.com` field on `solid_annotations` is kept (per user direction); `solid_generator` gained `topics: [code-generation, build-runner, framework, fine-grained-reactivity, swiftui]`. Both CHANGELOGs gained a `## 2.0.0` block in Conventional Commits style (`**FEAT**`); existing v1 entries preserved below. CHANGELOGs describe only genuinely new v2 deltas: `solid_annotations` lists the `Disposable` marker; `solid_generator` lists the six lowering behaviors (SignalBuilder placement / `.value` rewrite / dispose synthesis / Stateless→Stateful split, computed synthesis, fine-grained reactivity with `.untracked`, effect lowering with `initState` materialization, resource lowering with `.when()`/`.refresh()` preservation, environment field synthesis with cross-class chain rewrites). The four annotation classes themselves, the source-to-lib transformer model, and the `Widget.environment<T>()` providing extension all already existed in v1 and are not listed. Two extra files needed to clear pub.dev validation: `packages/solid_generator/.pubignore` excluding `test/` (kills 142 spurious flutter-import warnings from generator-output goldens), and `packages/solid_generator/lib/solid_generator.dart` as a doc-only library stub (eliminates the "library name should match package name" warning while leaving the build_runner entry point at `lib/builder.dart`). Verification: `flutter pub get` resolves cleanly; `dart format --set-exit-if-changed .` reports 188 files / 0 changed; the three `dart analyze` invocations report no issues; `dart test packages/solid_generator/ -r github --fail-fast` passes 140 tests; `flutter test example/ -r github` passes 9 tests; both `dart pub publish --dry-run` runs produce only the expected mid-PR "checked-in files are modified in git" warning that resolves on commit. Manual `dart pub publish` is left to the user (annotations first, then generator) after merge.
 
 ---
+
+## M8 — Output cleanup absorbed (retracted `dart fix --apply` delegation)
+
+M8 implements the Section 9 and Section 14 item 7 contract changes that landed when the build_runner maintainer confirmed (a) there is no post-build hook in `build_runner` or `build_config`, and (b) chaining `dart fix --apply` over generated output causes state divergence between local devs and CI. Three formerly-delegated cleanups become in-generator behavior: alphabetical import ordering, unused-`solid_annotations` import pruning, and `const`-on-widget-constructor emission. Each item below ships its own paired golden regeneration plus the corresponding `example/analysis_options.yaml` suppression removal where applicable.
+
+The three items are independent — they may land in any order, or be bundled into a single PR if golden churn permits.
+
+---
+
+### TODO M8-01 — In-generator unused-`solid_annotations` import pruning
+
+**Goal:** Drop `package:solid_annotations/...` from generator output unless the lowered code references the `Disposable` marker interface or the `.environment<T>()` extension. Annotation classes (`@SolidState`, `@SolidEffect`, `@SolidQuery`, `@SolidEnvironment`) are stripped during lowering, so a file that uses only annotations leaves no live reference and the import is pruned. The current rewriter preserves all source imports verbatim, forcing the `unused_import: ignore` suppression in `example/analysis_options.yaml:10`; that suppression becomes dead code after this change and is removed in the same PR.
+
+**SPEC references:** Section 9 (Import Rules — the `solid_annotations` pruning bullet and the rationale paragraph that follows it).
+
+**Files to modify:**
+
+- `packages/solid_generator/lib/src/import_rewriter.dart` — function `computeOutputImports` (line 51). Remove the doc-comment delegation to `dart fix --apply` (lines 48–50). Add a new bool parameter `referencesSolidAnnotations`; when false, filter out any URI starting with `package:solid_annotations/` from the result.
+- `packages/solid_generator/lib/src/import_rewriter.dart` — extend the `RewriteResult` typedef (line 38) with a `bool emitsDisposable` field.
+- `packages/solid_generator/lib/src/plain_class_rewriter.dart`, `packages/solid_generator/lib/src/stateless_rewriter.dart`, `packages/solid_generator/lib/src/state_class_rewriter.dart` — set `emitsDisposable: true` whenever the rewriter emits `implements Disposable` (search for existing `_disposableMarkerName` references at `plain_class_rewriter.dart:16`).
+- `packages/solid_generator/lib/builder.dart` — `_renderOutput` (line 289). Compute `referencesSolidAnnotations = results.any((r) => r.emitsDisposable) || RegExp(r'\.environment\b').hasMatch(combined)` (textual scan; acceptable false-positive bias — a user method literally named `environment` keeps the import live).
+- Regenerate every affected golden output under `packages/solid_generator/test/golden/outputs/`. Whichever fixtures' `source/` imports `solid_annotations` but whose lowered code references neither `Disposable` nor `.environment` need their `solid_annotations` import dropped.
+- `example/analysis_options.yaml` — remove the `unused_import: ignore` line (currently at line 10) and the explanatory comment above it.
+- Add at least three focused unit tests for `computeOutputImports`: drop when neither flag set, keep when `emitsDisposable`, keep when `.environment` appears in the textual scan.
+
+**Acceptance:** `dart test packages/solid_generator/` passes with regenerated goldens. `dart analyze packages/solid_generator/test/golden/outputs/` reports zero `unused_import` warnings. `dart analyze --fatal-infos` from the workspace root passes. The grep `solid_annotations` against `packages/solid_generator/test/golden/outputs/` returns zero matches in any output golden whose paired input uses only `@Solid…` annotations (no `Disposable` / `.environment`). The CI workflow (`.github/workflows/ci.yml`) is green.
+
+**Dependencies:** M7-02.
+
+**Status:** TODO
+
+---
+
+### TODO M8-02 — Alphabetical import sort at emit time
+
+**Goal:** Emit the import block in alphabetical order within each group (`dart:`, then `package:`, then relative) per the new Section 9 contract, matching the analyzer's `directives_ordering` rule. The current rewriter preserves source order verbatim, forcing the `directives_ordering: ignore` suppression in `example/analysis_options.yaml:14`; that suppression becomes dead code after this change and is removed in the same PR. Aliases and `show`/`hide` clauses round-trip exactly — only the order of import lines changes.
+
+**SPEC references:** Section 9 (Import Rules — the alphabetical-ordering bullet).
+
+**Files to modify:**
+
+- `packages/solid_generator/lib/src/import_rewriter.dart` — function `computeOutputImports` (line 51). After the keep/drop logic, sort the URI list with the standard `dart:` → `package:` → relative grouping, alphabetical within each group. Check `package:dart_style` for an existing helper before reimplementing; if none, write a small inline comparator.
+- Regenerate every affected golden output under `packages/solid_generator/test/golden/outputs/` whose imports were not already in alphabetical order in source.
+- `example/analysis_options.yaml` — remove the `directives_ordering: ignore` line (currently at line 14) and the two-line explanatory comment above it.
+- Add a unit test for the comparator covering `dart:` vs `package:` vs relative ordering and within-group alphabetical comparison.
+
+**Acceptance:** `dart test packages/solid_generator/` passes with regenerated goldens. `dart analyze packages/solid_generator/test/golden/outputs/` reports zero `directives_ordering` warnings. `dart analyze --fatal-infos` from the workspace root passes. The CI workflow is green.
+
+**Dependencies:** M7-02. Independent of M8-01 — may land before, after, or bundled with it.
+
+**Status:** TODO
+
+---
+
+### TODO M8-03 — `const`-on-widget-constructor detection
+
+**Goal:** Add `const` to the public widget constructor when statically determinable per the new Section 14 item 7 contract: (a) every constructor parameter forwards to a `final` field via `this.<name>` or `super.<name>`, (b) the constructor has no body (or only an empty body), and (c) the initializer list is either absent or contains only const expressions. Otherwise the constructor round-trips verbatim from source — no other modifications. The canonical `Counter({super.key})` pattern is the most common eligible case.
+
+**SPEC references:** Section 8.1 (line 1118) and Section 14 item 7 (line 1355).
+
+**Files to modify:**
+
+- `packages/solid_generator/lib/src/stateless_rewriter.dart` — near where the public widget header is rebuilt after the StatelessWidget→StatefulWidget split. Add a helper `bool _isConstEligible(ConstructorDeclaration ctor)` that walks the constructor AST and returns true iff all three Section 14 item 7 conditions hold. When true, prefix the emitted constructor declaration with `const`.
+- Regenerate every affected golden output under `packages/solid_generator/test/golden/outputs/` whose lowered widget is now const-eligible.
+- Add focused goldens for at least three eligibility scenarios: (a) `Widget({super.key})` → `const Widget({super.key})`, (b) `Widget({super.key, required this.x})` with `final int x` → `const Widget({super.key, required this.x})`, (c) `Widget({super.key}) : assert(...)` → preserved verbatim (initializer list non-trivial, not const-only).
+
+**Acceptance:** `dart test packages/solid_generator/` passes with regenerated goldens. `dart analyze packages/solid_generator/test/golden/outputs/` reports zero `prefer_const_constructors_in_immutables` warnings on lowered widget classes. `flutter test example/` passes (existing widget tests must not regress). The CI workflow is green.
+
+**Dependencies:** M7-02. Independent of M8-01 and M8-02 — may land in any order.
+
+**Status:** TODO
+
+---
