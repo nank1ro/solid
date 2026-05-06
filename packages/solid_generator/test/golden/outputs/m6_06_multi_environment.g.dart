@@ -17,7 +17,7 @@ class Logger {
 }
 
 class CounterDisplay extends StatefulWidget {
-  CounterDisplay({super.key});
+  const CounterDisplay({super.key});
 
   @override
   State<CounterDisplay> createState() => _CounterDisplayState();

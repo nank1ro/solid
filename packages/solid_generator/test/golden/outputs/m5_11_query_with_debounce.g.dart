@@ -2,7 +2,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
 
 class Searcher extends StatefulWidget {
-  Searcher({super.key});
+  const Searcher({super.key});
 
   @override
   State<Searcher> createState() => _SearcherState();

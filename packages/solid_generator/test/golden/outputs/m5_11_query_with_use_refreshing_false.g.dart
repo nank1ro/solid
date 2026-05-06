@@ -2,7 +2,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
 
 class Loader extends StatefulWidget {
-  Loader({super.key});
+  const Loader({super.key});
 
   @override
   State<Loader> createState() => _LoaderState();

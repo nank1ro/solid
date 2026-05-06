@@ -2,7 +2,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
 
 class NestedCounter extends StatefulWidget {
-  NestedCounter({super.key});
+  const NestedCounter({super.key});
 
   @override
   State<NestedCounter> createState() => _NestedCounterState();

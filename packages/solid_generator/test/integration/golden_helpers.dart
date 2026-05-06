@@ -68,6 +68,10 @@ const List<String> goldenNames = <String>[
   'm6_05_environment_on_state_class',
   'm6_06_multi_environment',
   'm8_01_environment_extension_used',
+  'm8_03_const_ctor_super_key',
+  'm8_03_const_ctor_field_formal',
+  'm8_03_const_ctor_literal_initializer',
+  'm8_03_const_ctor_assert_preserved',
 ];
 
 /// Memoized golden directory resolution. Resolved relative to the package

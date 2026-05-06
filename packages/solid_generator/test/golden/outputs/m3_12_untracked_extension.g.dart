@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
 
 class KeyedContainerUntracked extends StatefulWidget {
-  KeyedContainerUntracked({super.key});
+  const KeyedContainerUntracked({super.key});
 
   @override
   State<KeyedContainerUntracked> createState() =>

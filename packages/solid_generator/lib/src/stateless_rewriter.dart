@@ -57,7 +57,16 @@ RewriteResult rewriteStatelessWidget(
     widgetBoundNames,
     source,
   );
-  final ctorsBlock = _emitCtors(members.ctors, source);
+  final classFieldsAreConstSafe = _classFieldsAreConstSafe(
+    members.fields,
+    widgetBoundNames,
+    partitionExcludeNames,
+  );
+  final ctorsBlock = _emitCtors(
+    members.ctors,
+    source,
+    classFieldsAreConstSafe,
+  );
   // SPEC §5.1 M6-04 cross-class env-field receiver type map.
   final environmentFields = solidEnvironments.isEmpty
       ? const <String, String>{}
@@ -266,7 +275,7 @@ Set<String> _collectWidgetBoundNames(List<ConstructorDeclaration> ctors) {
   for (final ctor in ctors) {
     if (ctor.factoryKeyword != null) continue;
     for (final param in ctor.parameters.parameters) {
-      final inner = param is DefaultFormalParameter ? param.parameter : param;
+      final inner = _unwrapDefault(param);
       if (inner is FieldFormalParameter) {
         names.add(inner.name.lexeme);
       }
@@ -279,6 +288,14 @@ Set<String> _collectWidgetBoundNames(List<ConstructorDeclaration> ctors) {
   }
   return names;
 }
+
+/// Strips the `DefaultFormalParameter` wrapper so the inner shape
+/// (`FieldFormalParameter`, `SuperFormalParameter`, …) can be type-checked
+/// directly. Default values and `required`/`covariant` modifiers live on
+/// the wrapper and are immaterial to const-eligibility / field-binding
+/// decisions.
+FormalParameter _unwrapDefault(FormalParameter p) =>
+    p is DefaultFormalParameter ? p.parameter : p;
 
 typedef _FieldPartition = ({String widgetFieldsText, String stateFieldsText});
 
@@ -310,14 +327,107 @@ _FieldPartition _partitionFields(
   );
 }
 
-/// Emits every constructor verbatim, 2-space indented and joined by blank
-/// lines. Returns an empty string when [ctors] is empty (Dart synthesises
-/// the implicit default constructor on the rewritten class).
-String _emitCtors(List<ConstructorDeclaration> ctors, String source) {
+/// Emits every constructor 2-space indented and joined by blank lines,
+/// prefixing `const ` on each ctor that is statically determinable
+/// const-eligible per SPEC §14 item 7. Returns an empty string when [ctors]
+/// is empty (Dart synthesises the implicit default constructor on the
+/// rewritten class).
+///
+/// [classFieldsAreConstSafe] is the class-level gate: false when any
+/// retained widget-bound non-`@SolidState` instance field is non-final
+/// (and non-static / non-const), in which case NO ctor on the class can
+/// be const regardless of its own shape. When true, each ctor is checked
+/// individually via [_isConstEligibleCtor].
+String _emitCtors(
+  List<ConstructorDeclaration> ctors,
+  String source,
+  bool classFieldsAreConstSafe,
+) {
   if (ctors.isEmpty) return '';
   return ctors
-      .map((c) => '  ${source.substring(c.offset, c.end)}')
+      .map((c) {
+        final text = source.substring(c.offset, c.end);
+        final addConst = classFieldsAreConstSafe && _isConstEligibleCtor(c);
+        return addConst ? '  const $text' : '  $text';
+      })
       .join('\n\n');
+}
+
+/// Returns true iff [ctor] alone meets the per-ctor const-eligibility
+/// conditions of SPEC §14 item 7: it is generative (not factory/external)
+/// and not already declared `const`; every parameter forwards via
+/// `this.<name>` (FieldFormalParameter) or `super.<name>`
+/// (SuperFormalParameter); the body is empty (`;` or `{}`); the
+/// initializer list is either absent or contains only
+/// [ConstructorFieldInitializer] entries whose RHS is a basic literal
+/// per [_isLiteralRhs]. AssertInitializer, RedirectingConstructorInvocation,
+/// SuperConstructorInvocation, and any non-literal RHS disqualify.
+///
+/// The class-level gate (every retained widget-bound instance field is
+/// final) is checked separately by [_classFieldsAreConstSafe] — this
+/// function does NOT inspect fields.
+bool _isConstEligibleCtor(ConstructorDeclaration ctor) {
+  if (ctor.factoryKeyword != null) return false;
+  if (ctor.externalKeyword != null) return false;
+  if (ctor.constKeyword != null) return false;
+  for (final param in ctor.parameters.parameters) {
+    final inner = _unwrapDefault(param);
+    if (inner is! FieldFormalParameter && inner is! SuperFormalParameter) {
+      return false;
+    }
+  }
+  final body = ctor.body;
+  final hasEmptyBody =
+      body is EmptyFunctionBody ||
+      (body is BlockFunctionBody && body.block.statements.isEmpty);
+  if (!hasEmptyBody) return false;
+  for (final initializer in ctor.initializers) {
+    if (initializer is! ConstructorFieldInitializer) return false;
+    if (!_isLiteralRhs(initializer.expression)) return false;
+  }
+  return true;
+}
+
+/// Returns true iff [expr] is one of the basic literal forms that are
+/// always const-evaluable. Conservative subset of the spec's "contains
+/// only const expressions" clause (SPEC §14 item 7); covers the known
+/// corpus and is trivially extensible to cover other forms (`const C(...)`,
+/// `AdjacentStrings`, identifier reads of static const fields, ...) later.
+bool _isLiteralRhs(Expression expr) {
+  return expr is BooleanLiteral ||
+      expr is DoubleLiteral ||
+      expr is IntegerLiteral ||
+      expr is NullLiteral ||
+      expr is SimpleStringLiteral ||
+      expr is SymbolLiteral;
+}
+
+/// Returns true iff every retained widget-bound non-`@SolidState` instance
+/// field of the original class is `final` (or `const` / `static`). A non-
+/// final non-const non-static instance field on the lowered StatefulWidget
+/// half makes it impossible for ANY constructor on the class to be const,
+/// regardless of the constructor's own shape — so this is the class-level
+/// gate paired with [_isConstEligibleCtor]'s per-ctor checks.
+///
+/// `late final` counts as final (the `late` modifier is orthogonal to
+/// finality). Static fields are skipped because they don't participate in
+/// instance construction. Const fields are also skipped because they're
+/// already immutable.
+bool _classFieldsAreConstSafe(
+  List<FieldDeclaration> fields,
+  Set<String> widgetBoundNames,
+  Set<String> partitionExcludeNames,
+) {
+  for (final f in fields) {
+    final name = f.fields.variables.first.name.lexeme;
+    if (partitionExcludeNames.contains(name)) continue;
+    if (!widgetBoundNames.contains(name)) continue;
+    if (f.isStatic) continue;
+    if (f.fields.isFinal) continue;
+    if (f.fields.isConst) continue;
+    return false;
+  }
+  return true;
 }
 
 /// Emits the public `StatefulWidget` half of the class split (SPEC §8.1).

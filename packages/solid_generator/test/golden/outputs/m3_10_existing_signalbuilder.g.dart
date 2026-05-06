@@ -2,7 +2,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
 
 class ManualWrapProbe extends StatefulWidget {
-  ManualWrapProbe({super.key});
+  const ManualWrapProbe({super.key});
 
   @override
   State<ManualWrapProbe> createState() => _ManualWrapProbeState();

@@ -2,7 +2,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
 
 class BuilderProbe extends StatefulWidget {
-  BuilderProbe({super.key});
+  const BuilderProbe({super.key});
 
   @override
   State<BuilderProbe> createState() => _BuilderProbeState();

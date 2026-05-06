@@ -2,7 +2,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
 
 class ShadowProbe extends StatefulWidget {
-  ShadowProbe({super.key});
+  const ShadowProbe({super.key});
 
   @override
   State<ShadowProbe> createState() => _ShadowProbeState();

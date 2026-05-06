@@ -2,24 +2,27 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
 
 class Greeter extends StatefulWidget {
-  const Greeter({super.key});
+  const Greeter({super.key, required this.label});
+
+  final String label;
 
   @override
   State<Greeter> createState() => _GreeterState();
 }
 
 class _GreeterState extends State<Greeter> {
-  late final fetchData = Resource<String>(() async {
-    await Future<void>.delayed(const Duration(seconds: 1));
-    return 'fetched';
-  }, name: 'fetchData');
+  final counter = Signal<int>(0, name: 'counter');
 
   @override
   void dispose() {
-    fetchData.dispose();
+    counter.dispose();
     super.dispose();
   }
 
   @override
-  Widget build(BuildContext context) => const Placeholder();
+  Widget build(BuildContext context) => SignalBuilder(
+    builder: (context, child) {
+      return Text('$label ${counter.value}');
+    },
+  );
 }

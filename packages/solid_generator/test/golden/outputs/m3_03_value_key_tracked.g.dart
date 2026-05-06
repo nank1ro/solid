@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
 
 class KeyedContainer extends StatefulWidget {
-  KeyedContainer({super.key});
+  const KeyedContainer({super.key});
 
   @override
   State<KeyedContainer> createState() => _KeyedContainerState();

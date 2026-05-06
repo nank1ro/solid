@@ -2,7 +2,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
 
 class EffectShadowing extends StatefulWidget {
-  EffectShadowing({super.key});
+  const EffectShadowing({super.key});
 
   @override
   State<EffectShadowing> createState() => _EffectShadowingState();

@@ -2,7 +2,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
 
 class EffectWithDeps extends StatefulWidget {
-  EffectWithDeps({super.key});
+  const EffectWithDeps({super.key});
 
   @override
   State<EffectWithDeps> createState() => _EffectWithDepsState();
