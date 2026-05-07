@@ -10,9 +10,24 @@ class CounterPage extends StatefulWidget {
 
 class _CounterPageState extends State<CounterPage> {
   final counter = Signal<int>(0, name: 'counter');
+  late final doubleCounter = Computed<int>(
+    () => counter.value * 2,
+    name: 'doubleCounter',
+  );
+  late final logCounter = Effect(() {
+    print('Counter updated: ${counter.value}');
+  }, name: 'logCounter');
+
+  @override
+  void initState() {
+    super.initState();
+    logCounter;
+  }
 
   @override
   void dispose() {
+    logCounter.dispose();
+    doubleCounter.dispose();
     counter.dispose();
     super.dispose();
   }
@@ -23,7 +38,9 @@ class _CounterPageState extends State<CounterPage> {
       body: Center(
         child: SignalBuilder(
           builder: (context, child) {
-            return Text('Counter is ${counter.value}');
+            return Text(
+              'Counter is ${counter.value}, double is ${doubleCounter.value}',
+            );
           },
         ),
       ),

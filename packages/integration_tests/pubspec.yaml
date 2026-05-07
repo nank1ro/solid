@@ -1,5 +1,5 @@
-name: example
-description: Example app demonstrating solid_generator.
+name: integration_tests
+description: Runtime widget-contract tests for code emitted by solid_generator.
 publish_to: 'none'
 version: 0.0.1
 
@@ -14,12 +14,14 @@ dependencies:
   flutter_solidart: ^2.7.3
   provider: ^6.1.0
   solid_annotations:
-    path: ../packages/solid_annotations
+    path: ../solid_annotations
 
 dev_dependencies:
   build_runner: ^2.14.0
+  flutter_test:
+    sdk: flutter
   solid_generator:
-    path: ../packages/solid_generator
+    path: ../solid_generator
   very_good_analysis: ^10.0.0
 
 flutter:

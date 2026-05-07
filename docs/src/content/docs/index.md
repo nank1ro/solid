@@ -24,7 +24,7 @@ The benefits of using Solid include:
 
 You write this code, without any boilerplate and manual state management:
 
-```dart
+```dart title="source/counter.dart"
 import 'package:flutter/material.dart';
 import 'package:solid_annotations/solid_annotations.dart';
 

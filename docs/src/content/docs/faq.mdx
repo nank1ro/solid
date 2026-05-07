@@ -61,7 +61,7 @@ For the limitations of how Flutter works, your app needs to be built from the `l
 So the code I transpile must be transpiled in the `lib` folder.
 
 <Aside type="note">
-You can change the input and output directory by passing `--source` and `--output` to the `solid` command if you really need to.
+The input and output directories live in `build.yaml` (`targets.$default.sources`) and in the builder's `build_extensions`. The Solid builder hard-codes `^source/{{}}.dart` → `lib/{{}}.dart`, so changing the directories means forking the builder config in `packages/solid_generator/build.yaml`.
 </Aside>
 
 ## Why did I created Solid?
@@ -83,7 +83,6 @@ targets:
 
 This way, other generators will also consider the `source` directory as input.
 
-Then in one Terminal tab you simply use `solid --watch` to keep Solid running in watch mode.
-In another Terminal tab you can run `dart run build_runner build --delete-conflicting-outputs` to run other generators.
+Then run `dart run build_runner watch --delete-conflicting-outputs` once — `build_runner` invokes every registered builder, so Solid runs alongside `freezed`, `json_serializable`, etc. in the same process.
 
-Then write your code in the `source` directory, using `part` statements or what generators need.
+Write your code in the `source` directory, using `part` statements or whatever the other generators need.

@@ -4,11 +4,11 @@
 // empty `dispose()` body for plain classes) at runtime.
 //
 // `Counter` and `CounterDisplay` are imported from the generator-lowered
-// `package:example/m6_09_environment_app.dart` — this is the first widget
-// test that runs against generated `lib/` code (M1-10 / M3-04 / M4-07 / M5-07
-// all inline a test-local mirror of the lowered shape). The widget under
+// `package:integration_tests/m6_09_environment_app.dart` — this is the first
+// widget test that runs against generated `lib/` code (M1-10 / M3-04 / M4-07 /
+// M5-07 all inline a test-local mirror of the lowered shape). The widget under
 // test is therefore the actual production output of the source app at
-// `example/source/m6_09_environment_app.dart`.
+// `packages/integration_tests/source/m6_09_environment_app.dart`.
 //
 // The dispose assertion uses a closure-counted `dispose:` callback (rather
 // than `Counter.value.onDispose`) because the M6-09 acceptance criterion is
@@ -18,9 +18,9 @@
 
 import 'dart:async';
 
-import 'package:example/m6_09_environment_app.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:integration_tests/m6_09_environment_app.dart';
 import 'package:solid_annotations/solid_annotations.dart';
 
 void main() {
