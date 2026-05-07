@@ -62,10 +62,11 @@ RewriteResult rewriteStatelessWidget(
     widgetBoundNames,
     partitionExcludeNames,
   );
-  final ctorsBlock = _emitCtors(
+  final emittedCtors = _emitCtors(
     members.ctors,
     source,
     classFieldsAreConstSafe,
+    className,
   );
   // SPEC §5.1 M6-04 cross-class env-field receiver type map.
   final environmentFields = solidEnvironments.isEmpty
@@ -101,7 +102,7 @@ RewriteResult rewriteStatelessWidget(
   final widgetClass = _emitWidgetClass(
     className,
     stateClassName,
-    ctorsBlock,
+    emittedCtors.text,
     partition.widgetFieldsText,
   );
   final stateClass = _emitStateClass(
@@ -141,6 +142,7 @@ RewriteResult rewriteStatelessWidget(
     text: '$widgetClass\n\n$stateClass\n',
     solidartNames: solidartNames,
     emitsDisposable: false,
+    constCtorNames: emittedCtors.constCtorNames,
   );
 }
 
@@ -338,7 +340,7 @@ _FieldPartition _partitionFields(
 
 /// Emits every constructor 2-space indented and joined by blank lines,
 /// prefixing `const ` on each ctor that is statically determinable
-/// const-eligible per SPEC §14 item 7. Returns an empty string when [ctors]
+/// const-eligible per SPEC §14 item 7. Returns an empty `text` when [ctors]
 /// is empty (Dart synthesises the implicit default constructor on the
 /// rewritten class).
 ///
@@ -347,19 +349,32 @@ _FieldPartition _partitionFields(
 /// (and non-static / non-const), in which case NO ctor on the class can
 /// be const regardless of its own shape. When true, each ctor is checked
 /// individually via [_isConstEligibleCtor].
-String _emitCtors(
+///
+/// `constCtorNames` enumerates the constructor invocation names that gained
+/// `const` — `"$className"` for the unnamed ctor, `"$className.<name>"` for
+/// named ctors — used by the post-emit call-site rewriter to decide which
+/// `InstanceCreationExpression`s elsewhere in the output to promote.
+({String text, Set<String> constCtorNames}) _emitCtors(
   List<ConstructorDeclaration> ctors,
   String source,
   bool classFieldsAreConstSafe,
+  String className,
 ) {
-  if (ctors.isEmpty) return '';
-  return ctors
-      .map((c) {
-        final text = source.substring(c.offset, c.end);
-        final addConst = classFieldsAreConstSafe && _isConstEligibleCtor(c);
-        return addConst ? '  const $text' : '  $text';
-      })
-      .join('\n\n');
+  if (ctors.isEmpty) return (text: '', constCtorNames: const <String>{});
+  final constCtorNames = <String>{};
+  final pieces = <String>[];
+  for (final c in ctors) {
+    final ctorText = source.substring(c.offset, c.end);
+    final addConst = classFieldsAreConstSafe && _isConstEligibleCtor(c);
+    if (addConst) {
+      final name = c.name?.lexeme;
+      constCtorNames.add(name == null ? className : '$className.$name');
+      pieces.add('  const $ctorText');
+    } else {
+      pieces.add('  $ctorText');
+    }
+  }
+  return (text: pieces.join('\n\n'), constCtorNames: constCtorNames);
 }
 
 /// Returns true iff [ctor] alone meets the per-ctor const-eligibility

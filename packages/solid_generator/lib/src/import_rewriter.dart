@@ -48,10 +48,20 @@ const Set<String> solidartNames = {
 /// into the lowered class header (SPEC §10 marker rule). The builder unions
 /// this flag across results to decide whether to keep the `solid_annotations`
 /// import.
+///
+/// `constCtorNames` is the set of constructor invocation names (matching
+/// `InstanceCreationExpression.constructorName.toString()`) that this
+/// rewriter emitted with a `const` keyword on their declaration — `"Counter"`
+/// for the unnamed ctor, `"Counter.named"` for a named ctor. The builder
+/// unions these across all results and runs a post-emit pass that prepends
+/// `const ` to matching call sites elsewhere in the assembled output (SPEC
+/// §14 item 7 — keeps `prefer_const_constructors` silent end-to-end without
+/// requiring the user to run `dart fix`).
 typedef RewriteResult = ({
   String text,
   Set<String> solidartNames,
   bool emitsDisposable,
+  Set<String> constCtorNames,
 });
 
 /// Returns the import URIs that should appear at the top of the generated

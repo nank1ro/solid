@@ -6,6 +6,7 @@ import 'package:dart_style/dart_style.dart';
 
 import 'package:solid_generator/src/annotation_reader.dart';
 import 'package:solid_generator/src/class_kind.dart';
+import 'package:solid_generator/src/const_call_site_rewriter.dart';
 import 'package:solid_generator/src/effect_model.dart';
 import 'package:solid_generator/src/environment_model.dart';
 import 'package:solid_generator/src/field_model.dart';
@@ -308,7 +309,16 @@ String _renderOutput(
   final importBlock = imports.map((u) => "import '$u';").join('\n');
 
   final combined = '$importBlock\n\n$body\n';
-  return _formatter.format(combined);
+  // SPEC §14 item 7 follow-up. M8-03 adds `const` to widget-ctor declarations;
+  // this pass adds `const` to call sites of those declarations elsewhere in
+  // the assembled output (top-level `main()`, rewritten `build` bodies,
+  // passthrough classes — every scope), so `prefer_const_constructors` lint
+  // stays silent end-to-end.
+  final constCtorNames = <String>{
+    for (final r in results) ...r.constCtorNames,
+  };
+  final withConst = addConstAtCallSites(combined, constCtorNames);
+  return _formatter.format(withConst);
 }
 
 /// Returns a [RewriteResult] for [c]: a verbatim slice when the class has
@@ -339,6 +349,7 @@ RewriteResult _passthroughResult(AstNode node, String source) {
     text: source.substring(node.offset, node.end),
     solidartNames: const <String>{},
     emitsDisposable: false,
+    constCtorNames: const <String>{},
   );
 }
 
