@@ -30,4 +30,4 @@ jobs:
       - run: dart analyze packages/solid_generator/test/golden/outputs/
       - run: dart analyze packages/solid_annotations
       - run: dart test packages/solid_generator/ -r github --fail-fast
-      - run: flutter test example/ -r github
+      - run: flutter test packages/integration_tests/ -r github
