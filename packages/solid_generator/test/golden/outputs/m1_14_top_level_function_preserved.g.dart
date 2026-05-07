@@ -4,7 +4,9 @@ import 'package:provider/provider.dart';
 import 'package:solid_annotations/solid_annotations.dart';
 
 void main() {
-  runApp(MaterialApp(home: CounterDisplay().environment((_) => Counter())));
+  runApp(
+    MaterialApp(home: const CounterDisplay().environment((_) => Counter())),
+  );
 }
 
 class Counter implements Disposable {

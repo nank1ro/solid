@@ -212,6 +212,7 @@ RewriteResult rewriteStateClass(
       if (solidQueries.any((q) => q.needsSourceComputed)) 'Computed',
     },
     emitsDisposable: false,
+    constCtorNames: const <String>{},
   );
 }
 
