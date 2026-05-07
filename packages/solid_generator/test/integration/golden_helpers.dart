@@ -72,6 +72,9 @@ const List<String> goldenNames = <String>[
   'm8_03_const_ctor_field_formal',
   'm8_03_const_ctor_literal_initializer',
   'm8_03_const_ctor_assert_preserved',
+  'm1_14_top_level_function_preserved',
+  'm1_15_top_level_variable_preserved',
+  'm1_16_top_level_extension_preserved',
 ];
 
 /// Memoized golden directory resolution. Resolved relative to the package
