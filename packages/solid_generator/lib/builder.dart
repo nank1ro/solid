@@ -101,14 +101,7 @@ class _SolidBuilder implements Builder {
     validateSolidEnvironmentTargets(parsed.unit);
 
     final annotatedClasses = _collectAnnotatedClasses(parsed.unit, source);
-    if (annotatedClasses.every(
-      (c) =>
-          c.fields.isEmpty &&
-          c.getters.isEmpty &&
-          c.effects.isEmpty &&
-          c.queries.isEmpty &&
-          c.environments.isEmpty,
-    )) {
+    if (annotatedClasses.every((c) => c.hasNoAnnotations)) {
       // Hint matched, but no `@SolidState` field/getter, `@SolidEffect`
       // method, or `@SolidQuery` method resolved — the file likely contains
       // a comment or string literal mentioning `@Solid…`. Reserved
@@ -175,6 +168,13 @@ class _AnnotatedClass {
   final List<EffectModel> effects;
   final List<QueryModel> queries;
   final List<EnvironmentModel> environments;
+
+  bool get hasNoAnnotations =>
+      fields.isEmpty &&
+      getters.isEmpty &&
+      effects.isEmpty &&
+      queries.isEmpty &&
+      environments.isEmpty;
 }
 
 /// Walks [unit] once and returns every class paired with its `@SolidState`
@@ -268,29 +268,25 @@ String _renderOutput(
   Map<String, Set<String>> classRegistry,
   String source,
 ) {
-  final results = annotatedClasses.map((c) {
-    if (c.fields.isEmpty &&
-        c.getters.isEmpty &&
-        c.effects.isEmpty &&
-        c.queries.isEmpty &&
-        c.environments.isEmpty) {
-      return (
-        text: source.substring(c.decl.offset, c.decl.end),
-        solidartNames: const <String>{},
-        emitsDisposable: false,
-      );
-    }
-    return _rewriteClass(
-      c.decl,
-      c.fields,
-      c.getters,
-      c.effects,
-      c.queries,
-      c.environments,
-      classRegistry,
-      source,
-    );
-  }).toList();
+  // Walk `unit.declarations` in source order. Class declarations are paired
+  // with `annotatedClasses` (which `_collectAnnotatedClasses` populates in
+  // the same order); non-class declarations (`FunctionDeclaration`,
+  // `TopLevelVariableDeclaration`, `ExtensionDeclaration`, `EnumDeclaration`,
+  // `TypeAlias`, `MixinDeclaration`) are sliced verbatim from `source` —
+  // without this branch, top-level `main()` and friends silently disappear.
+  var classIdx = 0;
+  final results = <RewriteResult>[
+    for (final decl in unit.declarations)
+      if (decl is ClassDeclaration)
+        _resultForClass(annotatedClasses[classIdx++], classRegistry, source)
+      else
+        _passthroughResult(decl, source),
+  ];
+  assert(
+    classIdx == annotatedClasses.length,
+    '_collectAnnotatedClasses must visit every ClassDeclaration in source '
+    'order; otherwise the index walk above misaligns class -> rewrite pairs.',
+  );
 
   final body = results.map((r) => r.text).join('\n\n');
   // SPEC §9 bullet 4: `Disposable` is tracked structurally on the rewriter
@@ -313,6 +309,37 @@ String _renderOutput(
 
   final combined = '$importBlock\n\n$body\n';
   return _formatter.format(combined);
+}
+
+/// Returns a [RewriteResult] for [c]: a verbatim slice when the class has
+/// no reactive annotations, otherwise the lowered output of [_rewriteClass].
+RewriteResult _resultForClass(
+  _AnnotatedClass c,
+  Map<String, Set<String>> classRegistry,
+  String source,
+) {
+  if (c.hasNoAnnotations) return _passthroughResult(c.decl, source);
+  return _rewriteClass(
+    c.decl,
+    c.fields,
+    c.getters,
+    c.effects,
+    c.queries,
+    c.environments,
+    classRegistry,
+    source,
+  );
+}
+
+/// Verbatim source slice for [node], packaged as an inert [RewriteResult]
+/// (no `solidart` names emitted, no `Disposable` marker). Used for
+/// non-annotated classes and every non-class top-level declaration.
+RewriteResult _passthroughResult(AstNode node, String source) {
+  return (
+    text: source.substring(node.offset, node.end),
+    solidartNames: const <String>{},
+    emitsDisposable: false,
+  );
 }
 
 /// Dispatches on [decl]'s class kind to the matching rewriter.
