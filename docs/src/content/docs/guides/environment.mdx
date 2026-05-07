@@ -29,7 +29,7 @@ class CounterDisplay extends StatelessWidget {
 `counter` is bound to the nearest ancestor `Provider<Counter>` in the widget tree on first access. Because `Counter.value` is a `@SolidState` field, the read is reactive: only the `Text` widget rebuilds when `counter.value` changes — the same fine-grained reactivity you'd get from a same-class `@SolidState` read.
 
 <Aside type="tip">
-The lookup is lazy. The field initializer runs the first time the field is read, so it works inside `build`, an `@SolidEffect`, an `@SolidQuery` body, or any other reactive context — no `initState` boilerplate.
+The lookup is lazy. The field initializer runs the first time the field is read, so it works inside `build`, a `@SolidEffect`, a `@SolidQuery` body, or any other context.
 </Aside>
 
 ## Providing the instance

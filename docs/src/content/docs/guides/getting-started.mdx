@@ -14,13 +14,7 @@ import { Steps } from '@astrojs/starlight/components';
 
 <Steps>
 
-1. To install Solid, run the following command
-
-   ```bash
-   dart pub global activate solid_generator
-   ```
-
-2. Then, add the dependencies needed by running this command in your Flutter project
+1. Add the runtime dependencies to your Flutter project
 
    ```bash
    flutter pub add solid_annotations flutter_solidart provider
@@ -28,7 +22,26 @@ import { Steps } from '@astrojs/starlight/components';
    
    [flutter_solidart](https://pub.dev/packages/flutter_solidart) is the state-management runtime that backs Solid's reactive primitives, and [provider](https://pub.dev/packages/provider) is the dependency-injection plumbing for `@SolidEnvironment`. You don't have to learn either directly — Solid generates the boilerplate that uses them — but they appear in the generated `lib/` output, so they need to be in your pubspec.
 
-3. I'd also suggest installing the [very_good_analysis](https://pub.dev/packages/very_good_analysis) package to get amazing linting rules for your Flutter project.
+2. Add the generator and `build_runner` as dev dependencies
+
+   ```bash
+   dart pub add --dev solid_generator build_runner
+   ```
+
+   Solid ships as a `build_runner` builder — there is no separate CLI to install.
+
+3. Update (or create) `build.yaml` at the project root so `build_runner` watches the `source/` folder. Most projects already have a `build.yaml` from other generators (`freezed`, `json_serializable`, …); just add `source/**` to the existing `sources` list. New projects can drop the file in as-is:
+
+   ```yaml title="build.yaml" {4}
+   targets:
+     $default:
+       sources:
+         - source/**
+         - lib/**
+         - $package$
+   ```
+
+4. I'd also suggest installing the [very_good_analysis](https://pub.dev/packages/very_good_analysis) package to get amazing linting rules for your Flutter project.
 
    ```bash
    flutter pub add dev:very_good_analysis
@@ -74,22 +87,23 @@ In addition, Solid is not a common generator because it transpiles your existing
 
 ## Usage
 
-```sh
-Usage: solid [options]
+Run the generator with `build_runner`:
 
--s, --source          Source directory to read from
-                      (defaults to "source")
--o, --output          Output directory to write to
-                      (defaults to "lib")
--w, --[no-]watch      Watch for file changes and auto-regenerate
--c, --[no-]clean      Deletes the build cache. The next build will be a full build.
--v, --[no-]verbose    Verbose output
--h, --[no-]help       Show this help message
+```bash
+# one-shot build
+dart run build_runner build --delete-conflicting-outputs
 
-Examples:
-  solid                    # Basic transpilation
-  solid --watch            # Watch mode
-  solid --clean --verbose  # Clean build with verbose output
+# watch mode (recommended during development)
+dart run build_runner watch --delete-conflicting-outputs
 ```
 
-> The next chapters expect that you have setup Solid in your Flutter project, created the `source` folder and started the command with `solid --watch` to auto-generate the `lib` folder on file changes.
+### Hot reload
+
+`flutter run` does not auto-reload when `build_runner` rewrites files under `lib/`, because no IDE save event fires for filesystem changes. There are two supported workflows:
+
+- Press `r` in the `flutter run` terminal after `build_runner` emits.
+- Use [`dashmonx`](https://pub.dev/packages/dashmonx), which wraps `flutter run` and triggers hot reload automatically when files under `lib/` change. Any `flutter run` flag passes through, e.g. `dashmonx -d chrome` for a web target.
+
+<Aside>
+The next chapters assume you have set up Solid in your Flutter project, created the `source` folder, and are running `dart run build_runner watch --delete-conflicting-outputs` to regenerate `lib/` on every change.
+</Aside>

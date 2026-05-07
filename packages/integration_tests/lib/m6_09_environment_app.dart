@@ -20,7 +20,7 @@ class CounterDisplay extends StatefulWidget {
 }
 
 class _CounterDisplayState extends State<CounterDisplay> {
-  late final Counter counter = context.read<Counter>();
+  late final counter = context.read<Counter>();
 
   @override
   Widget build(BuildContext context) {
