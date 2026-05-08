@@ -15,22 +15,22 @@ Solid is a tiny framework on top of Flutter. You write reactive state directly o
 
 Each annotation goes on a class member of a `StatelessWidget` (or any class — `@SolidEnvironment` also works in `State<X>`). The generator turns the widget into a `StatefulWidget` under the hood.
 
-- **`@SolidState()`** — reactive state. Source: `docs/src/content/docs/guides/state.mdx`.
+- **`@SolidState()`** — reactive state. Docs: <https://solid.mariuti.com/guides/state>.
   - Valid on: instance field with initializer, `late` non-nullable instance field, instance getter (derived state).
   - Invalid: `final`, `const`, `static`, setter, method, top-level.
   - Example: `@SolidState() int counter = 0;` or `@SolidState() int get doubleCounter => counter * 2;`
 
-- **`@SolidEffect()`** — side effect that re-runs whenever its tracked dependencies change. Source: `docs/src/content/docs/guides/effect.mdx`.
+- **`@SolidEffect()`** — side effect that re-runs whenever its tracked dependencies change. Docs: <https://solid.mariuti.com/guides/effect>.
   - Valid on: instance method returning `void`.
   - Example: `@SolidEffect() void logCounter() { print('Counter: $counter'); }`
 
-- **`@SolidQuery()`** — reactive async/stream resource. Source: `docs/src/content/docs/guides/query.mdx`.
+- **`@SolidQuery()`** — reactive async/stream resource. Docs: <https://solid.mariuti.com/guides/query>.
   - Valid on: instance method returning `Future<T>` or `Stream<T>`. **No parameters.**
   - Call site `fetchData()` returns a `Resource<T>` exposing `.when(ready:, loading:, error:)`, `.maybeWhen(...)`, `.isRefreshing`, `.refresh()`.
   - Options: `debounce: Duration(...)`, `useRefreshing: false`.
   - Example: `@SolidQuery() Future<String> fetchData() async { ... }` then `fetchData().when(ready: Text.new, loading: CircularProgressIndicator.new, error: (e, _) => Text('$e'))`.
 
-- **`@SolidEnvironment()`** — inject a value from the widget tree (SwiftUI `@Environment`-style). Source: `docs/src/content/docs/guides/environment.mdx`.
+- **`@SolidEnvironment()`** — inject a value from the widget tree (SwiftUI `@Environment`-style). Docs: <https://solid.mariuti.com/guides/environment>.
   - Valid on: `late` field on a `StatelessWidget` or `State<X>`.
   - Bound on first access to the nearest ancestor `Provider<T>`. Reactive — `@SolidState` fields on the injected type stay reactive.
   - Provide via `.environment<T>()` extension or `Provider<T>` from `package:provider`.
@@ -79,5 +79,4 @@ The skill ships two scripts under `scripts/`:
 ## Where to read more
 
 - Canonical docs: <https://solid.mariuti.com>
-- In-repo: `docs/src/content/docs/guides/` (offline)
-- Working example: `example/source/counter.dart`, `example/source/main.dart`
+- Working example on GitHub: <https://github.com/nank1ro/solid/tree/main/example/source>

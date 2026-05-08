@@ -1,6 +1,6 @@
 # Solid troubleshooting
 
-Common errors and fixes. Source: `docs/src/content/docs/faq.mdx` plus the "common mistakes" callouts in each guide.
+Common errors and fixes. Source: <https://solid.mariuti.com/faq> plus the "common mistakes" callouts in each guide.
 
 ## Build & generation
 

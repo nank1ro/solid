@@ -1,10 +1,10 @@
 # Solid patterns
 
-Six canonical idioms, each with a complete `source/` snippet. All examples lifted from the user docs at `docs/src/content/docs/guides/`.
+Six canonical idioms, each with a complete `source/` snippet. All examples lifted from the user docs at <https://solid.mariuti.com>.
 
 ## 1. Counter with `@SolidState` field
 
-Source: `state.mdx`. The simplest reactive primitive — a mutable field whose reads are tracked.
+Docs: <https://solid.mariuti.com/guides/state>. The simplest reactive primitive — a mutable field whose reads are tracked.
 
 ```dart title="source/counter.dart"
 import 'package:flutter/material.dart';
@@ -33,7 +33,7 @@ Only the `Text` rebuilds when `counter` changes — fine-grained reactivity, no 
 
 ## 2. Computed value via `@SolidState` getter
 
-Source: `state.mdx`. A getter annotated with `@SolidState` is a derived value that re-evaluates when its dependencies change.
+Docs: <https://solid.mariuti.com/guides/state>. A getter annotated with `@SolidState` is a derived value that re-evaluates when its dependencies change.
 
 ```dart title="source/computed_counter.dart"
 class Counter extends StatelessWidget {
@@ -63,7 +63,7 @@ class Counter extends StatelessWidget {
 
 ## 3. `@SolidEffect` reacting to state
 
-Source: `effect.mdx`. A `void` instance method that re-runs whenever its tracked reads change.
+Docs: <https://solid.mariuti.com/guides/effect>. A `void` instance method that re-runs whenever its tracked reads change.
 
 ```dart title="source/effect_example.dart"
 class EffectExample extends StatelessWidget {
@@ -93,7 +93,7 @@ class EffectExample extends StatelessWidget {
 
 ## 4. `@SolidQuery` async fetch with `.when(...)`
 
-Source: `query.mdx`. Annotate a parameterless method returning `Future<T>` (or `Stream<T>`). The call site returns a `Resource<T>` you render with `.when`.
+Docs: <https://solid.mariuti.com/guides/query>. Annotate a parameterless method returning `Future<T>` (or `Stream<T>`). The call site returns a `Resource<T>` you render with `.when`.
 
 ```dart title="source/query_example.dart"
 class QueryExample extends StatelessWidget {
@@ -125,7 +125,7 @@ class QueryExample extends StatelessWidget {
 
 ## 5. `@SolidQuery` reacting to state, with `debounce`
 
-Source: `query.mdx`. The query has no parameters — it reads `@SolidState` fields from its body and re-runs whenever they change. `debounce` waits N after the last change before re-executing.
+Docs: <https://solid.mariuti.com/guides/query>. The query has no parameters — it reads `@SolidState` fields from its body and re-runs whenever they change. `debounce` waits N after the last change before re-executing.
 
 ```dart title="source/query_with_source_example.dart"
 class QueryWithSourceExample extends StatelessWidget {
@@ -167,7 +167,7 @@ class QueryWithSourceExample extends StatelessWidget {
 
 ## 6. `@SolidEnvironment` reading an ancestor `Provider<T>`
 
-Source: `environment.mdx`. A `late` field on a `StatelessWidget` (or `State<X>`) bound to the nearest ancestor `Provider<T>`.
+Docs: <https://solid.mariuti.com/guides/environment>. A `late` field on a `StatelessWidget` (or `State<X>`) bound to the nearest ancestor `Provider<T>`.
 
 ```dart title="source/counter_display.dart"
 class CounterDisplay extends StatelessWidget {

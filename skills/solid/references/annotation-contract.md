@@ -1,10 +1,10 @@
 # Solid annotation contract
 
-Per-annotation valid/invalid targets. Distilled from the user docs at `docs/src/content/docs/guides/`.
+Per-annotation valid/invalid targets. Distilled from the user docs at <https://solid.mariuti.com>.
 
 ## `@SolidState()` — reactive state
 
-Source guide: `state.mdx`.
+Docs: <https://solid.mariuti.com/guides/state>.
 
 ### Valid targets
 
@@ -27,7 +27,7 @@ Source guide: `state.mdx`.
 
 ## `@SolidEffect()` — side effect
 
-Source guide: `effect.mdx`.
+Docs: <https://solid.mariuti.com/guides/effect>.
 
 ### Valid target
 
@@ -45,7 +45,7 @@ The body's reads of `@SolidState` fields are tracked automatically. The effect r
 
 ## `@SolidQuery()` — async/stream resource
 
-Source guide: `query.mdx`.
+Docs: <https://solid.mariuti.com/guides/query>.
 
 ### Valid target
 
@@ -73,7 +73,7 @@ Source guide: `query.mdx`.
 
 ## `@SolidEnvironment()` — inject from widget tree
 
-Source guide: `environment.mdx`.
+Docs: <https://solid.mariuti.com/guides/environment>.
 
 ### Valid target
 

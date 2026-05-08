@@ -1,13 +1,21 @@
 // @ts-check
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
+import starlightLlmsTxt from 'starlight-llms-txt';
 
 // https://astro.build/config
 export default defineConfig({
+  site: 'https://solid.mariuti.com',
   integrations: [
     starlight({
       title: 'Flutter Solid Framework',
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/nank1ro/solid' }],
+      plugins: [
+        starlightLlmsTxt({
+          description:
+            'Solid is a tiny Flutter framework that uses code generation and fine-grained reactivity (inspired by SwiftUI and SolidJS) to remove state-management and DI boilerplate. You write annotated widgets in source/; the generator emits runnable Flutter into lib/.',
+        }),
+      ],
       sidebar: [
         {
           label: '',
