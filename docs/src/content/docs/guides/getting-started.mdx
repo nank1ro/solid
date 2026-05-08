@@ -68,6 +68,8 @@ import { Steps } from '@astrojs/starlight/components';
 
 <Aside title="AI assistant setup (optional)">
 If you use Claude Code, Cursor, Codex, GitHub Copilot, or another supported agent, install the Solid skill so your assistant follows Solid's conventions (edit `source/`, never `lib/`; correct annotation targets; setup steps): `npx skills add nank1ro/solid`. Or copy `skills/solid/SKILL.md` from the [Solid repo](https://github.com/nank1ro/solid) into your editor's skill location.
+
+If your tool fetches documentation over HTTP (Cursor `@docs`, ChatGPT custom GPTs, claude.ai web search, …), point it at [`/llms-full.txt`](https://solid.mariuti.com/llms-full.txt) — the full docs as a single LLM-friendly file. A short index lives at [`/llms.txt`](https://solid.mariuti.com/llms.txt).
 </Aside>
 
 ## How it works
