@@ -1,15 +1,14 @@
 import 'dart:io';
 
-/// Walks [libRoot] bottom-up and removes:
+/// Walks [libRoot] bottom-up and removes every orphan output: a file under
+/// `<libRoot>/X/Y/file.ext` whose `<sourceRoot>/X/Y/file.ext` counterpart
+/// no longer exists, and every directory `<libRoot>/X/Y/Z` that becomes
+/// empty after orphan-file removal AND whose `<sourceRoot>/X/Y/Z`
+/// counterpart no longer exists either.
 ///
-/// 1. Every file under `<libRoot>/X/Y/file.ext` whose
-///    `<sourceRoot>/X/Y/file.ext` counterpart no longer exists (orphan
-///    output — the matching `source/` input was deleted).
-/// 2. Every directory under [libRoot] that ends up empty after step 1
-///    (regardless of whether its `source/` counterpart still exists). An
-///    empty `lib/X/` is a stale generator output: every dart input under
-///    `source/X/` would have produced a file there, so an empty `lib/X/`
-///    means there is no live mapping into it.
+/// The directory rule preserves user-managed structure: if `source/X/`
+/// exists (even as an empty directory the user keeps for layout), `lib/X/`
+/// is left in place so the lib tree mirrors the source tree.
 ///
 /// Does NOT delete [libRoot] itself, even when its last subtree is pruned —
 /// the package's `lib/` is a fixed point. Returns the total number of
@@ -26,8 +25,8 @@ import 'dart:io';
 /// removed, populated dirs preserved — is reached either way.
 ///
 /// SPEC §9 "Empty-directory pruning". The build extension
-/// `^source/{{}} -> lib/{{}}` defines the pairing rule for files; empty
-/// directories are pruned unconditionally (other than the root).
+/// `^source/{{}} -> lib/{{}}` defines the pairing rule that determines
+/// which lib outputs are orphans.
 ///
 /// Safety guard: when [sourceRoot] does NOT exist on disk, the pruner
 /// returns 0 immediately without touching anything. A missing `source/`
@@ -69,7 +68,7 @@ int pruneOrphanedSubtree(Directory libRoot, Directory sourceRoot) {
     if (entity is Directory) {
       final result = _pruneInto(libRoot, entity, sourceRoot);
       removed += result.removed;
-      if (result.isEmpty) {
+      if (result.isEmpty && !_counterpartExists(libRoot, entity, sourceRoot)) {
         if (_tryDelete(entity)) {
           removed++;
         } else {
@@ -79,7 +78,7 @@ int pruneOrphanedSubtree(Directory libRoot, Directory sourceRoot) {
         remaining++;
       }
     } else if (entity is File) {
-      if (!_fileCounterpartExists(libRoot, entity, sourceRoot)) {
+      if (!_counterpartExists(libRoot, entity, sourceRoot)) {
         if (_tryDelete(entity)) {
           removed++;
         } else {
@@ -95,17 +94,21 @@ int pruneOrphanedSubtree(Directory libRoot, Directory sourceRoot) {
   return (removed: removed, isEmpty: remaining == 0);
 }
 
-/// True iff [file]'s `<sourceRoot>/<relative>` counterpart exists. Used
-/// only for files: directories are pruned based on emptiness alone (see
-/// the file-level doc on [pruneOrphanedSubtree]).
-bool _fileCounterpartExists(
+/// True iff [entity]'s `<sourceRoot>/<relative>` counterpart exists. Used
+/// for both files (`File(counterpath).existsSync()`) and directories
+/// (`Directory(counterpath).existsSync()`). The lib root itself is treated
+/// as always-present so the caller's recursion never deletes it.
+bool _counterpartExists(
   Directory libRoot,
-  File file,
+  FileSystemEntity entity,
   Directory sourceRoot,
 ) {
-  final relative = _relativeUnder(libRoot, file.path);
-  if (relative.isEmpty) return true; // shouldn't happen for files, defensive
-  return File('${sourceRoot.path}/$relative').existsSync();
+  final relative = _relativeUnder(libRoot, entity.path);
+  if (relative.isEmpty) return true;
+  final counterpath = '${sourceRoot.path}/$relative';
+  return entity is Directory
+      ? Directory(counterpath).existsSync()
+      : File(counterpath).existsSync();
 }
 
 bool _tryDelete(FileSystemEntity entity) {
