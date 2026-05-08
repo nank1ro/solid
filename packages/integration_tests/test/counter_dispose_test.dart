@@ -1,17 +1,18 @@
-// M1-11 — fences SPEC §10 (dispose contract) at runtime: when the route
+// Fences SPEC §10 (dispose contract) at runtime: when the route
 // containing a `@SolidState` signal is popped from `Navigator`, the emitted
 // `signal.dispose()` actually fires. Static byte-equality of the emitted
-// `dispose()` body is covered by the M1-08 golden + idempotency suites;
-// this test asserts the runtime invariant that the call happens.
+// `dispose()` body is covered by the import-rewrite golden + idempotency
+// suites; this test asserts the runtime invariant that the call happens.
 //
 // Observed via `SignalBase<T>.onDispose(VoidCallback)` — the public hook
 // real user code uses, exported by `flutter_solidart`. The test exercises
 // the SignalBase contract directly rather than a private subclass shim, and
-// the same hook composes for M2-04's dispose-order golden.
+// the same hook composes for the dispose-order golden.
 //
 // `_ProbedCounterPage` is a test-local mirror of `_CounterPageState`'s
 // shape: the production `_CounterPageState` is library-private and cannot
-// expose its signal to the test (same pattern M1-10 uses for `BuildTracker`).
+// expose its signal to the test (same pattern the counter widget test
+// uses for `BuildTracker`).
 
 import 'dart:async';
 

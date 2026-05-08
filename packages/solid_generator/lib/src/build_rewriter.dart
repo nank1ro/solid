@@ -23,7 +23,7 @@ class SourceEdit {
   final String replacement;
 }
 
-/// Rewrites the `build()` method source text by applying SPEC M1 rules.
+/// Rewrites the `build()` method source text by applying SPEC §5 rules.
 ///
 /// The rewrite comprises four passes composed in the order they are visible
 /// in the returned string:
@@ -40,22 +40,22 @@ class SourceEdit {
 ///
 /// [reactiveFields] is the set of field names declared `@SolidState` on the
 /// enclosing class. The match is name-based; SPEC 5.4's type-driven rule
-/// upgrades to resolved-element analysis at M3-05, at which point the call
-/// site swaps to a resolved predicate without restructuring this file.
+/// will eventually upgrade to resolved-element analysis, at which point the
+/// call site swaps to a resolved predicate without restructuring this file.
 ///
 /// [queryNames] is the set of `@SolidQuery` method names declared on the
-/// enclosing class (M5-01). Their zero-arg call sites in the build body are
+/// enclosing class. Their zero-arg call sites in the build body are
 /// recorded as tracked reads for SignalBuilder placement (SPEC §4.8 rule 3)
 /// without mutating the call expression itself.
 ///
 /// [classRegistry] is the cross-class reactivity map (class name → reactive
 /// field/getter names). Threaded through to the value-rewrite visitor so
 /// SPEC §5.1's single-level `<param>.<reactiveField>` cross-class rewrite
-/// fires (M6-02). Empty map → no-op for the cross-class branch.
+/// fires. Empty map → no-op for the cross-class branch.
 ///
 /// [environmentFields] is the host class's `@SolidEnvironment` field map
 /// (`fieldName -> typeText`). Threaded through to the value-rewrite visitor
-/// so SPEC §5.1's M6-04 sibling slice fires for `<envField>.<reactiveField>`
+/// so SPEC §5.1's sibling slice fires for `<envField>.<reactiveField>`
 /// shapes when the env field's declared type names a class in
 /// [classRegistry]. Empty map → no-op for the env-field branch.
 ///
@@ -148,7 +148,8 @@ String rewriteBuildMethod(
 
 /// Emits the SPEC Section 7 `SignalBuilder` wrapper around [inner] using a
 /// block-body `builder:` callback. The `child` parameter of the callback is
-/// accepted but not consumed — M1-05 does not pass through a static child.
+/// accepted but not consumed — the rewriter does not pass through a static
+/// child.
 String _signalBuilderWrap(String inner) {
   return 'SignalBuilder(\n'
       '  builder: (context, child) {\n'

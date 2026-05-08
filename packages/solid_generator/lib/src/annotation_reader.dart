@@ -34,7 +34,7 @@ const String solidEnvironmentName = 'SolidEnvironment';
 /// `SignalBase<T>`. Matched textually on the unresolved AST per the
 /// [solidStateName] contract. Consumed by the target validator (rejecting
 /// `@SolidEnvironment` fields typed as one of these — SPEC §3.6) and by the
-/// M6-04 cross-class `.value` rewrite. Excludes `SignalBuilder` /
+/// cross-class `.value` rewrite. Excludes `SignalBuilder` /
 /// `SolidartConfig` (those are non-`SignalBase` solidart names).
 const Set<String> signalBaseTypeNames = {
   'Signal',
@@ -213,7 +213,7 @@ _readReactiveBody(
 /// Reads a `@SolidEffect(...)` annotation on the method [decl] and returns an
 /// [EffectModel]. Returns `null` when [decl] is not an `@SolidEffect`-bearing
 /// instance method; getters, setters, and static methods are filtered out
-/// here defensively (the M4-04 target validator rejects them with a clearer
+/// here defensively (the target validator rejects them with a clearer
 /// error before this reader runs).
 ///
 /// The method body is rewritten in place per SPEC §5.1: any reference to a
@@ -224,8 +224,8 @@ _readReactiveBody(
 ///
 /// SPEC §3.4 reactive-deps requirement: an Effect with zero reactive
 /// dependencies is rejected with the SPEC-defined message
-/// `"effect '<name>' has no reactive dependencies"`. M4-05 pins this
-/// behavior with a dedicated rejection test.
+/// `"effect '<name>' has no reactive dependencies"`. A dedicated rejection
+/// test pins this behavior.
 EffectModel? readSolidEffectMethod(
   MethodDeclaration decl,
   Set<String> reactiveFields,
@@ -284,7 +284,7 @@ QueryModel? readSolidQueryMethod(
   if (decl.isGetter || decl.isSetter || decl.isStatic) return null;
   final annotation = findAnnotationByName(solidQueryName, decl.metadata);
   if (annotation == null) return null;
-  // Other return types are rejected by `validateSolidQueryTargets` (M5-05);
+  // Other return types are rejected by `validateSolidQueryTargets`;
   // this defensive guard keeps the reader robust against direct callers.
   final returnType = decl.returnType;
   if (returnType is! NamedType) return null;

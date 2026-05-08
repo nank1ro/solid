@@ -47,7 +47,7 @@ class ValueRewriteResult {
   /// position, in source-first-appearance order, deduplicated. Mirrors
   /// [trackedReadOffsets] minus the offset → name lookup, restricted to
   /// reactive-field reads (NOT query-call invocations). Consumed by
-  /// `readSolidQueryMethod` (M5-10) to wire the Resource's `source:`
+  /// `readSolidQueryMethod` to wire the Resource's `source:`
   /// argument: zero names → no source, one name → direct pass, two or
   /// more names → synthesized Record-Computed source field.
   final List<String> trackedReadNames;
@@ -74,13 +74,13 @@ bool _isOnPrefixedCallbackName(String name) {
 ///
 /// [reactiveFields] is the name-set of `@SolidState` fields and getters
 /// declared on the enclosing class. The rewrite is name-based; the
-/// `m3_05_type_aware_no_double_append` golden locks in the no-double-append
+/// `type_aware_no_double_append` golden locks in the no-double-append
 /// guarantee at the name-set boundary. Full SPEC §5.4 type-driven resolution
 /// (`buildStep.resolver.compilationUnitFor` + `staticType` subtype queries)
-/// is deferred — it is the architectural prerequisite for M3-09 (shadowing).
+/// is deferred — it is the architectural prerequisite for shadowing support.
 ///
 /// [queryNames] is the name-set of `@SolidQuery` methods declared on the
-/// enclosing class (M5-01). Zero-argument `MethodInvocation`s whose target is
+/// enclosing class. Zero-argument `MethodInvocation`s whose target is
 /// a bare `SimpleIdentifier` matching a query name (and not shadowed, and not
 /// inside an untracked context) have their offsets recorded in
 /// [ValueRewriteResult.trackedReadOffsets] so SPEC §7 SignalBuilder placement
@@ -90,28 +90,29 @@ bool _isOnPrefixedCallbackName(String name) {
 /// `Resource<T>.call() => state` to upstream extensions on `ResourceState<T>`.
 ///
 /// [classRegistry] is the cross-class reactivity map (class name → reactive
-/// field/getter names). M6-02 ships a single-level slice of SPEC §5.1's
-/// chain-aware rule: `<param>.<reactiveField>` shapes where `<param>` is a
-/// method parameter declared with a typed annotation that names a class in
-/// [classRegistry] receive a trailing `.value`. M6-04 widens the receiver
-/// shape to also include `@SolidEnvironment late T name;` host-class fields
-/// via [environmentFields]. Full chains (`a.b.c.d` per SPEC §5.1) and
+/// field/getter names). The implementation ships a single-level slice of
+/// SPEC §5.1's chain-aware rule: `<param>.<reactiveField>` shapes where
+/// `<param>` is a method parameter declared with a typed annotation that
+/// names a class in [classRegistry] receive a trailing `.value`. The
+/// receiver shape also includes `@SolidEnvironment late T name;`
+/// host-class fields via [environmentFields]. Full chains
+/// (`a.b.c.d` per SPEC §5.1) and
 /// arbitrary receivers (locals, method-call results) still require the
 /// resolved-AST migration mandated by SPEC §5.4 and remain deferred. Empty
 /// registry = no-op for the new path; existing same-class behavior unchanged.
 ///
 /// [environmentFields] is the host class's `@SolidEnvironment` field map
-/// (`fieldName -> typeText`) — the M6-04 sibling slice of SPEC §5.1's
+/// (`fieldName -> typeText`) — the sibling slice of SPEC §5.1's
 /// cross-class rewrite. Empty map → no-op for the env-field branch.
 ///
-/// [node] is typically the `build()` `MethodDeclaration` (the M1-05 path) or
-/// the body expression of a `@SolidState` getter (the M2-01 path). Both share
-/// the same identifier-rewrite contract; only `build()` consumes
+/// [node] is typically the `build()` `MethodDeclaration` or the body
+/// expression of a `@SolidState` getter. Both share the same
+/// identifier-rewrite contract; only `build()` consumes
 /// [ValueRewriteResult.trackedReadOffsets] for SignalBuilder placement.
 ///
 /// [ValueRewriteResult.trackedReadNames] is asymmetric with
 /// `trackedReadOffsets`: it includes only `@SolidState` field/getter reads
-/// (the source-Computed inputs for M5-10), NOT query-call invocations. Query
+/// (the source-Computed inputs), NOT query-call invocations. Query
 /// calls appear in `trackedReadOffsets` for SignalBuilder placement but not
 /// in `trackedReadNames` because they are not legal `Resource.source:`
 /// arguments.
@@ -168,10 +169,10 @@ const String _untrackedValueGetterName = 'untrackedValue';
 
 /// AST visitor that accumulates [ValueEdit]s for reactive-field identifiers.
 ///
-/// Scope tracking is intentionally minimal in M1-05: a local variable whose
-/// name collides with a reactive field suppresses the rewrite inside its
-/// enclosing block. M3-09 replaces this heuristic with type-driven
-/// shadowing resolution.
+/// Scope tracking is intentionally minimal: a local variable whose name
+/// collides with a reactive field suppresses the rewrite inside its
+/// enclosing block. A future type-driven shadowing pass will replace this
+/// heuristic.
 class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
   _ValueRewriteVisitor(
     this._reactiveFields,
@@ -184,22 +185,22 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
   final Set<String> _reactiveFields;
 
   /// Per-class set of `@SolidQuery` method names. Empty when collecting edits
-  /// for a non-`build` body (M5-01 query-call detection only fires on
-  /// `build`'s body, where SignalBuilder placement consumes the offsets).
+  /// for a non-`build` body (query-call detection only fires on `build`'s
+  /// body, where SignalBuilder placement consumes the offsets).
   final Set<String> _queryNames;
 
   /// Cross-class reactivity map (class name → reactive field/getter names).
   /// Drives the single-level cross-class rewrite in [visitPrefixedIdentifier]
-  /// (M6-02 slice of SPEC §5.1). Empty map → cross-class branch no-ops.
+  /// (slice of SPEC §5.1). Empty map → cross-class branch no-ops.
   final Map<String, Set<String>> _classRegistry;
 
   /// Host-class `@SolidEnvironment` field map (`fieldName -> typeText`).
-  /// Drives the M6-04 sibling slice of SPEC §5.1: when the prefix of a
+  /// Drives the sibling slice of SPEC §5.1: when the prefix of a
   /// `<id>.<reactiveField>` chain is not a method parameter but matches an
   /// env-field name on the enclosing class, the env field's declared type is
   /// looked up in [_classRegistry] for the cross-class `.value` append.
-  /// Empty map → env-field branch no-ops; existing parameter-receiver
-  /// behavior (m6_02_*) is unchanged.
+  /// Empty map → env-field branch no-ops; the parameter-receiver behavior
+  /// is unchanged.
   final Map<String, String> _environmentFields;
 
   /// Names of widget-bound non-`@SolidState` fields on the host class.
@@ -314,9 +315,9 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
       // to the prefix, corrupting the replacement just emitted.
       return;
     }
-    // SPEC §5.1 cross-class single-level slice (M6-02 + M6-04): if the prefix
-    // is a `SimpleIdentifier` resolving to either a method parameter (M6-02)
-    // OR a host-class `@SolidEnvironment` field (M6-04) whose declared type
+    // SPEC §5.1 cross-class single-level slice: if the prefix is a
+    // `SimpleIdentifier` resolving to either a method parameter
+    // OR a host-class `@SolidEnvironment` field whose declared type
     // names a class in [_classRegistry] AND the suffix matches a reactive
     // field on that class, append `.value`. Full type-driven chain support
     // (`a.b.c.d` per SPEC §5.1) still requires the resolved-AST migration
@@ -331,9 +332,9 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
 
   /// Single-level `<receiver>.<reactiveField>` cross-class rewrite — the
   /// shipped slice of SPEC §5.1's chain-aware rule. The receiver type
-  /// resolves via [_resolveParameterTypeName] (M6-02 — method parameter)
-  /// then [_environmentFields] (M6-04 — `@SolidEnvironment` host-class
-  /// field); parameter wins because method parameters shadow host-class
+  /// resolves via [_resolveParameterTypeName] (method parameter)
+  /// then [_environmentFields] (`@SolidEnvironment` host-class field);
+  /// parameter wins because method parameters shadow host-class
   /// fields in Dart and are not tracked by [_isShadowed] (which covers only
   /// `visitFunctionExpression` and block-local declarations), so the lookup
   /// ORDER carries the parameter-vs-field shadowing semantics here.
@@ -359,17 +360,15 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
   /// cannot reason about in parsed AST: function-typed parameters,
   /// `var`-typed parameters, generic type-parameter receivers, and identifiers
   /// that do not resolve to a parameter at all (locals, fields, etc.). For
-  /// the host-class-field case (the M6-04 `@SolidEnvironment` shape), see
+  /// the host-class-field case (the `@SolidEnvironment` shape), see
   /// the sibling [_environmentFields] lookup in [_maybeRewriteCrossClass] —
   /// kept as a separate branch so the parameter-vs-field resolution order
   /// matches Dart's natural shadowing.
   ///
-  /// A future PR will replace this with a `staticType` lookup on the resolved
-  /// AST (SPEC §5.4 — "Name-matching, regex, or string heuristics are not
-  /// acceptable"). The parameter-only resolver ships M6-02's sub-case b
-  /// without dragging the resolved-AST migration into this PR; M6-04 widens
-  /// the receiver shape via [_environmentFields] without requiring resolved
-  /// AST either.
+  /// A future revision will replace this with a `staticType` lookup on the
+  /// resolved AST (SPEC §5.4 — "Name-matching, regex, or string heuristics
+  /// are not acceptable"). The parameter-only resolver and the env-field
+  /// receiver widening both work without requiring resolved AST.
   String? _resolveParameterTypeName(SimpleIdentifier prefix) {
     final method = prefix.thisOrAncestorOfType<MethodDeclaration>();
     final fn = prefix.thisOrAncestorOfType<FunctionExpression>();
@@ -383,8 +382,8 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
         if (type is NamedType) return type.name.lexeme;
       }
       // FieldFormalParameter (`this.foo`), FunctionTypedFormalParameter,
-      // and SuperFormalParameter (`super.foo`) all fall through — M6-02
-      // does not need them; M6-04 widens this when resolved AST lands.
+      // and SuperFormalParameter (`super.foo`) all fall through —
+      // unsupported until resolved AST lands.
       return null;
     }
     return null;
@@ -465,7 +464,7 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
   /// Appends [name] to [trackedReadNames] iff not already present, preserving
   /// source-first-appearance order. A query body that reads the same Signal
   /// at multiple offsets — e.g. `'$userId-$userId'` — must contribute the
-  /// name exactly once to the M5-10 source-Computed tuple.
+  /// name exactly once to the source-Computed tuple.
   void _recordTrackedReadName(String name) {
     if (!trackedReadNames.contains(name)) trackedReadNames.add(name);
   }

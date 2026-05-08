@@ -8,7 +8,7 @@ import 'package:solid_generator/src/value_rewriter.dart';
 /// whose constructor name is in [constCtorNames] and whose arguments are all
 /// statically const-evaluable.
 ///
-/// SPEC §14 item 7 follow-up: M8-03 added `const` to the constructor
+/// SPEC §14 item 7 follow-up: a sibling pass adds `const` to the constructor
 /// *declaration* of an eligible lowered widget. This pass closes the gap on
 /// the call site — `runApp(CounterDisplay())` becomes
 /// `runApp(const CounterDisplay())` so the analyzer's
@@ -33,17 +33,17 @@ import 'package:solid_generator/src/value_rewriter.dart';
 /// cannot accumulate their own `const` insertions.
 ///
 /// Argument const-evaluability is conservative — accepts only the literal
-/// forms `_isLiteralRhs` accepted in M8-03 plus already-`const`
+/// forms `_isLiteralRhs` accepts plus already-`const`
 /// `InstanceCreationExpression`s and constructor-call sites whose class is
 /// in [constCtorNames] (i.e., would *also* be made const by this pass).
 /// Identifier reads, method invocations of non-class names, operators,
 /// string interpolations, list/map/set literals, and explicitly-`new`
 /// expressions are rejected. This is the smallest rule that lints clean for
-/// the M1-13 (`Counter(title: 'count=$value')` — rejected because of string
-/// interpolation) and M1-14 + M8-04 (`CounterDisplay()` /
-/// `Outer(child: Inner())` — accepted) cases without requiring resolved-AST
-/// analysis. Identifier-RHS, `AdjacentStrings`, and list/map literal
-/// const-evaluability are tractable future extensions.
+/// the multi-constructor case (`Counter(title: 'count=$value')` — rejected
+/// because of string interpolation) and the const-call-site cases
+/// (`CounterDisplay()` / `Outer(child: Inner())` — accepted) without
+/// requiring resolved-AST analysis. Identifier-RHS, `AdjacentStrings`, and
+/// list/map literal const-evaluability are tractable future extensions.
 String addConstAtCallSites(String text, Set<String> constCtorNames) {
   if (constCtorNames.isEmpty) return text;
 

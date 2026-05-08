@@ -1,26 +1,26 @@
-// M6-09 — fences SPEC §3.6 (`.environment<T>()` extension, source-side
+// Fences SPEC §3.6 (`.environment<T>()` extension, source-side
 // `dispose()` stub requirement), §7 (`SignalBuilder` placement on cross-class
 // chain read), and §10 (synthesized reactive disposal merged into the user's
 // empty `dispose()` body for plain classes) at runtime.
 //
 // `Counter` and `CounterDisplay` are imported from the generator-lowered
-// `package:integration_tests/m6_09_environment_app.dart` — this is the first
-// widget test that runs against generated `lib/` code (M1-10 / M3-04 / M4-07 /
-// M5-07 all inline a test-local mirror of the lowered shape). The widget under
-// test is therefore the actual production output of the source app at
-// `packages/integration_tests/source/m6_09_environment_app.dart`.
+// `package:integration_tests/environment_app.dart` — this is the only
+// widget test that runs against generated `lib/` code; the rest inline a
+// test-local mirror of the lowered shape. The widget under test is therefore
+// the actual production output of the source app at
+// `packages/integration_tests/source/environment_app.dart`.
 //
 // The dispose assertion uses a closure-counted `dispose:` callback (rather
-// than `Counter.value.onDispose`) because the M6-09 acceptance criterion is
+// than `Counter.value.onDispose`) because the acceptance criterion is
 // specifically the user-passed callback firing exactly once on provider
-// teardown. The internal Signal disposal is fenced by M6-02's user-dispose
-// merge golden + M1-11's runtime onDispose test.
+// teardown. The internal Signal disposal is fenced by the user-dispose
+// merge golden + the runtime onDispose test.
 
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:integration_tests/m6_09_environment_app.dart';
+import 'package:integration_tests/environment_app.dart';
 import 'package:solid_annotations/solid_annotations.dart';
 
 void main() {

@@ -1,4 +1,4 @@
-// M5-11: exercises `useRefreshing: false` propagation. The default `true` is
+// Exercises `useRefreshing: false` propagation. The default `true` is
 // omitted from emitted output (upstream `Resource` default).
 // ignore_for_file: prefer_const_constructors_in_immutables
 

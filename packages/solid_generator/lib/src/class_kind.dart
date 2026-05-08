@@ -30,7 +30,7 @@ enum ClassKind {
 /// Classifies [decl] based on the textual name of its `extends` clause.
 ///
 /// Uses unresolved AST — the superclass is matched by lexeme only. This is
-/// adequate for M1 because the only relevant supertypes are `StatelessWidget`,
+/// adequate because the only relevant supertypes are `StatelessWidget`,
 /// `StatefulWidget`, and `State`, all of which are imported from
 /// `package:flutter/widgets.dart` and are not shadowed in practice.
 ClassKind classKindOf(ClassDeclaration decl) {

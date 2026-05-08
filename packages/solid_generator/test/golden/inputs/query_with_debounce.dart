@@ -1,4 +1,4 @@
-// M5-11: exercises `debounce:` propagation to `debounceDelay:`.
+// Exercises `debounce:` propagation to `debounceDelay:`.
 // ignore_for_file: prefer_const_constructors_in_immutables
 
 import 'package:solid_annotations/solid_annotations.dart';

@@ -1,4 +1,4 @@
-// The `Signal<int>` type IS the rejection target — the M6-07 validator flags
+// The `Signal<int>` type IS the rejection target — the validator flags
 // any field whose declared type's lexeme is in `signalBaseTypeNames`
 // (`Signal` / `Computed` / `Effect` / `Resource`). The validator works on the
 // unresolved AST, so no `flutter_solidart` import is needed; suppress the

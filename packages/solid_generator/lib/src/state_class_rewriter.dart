@@ -46,9 +46,9 @@ RewriteResult rewriteStateClass(
   String source,
 ) {
   final className = classDecl.name.lexeme;
-  // M2-01 ships getter→Computed for `StatelessWidget` only. The in-place
-  // merge logic this rewriter is built around does not yet handle the
-  // `late final ... = Computed<T>(...)` slot; reject so M1-14's valid-target
+  // getter→Computed only ships for `StatelessWidget`. The in-place merge
+  // logic this rewriter is built around does not yet handle the
+  // `late final ... = Computed<T>(...)` slot; reject so the valid-target
   // pass isn't silently undone here.
   rejectIfGettersNotYetSupported(
     solidGetters,
@@ -79,7 +79,7 @@ RewriteResult rewriteStateClass(
   final queryNames = solidQueries.isEmpty
       ? const <String>{}
       : {for (final q in solidQueries) q.methodName};
-  // SPEC §5.1 M6-04 cross-class env-field receiver type map.
+  // SPEC §5.1 cross-class env-field receiver type map.
   final environmentFields = solidEnvironments.isEmpty
       ? const <String, String>{}
       : {for (final e in solidEnvironments) e.fieldName: e.typeText};
@@ -166,8 +166,8 @@ RewriteResult rewriteStateClass(
   // §14 item 4); when Effects are present, materialization reads are
   // spliced after the existing `super.initState();` call (§14 item 4
   // carve-out + §4.7). When no `initState` was declared, synthesize one
-  // iff at least one Effect needs materialization — otherwise skip, so the
-  // M1-07 Signal-only golden round-trips byte-identical.
+  // iff at least one Effect needs materialization — otherwise skip, so
+  // Signal-only goldens round-trip byte-identical.
   if (initStateMethod != null) {
     pieces[initStateSlot] = effectNames.isEmpty
         ? source.substring(initStateMethod.offset, initStateMethod.end)
@@ -196,8 +196,8 @@ RewriteResult rewriteStateClass(
     text: '$header{\n${pieces.join('\n\n')}\n}',
     solidartNames: <String>{
       // SPEC §9 import-add gate: `Signal` is only emitted when the class
-      // has at least one `@SolidState` field. An env-only host (M6-05) has
-      // no Signal reference in lowered output and so does NOT pull in
+      // has at least one `@SolidState` field. An env-only host has no
+      // Signal reference in lowered output and so does NOT pull in
       // `flutter_solidart`.
       if (solidFields.isNotEmpty) 'Signal',
       if (effectNames.isNotEmpty) 'Effect',

@@ -1,6 +1,6 @@
-// M3-04 — proves SPEC §7.4 (siblings do not share wrappers) at runtime:
+// Proves SPEC §7.4 (siblings do not share wrappers) at runtime:
 // mutating signal A rebuilds only widget A; widget B's rebuild count stays
-// at zero. Validates that M1-05's minimum-subtree wrap rule (SPEC §7.2)
+// at zero. Validates that the minimum-subtree wrap rule (SPEC §7.2)
 // produces sibling isolation.
 //
 // Mutation goes through a `GlobalKey<State>` (same shape `counter_dispose_test`

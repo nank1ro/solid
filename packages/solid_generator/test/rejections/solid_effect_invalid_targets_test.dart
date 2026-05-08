@@ -1,4 +1,4 @@
-// Rejection suite for M4-04: invalid `@SolidEffect` placements per SPEC §3.4.
+// Rejection suite for invalid `@SolidEffect` placements per SPEC §3.4.
 
 import '../integration/golden_helpers.dart';
 
@@ -8,39 +8,39 @@ import '../integration/golden_helpers.dart';
 /// top-level function → field.
 const List<({String name, String errorContains})> _cases = [
   (
-    name: 'm4_04_parameterized',
+    name: 'solid_effect_parameterized',
     errorContains: '@SolidEffect cannot be applied to a parameterized method',
   ),
   (
-    name: 'm4_04_non_void_return',
+    name: 'non_void_return',
     errorContains: '@SolidEffect cannot be applied to a non-void method',
   ),
   (
-    name: 'm4_04_static',
+    name: 'solid_effect_static',
     errorContains: '@SolidEffect cannot be applied to a static method',
   ),
   (
-    name: 'm4_04_abstract',
+    name: 'solid_effect_abstract',
     errorContains: '@SolidEffect cannot be applied to an abstract method',
   ),
   (
-    name: 'm4_04_getter',
+    name: 'solid_effect_getter',
     errorContains: '@SolidEffect cannot be applied to a getter',
   ),
   (
-    name: 'm4_04_setter',
+    name: 'solid_effect_setter',
     errorContains: '@SolidEffect cannot be applied to a setter',
   ),
   (
-    name: 'm4_04_top_level',
+    name: 'solid_effect_top_level',
     errorContains: '@SolidEffect cannot be applied to a top-level function',
   ),
   (
-    name: 'm4_04_field',
+    name: 'solid_effect_field',
     errorContains: '@SolidEffect cannot be applied to a field',
   ),
 ];
 
 void main() {
-  runRejectionCases('m4_04 invalid @SolidEffect targets', _cases);
+  runRejectionCases('invalid @SolidEffect targets', _cases);
 }

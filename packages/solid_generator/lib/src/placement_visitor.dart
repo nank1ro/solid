@@ -12,8 +12,8 @@ import 'package:analyzer/dart/ast/visitor.dart';
 ///    (explicit `const`/`new` form) or a `MethodInvocation` whose callee is
 ///    an UpperCamelCase identifier (the `Text(...)` style used without
 ///    `const` or `new`; the analyzer only upgrades these to
-///    `InstanceCreationExpression` during resolution, which we defer to
-///    M3-05 per SPEC 5.4). The collector also recognizes the SPEC §3.5 /
+///    `InstanceCreationExpression` during resolution, which we defer per
+///    SPEC 5.4). The collector also recognizes the SPEC §3.5 /
 ///    §4.8 query-state chain `<queryName>().when(...)` and
 ///    `<queryName>().maybeWhen(...)` — the `FutureWhen` / `StreamWhen`
 ///    extensions on `Future<T>` / `Stream<T>` from `solid_annotations`
@@ -159,7 +159,7 @@ class _WidgetCollector extends RecursiveAstVisitor<void> {
 /// Syntactic heuristic: a bare `Foo(...)` call with no target and an
 /// UpperCamelCase method name is almost certainly a widget constructor in
 /// pre-resolution Dart AST. Named constructors on classes (`Foo.named(...)`)
-/// and library-prefixed calls are left for M3-05's type-resolved pivot.
+/// and library-prefixed calls are left for the future type-resolved pivot.
 bool _looksLikeWidgetCtor(MethodInvocation node) {
   if (node.target != null) return false;
   final name = node.methodName.name;
@@ -171,7 +171,7 @@ bool _looksLikeWidgetCtor(MethodInvocation node) {
 /// Syntactic stand-in for "this expression's static type is `Widget`": skips
 /// constructor calls that sit at `key:` argument position, since `Key` is not
 /// a `Widget` and cannot host a `SignalBuilder` wrap. The general non-Widget-
-/// argument case (e.g. `EdgeInsets`) waits for the type-driven pivot in M3-05.
+/// argument case (e.g. `EdgeInsets`) waits for the future type-driven pivot.
 bool _isAtKeyPosition(Expression expr) {
   final parent = expr.parent;
   return parent is NamedExpression && parent.name.label.name == 'key';

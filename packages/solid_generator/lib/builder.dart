@@ -121,7 +121,7 @@ class _SolidBuilder implements Builder {
       );
     }
 
-    // SPEC §3.2 + §13 reserved-annotation guard. No-op at M6-01; preserved
+    // SPEC §3.2 + §13 reserved-annotation guard. Currently a no-op; preserved
     // as a regression fence for future SPEC revisions.
     validateReservedAnnotations(parsed.unit);
     // SPEC §3.1 invalid-target guard. Must run before
@@ -179,8 +179,8 @@ class _SolidBuilder implements Builder {
 /// field/getter names declared on that class. Consumed by `value_rewriter`
 /// to detect `<receiver>.<field>` reads where the receiver's declared type
 /// names a class with reactive declarations (SPEC §5.1 cross-class chain
-/// rewrite — single-level subset shipped in M6-02; full chains land in
-/// M6-04 alongside the resolved-AST migration).
+/// rewrite — currently a single-level subset; full chains will land alongside
+/// the resolved-AST migration).
 ///
 /// `@SolidEffect` and `@SolidQuery` names are intentionally excluded — an
 /// Effect lowers to a `void`-returning `Effect` field with no observable
@@ -369,11 +369,11 @@ String _renderOutput(
   // closure (a `FunctionExpression`, never const-eligible) is part of the
   // argument list when const promotion evaluates const-eligibility.
   final withDispose = addProviderDisposeAtCallSites(combined);
-  // SPEC §14 item 7 follow-up. M8-03 adds `const` to widget-ctor declarations;
-  // this pass adds `const` to call sites of those declarations elsewhere in
-  // the assembled output (top-level `main()`, rewritten `build` bodies,
-  // passthrough classes — every scope), so `prefer_const_constructors` lint
-  // stays silent end-to-end.
+  // SPEC §14 item 7 follow-up. The const-ctor pass adds `const` to widget-ctor
+  // declarations; this pass adds `const` to call sites of those declarations
+  // elsewhere in the assembled output (top-level `main()`, rewritten `build`
+  // bodies, passthrough classes — every scope), so `prefer_const_constructors`
+  // lint stays silent end-to-end.
   final constCtorNames = <String>{
     for (final r in results) ...r.constCtorNames,
   };
@@ -415,10 +415,9 @@ RewriteResult _passthroughResult(AstNode node, String source) {
 
 /// Dispatches on [decl]'s class kind to the matching rewriter.
 ///
-/// `@SolidQuery` lowers on every supported class kind: `StatelessWidget`
-/// (M5-01), existing `State<X>` subclasses (M5-08), and plain classes
-/// (M5-09). `StatefulWidget` lowering itself is the only class kind not yet
-/// implemented (scheduled for a later M1 TODO).
+/// `@SolidQuery` lowers on every supported class kind: `StatelessWidget`,
+/// existing `State<X>` subclasses, and plain classes. `StatefulWidget` as an
+/// input class kind is the only one not yet implemented.
 RewriteResult _rewriteClass(
   ClassDeclaration decl,
   List<FieldModel> fields,
@@ -467,8 +466,7 @@ RewriteResult _rewriteClass(
       );
     case ClassKind.statefulWidget:
       throw CodeGenerationError(
-        'class-kind $kind is not supported yet '
-        '(scheduled for a later M1 TODO)',
+        'class-kind $kind is not supported yet',
         null,
         className,
       );

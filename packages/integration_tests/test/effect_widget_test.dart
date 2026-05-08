@@ -1,5 +1,5 @@
-// M4-07 — fences SPEC §4.7 (`@SolidEffect` on method → `Effect`) at runtime.
-// `_EffectCounterPage` mirrors the M4-01 lowered shape, including the
+// Fences SPEC §4.7 (`@SolidEffect` on method → `Effect`) at runtime.
+// `_EffectCounterPage` mirrors the lowered shape, including the
 // synthesized `initState()` that materializes the `late final` Effect field
 // at mount time. Without that read, the Effect's autorun never fires during
 // the widget's mounted lifetime — see SPEC §4.7 last bullet.
@@ -9,8 +9,9 @@
 // re-firing the Effect with the new value. After three taps the recorded
 // history is `[0, 1, 2, 3]` — four entries, three produced by tap.
 //
-// The dispose test parallels M1-11; reverse-declaration disposal order is
-// golden-asserted in M4-02, not retested here.
+// The dispose test parallels the counter dispose suite; reverse-declaration
+// disposal order is golden-asserted by `effect_with_signal_and_computed`,
+// not retested here.
 
 import 'dart:async';
 
@@ -99,8 +100,8 @@ class _EffectCounterPage extends StatefulWidget {
 class _EffectCounterPageState extends State<_EffectCounterPage> {
   final counter = Signal<int>(0, name: 'counter');
   final history = Signal<List<int>>(<int>[], name: 'history');
-  // Reads `history.untrackedValue` (the M3-12 `.untracked` lowering, SPEC
-  // §6.4) so the spread does not register `history` as a tracked dependency.
+  // Reads `history.untrackedValue` (the `.untracked` lowering, SPEC §6.4)
+  // so the spread does not register `history` as a tracked dependency.
   // Otherwise the same Effect that writes `history.value` would re-run on
   // its own write — a self-dep loop. Only `counter.value` is tracked, so the
   // Effect re-runs exactly when the counter changes.

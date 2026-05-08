@@ -85,22 +85,22 @@ void _validateField(FieldDeclaration field, String className) {
   final fieldName = varList.variables.first.name.lexeme;
   final location = '$className.$fieldName';
   // Order matters: `static const` reports as "const field" — the const-ness
-  // is the dominant violation per the M1-14 TODO parenthetical guidance.
+  // is the dominant violation per SPEC §3.1.
   if (varList.isConst) _reject('const field', location);
   if (varList.isFinal) _reject('final field', location);
   if (field.isStatic) _reject('static field', location);
 }
 
 /// Rejects `@SolidState` on a setter, static getter, or non-accessor method.
-/// Instance getters fall through — they are valid SPEC 3.1 targets and M2
-/// will emit `Computed`.
+/// Instance getters fall through — they are valid SPEC 3.1 targets and lower
+/// to `Computed`.
 void _validateMethod(MethodDeclaration method, String className) {
   if (findAnnotationByName(solidStateName, method.metadata) == null) return;
   final location = '$className.${method.name.lexeme}';
   if (method.isSetter) _reject('setter', location);
   if (method.isGetter && method.isStatic) _reject('static getter', location);
   if (!method.isGetter && !method.isSetter) _reject('method', location);
-  // Instance getter — valid SPEC 3.1 target; M2 emits Computed.
+  // Instance getter — valid SPEC 3.1 target; lowers to Computed.
 }
 
 /// Rejects `@SolidState` on top-level variables, getters, and any other
@@ -281,7 +281,8 @@ void _validateQueryMethod(MethodDeclaration method, String className) {
   // caught here — `?.lexeme` returns `null`, and `null != 'async'` is
   // `true`. Mirrors `annotation_reader.dart`'s `?.lexeme ?? ''` pattern.
   // Stream-form mismatches are out of scope (Stream has two valid shapes:
-  // sync-return or async*); they are exercised positively in M5-02.
+  // sync-return or async*); they are exercised positively by the
+  // simple_query_with_stream golden.
   final bodyKeyword = method.body.keyword?.lexeme;
   if (returnName == futureLexeme && bodyKeyword != 'async') {
     _rejectQuery(
@@ -311,10 +312,9 @@ void _validateQueryTopLevel(CompilationUnitMember decl) =>
 /// reach `readSolidEnvironmentField`, which would otherwise skip them
 /// silently or produce a confusing downstream error.
 ///
-/// **M6-03 scope:** the canonical valid case (`late <T> name;` on a
-/// `StatelessWidget`/`State<X>`) falls through silently; comprehensive
-/// per-case error messages and codes ship in M6-07 (the rejection-test PR).
-/// The function structure is wired up here so M6-07 only needs to add cases.
+/// The canonical valid case (`late <T> name;` on a
+/// `StatelessWidget`/`State<X>`) falls through silently; per-case error
+/// messages and codes cover every invalid placement.
 void validateSolidEnvironmentTargets(CompilationUnit unit) => _walkUnit(
   unit,
   onField: _validateEnvironmentField,

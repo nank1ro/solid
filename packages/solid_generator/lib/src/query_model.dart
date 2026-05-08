@@ -73,7 +73,7 @@ class QueryModel {
 
   /// Names of `@SolidState` field/getter identifiers read in the query body's
   /// tracked position, in source-first-appearance order, deduplicated. Drives
-  /// M5-10 source-Computed synthesis:
+  /// source-Computed synthesis:
   ///
   /// * **0 names** → no `source:` argument on the lowered Resource.
   /// * **1 name** → that Signal/Computed is passed directly as `source:`
@@ -108,13 +108,11 @@ class QueryModel {
   /// constructor-arg context. Stored as source text (not a runtime
   /// `Duration`) so the emitter can splice it verbatim — mirrors how
   /// [bodyText], [innerTypeText], and [annotationName] carry source
-  /// substrings. Wired in M5-11.
+  /// substrings.
   final String? debounce;
 
   /// Value of the `useRefreshing:` argument on `@SolidQuery(useRefreshing: …)`,
-  /// or `null` if the annotation had no `useRefreshing:` argument. Reserved
-  /// in M5-01 for M5-11 — present on the model so future readers don't
-  /// reshape it.
+  /// or `null` if the annotation had no `useRefreshing:` argument.
   final bool? useRefreshing;
 
   /// Value of the `name:` argument on `@SolidQuery(name: '…')`, or `null` if

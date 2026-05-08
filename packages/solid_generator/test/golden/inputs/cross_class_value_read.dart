@@ -1,7 +1,7 @@
 // First cross-class `@SolidEnvironment` golden — `Counter` carries a
 // `@SolidState` field and is injected into `CounterDisplay` via
 // `@SolidEnvironment`. The build body's `counter.value` must rewrite to
-// `counter.value.value` (SPEC §5.1 chain-aware rule, M6-04 receiver shape)
+// `counter.value.value` (SPEC §5.1 chain-aware rule, env-field receiver shape)
 // and the enclosing `Text(...)` must be wrapped in a `SignalBuilder` (SPEC
 // §7). `Text(counter.value.toString())` is non-const by construction (the
 // argument is a method call), so no `prefer_const_constructors` ignore is

@@ -1,4 +1,4 @@
-// Marker test for M1-15 / M6-01: every shipped `@Solid*` annotation passes
+// Marker test: every shipped `@Solid*` annotation passes
 // `validateReservedAnnotations` without raising. If a future SPEC revision
 // re-reserves an annotation, the corresponding case here must be moved.
 
@@ -7,7 +7,7 @@ import 'package:solid_generator/src/reserved_annotation_validator.dart';
 import 'package:test/test.dart';
 
 void main() {
-  group('m1_15', () {
+  group('reserved annotations', () {
     test('shipped @Solid* annotations are not reserved', () {
       final unit = parseString(
         content: '''

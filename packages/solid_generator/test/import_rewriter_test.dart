@@ -1,6 +1,6 @@
-// Unit tests for `computeOutputImports`. M8-01 added the
-// `referencesSolidAnnotations` parameter; M8-02 added the `dart:` →
-// `package:` → relative alphabetical sort. The integration suite covers the
+// Unit tests for `computeOutputImports`. Covers the
+// `referencesSolidAnnotations` parameter and the `dart:` → `package:` →
+// relative alphabetical sort. The integration suite covers the
 // builder-level scan that produces `referencesSolidAnnotations`.
 
 import 'package:solid_generator/src/import_rewriter.dart';

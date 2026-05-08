@@ -1,4 +1,4 @@
-// Rejection suite for M1-14: invalid `@SolidState` placements per SPEC §3.1.
+// Rejection suite for invalid `@SolidState` placements per SPEC §3.1.
 
 import '../integration/golden_helpers.dart';
 
@@ -6,39 +6,39 @@ import '../integration/golden_helpers.dart';
 /// must contain.
 const List<({String name, String errorContains})> _cases = [
   (
-    name: 'm1_14_final_field',
+    name: 'solid_state_final_field',
     errorContains: '@SolidState cannot be applied to a final field',
   ),
   (
-    name: 'm1_14_const_field',
+    name: 'const_field',
     errorContains: '@SolidState cannot be applied to a const field',
   ),
   (
-    name: 'm1_14_static_field',
+    name: 'solid_state_static_field',
     errorContains: '@SolidState cannot be applied to a static field',
   ),
   (
-    name: 'm1_14_static_getter',
+    name: 'static_getter',
     errorContains: '@SolidState cannot be applied to a static getter',
   ),
   (
-    name: 'm1_14_top_level',
+    name: 'solid_state_top_level',
     errorContains: '@SolidState cannot be applied to a top-level variable',
   ),
   (
-    name: 'm1_14_top_level_getter',
+    name: 'top_level_getter',
     errorContains: '@SolidState cannot be applied to a top-level getter',
   ),
   (
-    name: 'm1_14_method',
+    name: 'solid_state_method',
     errorContains: '@SolidState cannot be applied to a method',
   ),
   (
-    name: 'm1_14_setter',
+    name: 'solid_state_setter',
     errorContains: '@SolidState cannot be applied to a setter',
   ),
 ];
 
 void main() {
-  runRejectionCases('m1_14 invalid @SolidState targets', _cases);
+  runRejectionCases('invalid @SolidState targets', _cases);
 }

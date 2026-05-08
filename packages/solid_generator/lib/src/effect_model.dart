@@ -59,8 +59,7 @@ class EffectModel {
 ///
 /// Mirrors `rejectIfGettersNotYetSupported` in `getter_model.dart`: the
 /// message template lives in one place so two rewriters' "not yet supported"
-/// errors can never drift. The StatelessWidget path lands in M4-01; the
-/// `State<X>` and plain-class paths land in M4-08.
+/// errors can never drift.
 void rejectIfEffectsNotYetSupported(
   List<EffectModel> solidEffects,
   String classKindLabel,
@@ -68,8 +67,7 @@ void rejectIfEffectsNotYetSupported(
 ) {
   if (solidEffects.isEmpty) return;
   throw CodeGenerationError(
-    '@SolidEffect on $classKindLabel is not yet supported '
-    '(will land in M4-08); '
+    '@SolidEffect on $classKindLabel is not yet supported; '
     'offending method: ${solidEffects.first.methodName}',
     null,
     className,

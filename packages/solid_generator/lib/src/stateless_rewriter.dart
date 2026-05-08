@@ -68,7 +68,7 @@ RewriteResult rewriteStatelessWidget(
     classFieldsAreConstSafe,
     className,
   );
-  // SPEC §5.1 M6-04 cross-class env-field receiver type map.
+  // SPEC §5.1 cross-class env-field receiver type map.
   final environmentFields = solidEnvironments.isEmpty
       ? const <String, String>{}
       : {for (final e in solidEnvironments) e.fieldName: e.typeText};
@@ -118,7 +118,7 @@ RewriteResult rewriteStatelessWidget(
 
   // SPEC §9 import-add gates. `Signal` and `SignalBuilder` are only emitted
   // when there's a same-class reactive declaration to wrap. An env-only
-  // class (M6-03 simple-environment) has no Signal/SignalBuilder reference
+  // class (simple-environment shape) has no Signal/SignalBuilder reference
   // in its lowered output and so does NOT pull in `flutter_solidart`.
   final hasReactive =
       solidFields.isNotEmpty ||
@@ -150,7 +150,7 @@ RewriteResult rewriteStatelessWidget(
 /// [classDecl] (Signal field + Computed getter + Effect method + Resource
 /// query + `@SolidEnvironment` env field) as a single 2-space-indented block,
 /// plus the declaration-order list of dispose names that pairs with it.
-/// Source order is the contract that `Computed`, `Effect`, and the M5-10
+/// Source order is the contract that `Computed`, `Effect`, and the
 /// query-source-Computed depend on: each must reference declarations defined
 /// before it, so the emitted `late final` lines must appear after the
 /// declarations they read in the rewritten State class.
@@ -162,7 +162,7 @@ RewriteResult rewriteStatelessWidget(
 /// per SPEC §4.8 rule 10 / §14 item 4, Resources are lazy and the late-final
 /// initializer fires on first call-site read, never via `initState`.
 ///
-/// `@SolidEnvironment` env fields (M6-03) are emitted in source-declaration
+/// `@SolidEnvironment` env fields are emitted in source-declaration
 /// order alongside Signal/Computed/Effect/Resource fields but are NEVER added
 /// to `disposeNames` (SPEC §10 — env fields are not host-disposed) and NEVER
 /// added to `effectNames` (SPEC §4.9 rule 2 — env fields are lazy and need
@@ -493,11 +493,11 @@ String _emitWidgetClass(
 /// [disposeNamesInDeclarationOrder]. When non-empty, this method emits a
 /// synthesized `initState()` that materializes each `late final` Effect field
 /// at mount time so its autorun fires (SPEC §4.7). When empty, no `initState`
-/// is emitted — preserving byte-equality with every M1/M2/M3 golden that has
-/// no Effects.
+/// is emitted — preserving byte-equality with every golden that has no
+/// Effects.
 ///
 /// `dispose()` is similarly gated on [disposeNamesInDeclarationOrder] being
-/// non-empty (SPEC §10): an env-only host class (M6-03) has no reactive
+/// non-empty (SPEC §10): an env-only host class has no reactive
 /// declarations to dispose, so no `dispose()` override is emitted — the
 /// inherited `State<T>.dispose()` runs unchanged.
 String _emitStateClass({

@@ -1,4 +1,4 @@
-// Mirror of M1-07 / M4-08 for `@SolidEnvironment`. An existing
+// Mirror of the existing-State-class fixtures for `@SolidEnvironment`. An existing
 // `State<HomePage>` already hosts a hand-written `initState` (calls
 // `super.initState()` then `debugPrint('init')`) and a hand-written
 // `dispose` (cancels a stream subscription, calls `super.dispose()`). It

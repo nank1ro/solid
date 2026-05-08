@@ -1,4 +1,4 @@
-// M8-01 — exercises the `.environment<T>()` textual-scan keep path.
+// Exercises the `.environment<T>()` textual-scan keep path.
 //
 // SPEC §9 bullet 4: `package:solid_annotations/...` survives in the output
 // when the lowered code references the `.environment<T>()` extension. The

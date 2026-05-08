@@ -1,9 +1,9 @@
-// M1-10 — proves SPEC §7 (SignalBuilder placement) at runtime: a FAB tap
+// Proves SPEC §7 (SignalBuilder placement) at runtime: a FAB tap
 // rebuilds only the `Text` subtree wrapped by `SignalBuilder`; the sibling
-// `Icon` does not. `_TrackedCounterPage` mirrors the M1-05 generated
+// `Icon` does not. `_TrackedCounterPage` mirrors the generated
 // `_CounterPageState` (see `example/lib/counter.dart`) but wraps the `Text`
 // and `Icon` leaves in `BuildTracker` — `BuildTracker` cannot be inserted
-// into the generated output without breaking the M1-05 golden, and the
+// into the generated output without breaking the golden, and the
 // generator's byte-equality is already covered by the golden + idempotency
 // suites. This test validates the *runtime contract* of the same shape.
 

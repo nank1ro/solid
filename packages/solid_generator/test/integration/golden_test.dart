@@ -1,5 +1,5 @@
 // Integration suite for the Solid builder's paired-golden tests.
-// M1+ TODOs extend [goldenNames]; the body of this file does not change.
+// New cases extend [goldenNames]; the body of this file does not change.
 
 import 'dart:io';
 

@@ -68,8 +68,7 @@ void rejectIfGettersNotYetSupported(
 ) {
   if (solidGetters.isEmpty) return;
   throw CodeGenerationError(
-    '@SolidState getter on $classKindLabel is not yet supported '
-    '(will land in a later M2 TODO); '
+    '@SolidState getter on $classKindLabel is not yet supported; '
     'offending getter: ${solidGetters.first.getterName}',
     null,
     className,

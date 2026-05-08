@@ -1,5 +1,5 @@
-// M5-07 — fences SPEC §3.5 (Refresh) and §10 (Resource disposal) at
-// runtime. `_QueryCounterPage` mirrors the M5-06 lowered shape but swaps
+// Fences SPEC §3.5 (Refresh) and §10 (Resource disposal) at runtime.
+// `_QueryCounterPage` mirrors the lowered shape but swaps
 // the constant fetcher `() async => 0` for a closure over the top-level
 // `_testCounter` so invocation count is observable.
 //
@@ -11,7 +11,7 @@
 // fetcher once. After three taps the ready value is `3` and `_testCounter`
 // is `4` — three produced by tap, one by the lazy mount-time fetch.
 //
-// The dispose test parallels M1-11 / M4-07: Navigator push/pop +
+// The dispose test parallels the counter / effect dispose suites: Navigator push/pop +
 // `fetchCount.onDispose` hook. `Resource<T>` extends
 // `Signal<ResourceState<T>>`, so it inherits `SignalBase.onDispose`.
 

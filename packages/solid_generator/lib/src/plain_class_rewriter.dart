@@ -27,7 +27,7 @@ const String _disposableMarkerName = 'Disposable';
 /// are lazy and the late-final initializer fires on first call-site read
 /// (SPEC §4.8 rule 10 / §8.3).
 ///
-/// Class header: M6-02 adds `implements Disposable` to every Solid-lowered
+/// Class header: `implements Disposable` is added to every Solid-lowered
 /// plain class per SPEC §10's marker rule (lines 1206–1210 of SPEC.md):
 /// when no `implements` clause is present, ` implements Disposable` is
 /// appended after any `extends` / `with` clauses; when one is present,
@@ -43,8 +43,8 @@ const String _disposableMarkerName = 'Disposable';
 ///
 /// Non-annotated members (other fields, user-defined methods other than
 /// `dispose()`, …) are emitted verbatim — with the SPEC §5.1 same-class
-/// `.value` rewrite applied to user method bodies (and the M6-02 single-
-/// level cross-class slice from [classRegistry], so a `compareTo(Counter
+/// `.value` rewrite applied to user method bodies (and the single-level
+/// cross-class slice from [classRegistry], so a `compareTo(Counter
 /// other) => value - other.value;` body lowers to
 /// `=> value.value - other.value.value;`). User-defined constructors are
 /// still rejected — constructor-merge is deferred to a later milestone.
@@ -66,8 +66,8 @@ RewriteResult rewritePlainClass(
   String source,
 ) {
   final className = classDecl.name.lexeme;
-  // M2-01 ships getter→Computed for `StatelessWidget` only; reject here so
-  // M1-14's valid-target pass isn't silently undone.
+  // getter→Computed only ships for `StatelessWidget`; reject here so the
+  // valid-target pass isn't silently undone.
   rejectIfGettersNotYetSupported(solidGetters, 'plain class', className);
   // SPEC §3.6: `@SolidEnvironment` requires a `BuildContext`, which only
   // widget/state hosts provide — plain classes cannot resolve `context.read`.

@@ -4,8 +4,7 @@ import 'package:solid_generator/src/transformation_error.dart';
 
 /// Reserved annotation names from `package:solid_annotations` whose full
 /// contract is deferred to a later SPEC revision. No annotations are
-/// currently reserved; M6-01 closed the v2 surface by landing
-/// `@SolidEnvironment`. This map is kept as a regression fence: any future
+/// currently reserved. This map is kept as a regression fence: any future
 /// reserved annotation MUST be added here (SPEC §3.2 + §13).
 const Map<String, String> _reservedAnnotations = {};
 
