@@ -1,13 +1,17 @@
+import 'dart:io';
+
 import 'package:analyzer/dart/analysis/features.dart';
 import 'package:analyzer/dart/analysis/utilities.dart';
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:build/build.dart';
 import 'package:dart_style/dart_style.dart';
+import 'package:glob/glob.dart';
 
 import 'package:solid_generator/src/annotation_reader.dart';
 import 'package:solid_generator/src/class_kind.dart';
 import 'package:solid_generator/src/const_call_site_rewriter.dart';
 import 'package:solid_generator/src/effect_model.dart';
+import 'package:solid_generator/src/empty_dir_pruner.dart';
 import 'package:solid_generator/src/environment_model.dart';
 import 'package:solid_generator/src/field_model.dart';
 import 'package:solid_generator/src/getter_model.dart';
@@ -62,6 +66,16 @@ class _SolidBuilder implements Builder {
       buildStep.inputId.path.startsWith('source/'),
       'Input path must start with source/: ${buildStep.inputId.path}',
     );
+    // SPEC §9 "Empty-directory pruning". The `findAssets` call registers a
+    // glob dependency on the source tree so this builder is re-scheduled
+    // whenever any source file is added, modified, or deleted — without
+    // it, `build_runner` would skip surviving inputs after an unrelated
+    // source deletion and the orphan `lib/` parents would never be pruned.
+    // The prune runs before the rest of the build so the current input's
+    // about-to-be-written output never appears as a transient orphan.
+    await buildStep.findAssets(Glob('source/**')).drain<void>();
+    pruneOrphanedSubtree(Directory('lib'), Directory('source'));
+
     final outputId = AssetId(
       buildStep.inputId.package,
       buildStep.inputId.path.replaceFirst('source/', 'lib/'),

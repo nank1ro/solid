@@ -1204,6 +1204,13 @@ The generated `lib/` file's imports are computed from the source's imports plus 
 
 **Rationale (added per build_runner maintainer feedback).** Earlier drafts of this SPEC delegated unused-import pruning to `dart fix --apply` on the consumer side. That delegation was retracted because `build_runner` has no post-build hook (confirmed by the package's maintainer), and chaining `dart fix --apply` after every build creates state divergence: locally fixed `lib/` files get overwritten by the next CI run that re-invokes the generator, and CI's `dart format --set-exit-if-changed` flags the divergence as a failure. The generator therefore performs all in-output cleanup itself.
 
+**Empty-directory pruning.** When the user deletes a file under `source/`, the matching `lib/` output and its parent directories should disappear too. `build_runner`'s built-in deletion handles only the file (it `unlink`s the orphan output but does not `rmdir` empty parents) and is in any case scheduled AFTER the build-phase builders run, so a same-cycle in-builder prune would still see the orphan file present. The generator addresses both gaps from inside `_SolidBuilder.build()`:
+
+- It calls `buildStep.findAssets(Glob('source/**'))` at the start of every invocation, registering a glob dependency on the entire source tree. When any file under `source/` is added, modified, or deleted, every input that registered the glob is re-scheduled — guaranteeing the prune fires on every source-tree change, including pure deletions.
+- It walks `lib/` via `dart:io` and removes (a) every file `lib/X/file.dart` whose `source/X/file.dart` counterpart no longer exists, and (b) every directory `lib/X/Y/Z` that is empty after orphan-file removal AND whose `source/X/Y/Z` counterpart no longer exists.
+
+`lib/` itself is never deleted; symlinks are not followed; `lib/` subtrees whose `source/` counterpart still exists are left alone (preserving any user-managed structure). The pairing rule mirrors the `^source/{{}}.dart -> lib/{{}}.dart` build extension. The prune runs at the START of `build()` so the current input's about-to-be-written output never appears as a transient orphan, and is idempotent across concurrent invocations (deletes are wrapped in try/catch so a directory or file removed by a sibling invocation is not an error). Removing orphan files inside the builder before `build_runner`'s own delete pass would race silently with that pass; the race is harmless because `File.deleteSync` is idempotent (the second `unlink` raises a `FileSystemException` that the pruner swallows).
+
 This is the fix for issue #8.
 
 ---
