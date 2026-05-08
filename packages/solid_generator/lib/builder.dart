@@ -1,18 +1,23 @@
+import 'dart:io';
+
 import 'package:analyzer/dart/analysis/features.dart';
 import 'package:analyzer/dart/analysis/utilities.dart';
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:build/build.dart';
 import 'package:dart_style/dart_style.dart';
+import 'package:glob/glob.dart';
 
 import 'package:solid_generator/src/annotation_reader.dart';
 import 'package:solid_generator/src/class_kind.dart';
 import 'package:solid_generator/src/const_call_site_rewriter.dart';
 import 'package:solid_generator/src/effect_model.dart';
+import 'package:solid_generator/src/empty_dir_pruner.dart';
 import 'package:solid_generator/src/environment_model.dart';
 import 'package:solid_generator/src/field_model.dart';
 import 'package:solid_generator/src/getter_model.dart';
 import 'package:solid_generator/src/import_rewriter.dart';
 import 'package:solid_generator/src/plain_class_rewriter.dart';
+import 'package:solid_generator/src/provider_dispose_rewriter.dart';
 import 'package:solid_generator/src/query_model.dart';
 import 'package:solid_generator/src/reserved_annotation_validator.dart';
 import 'package:solid_generator/src/state_class_rewriter.dart';
@@ -30,6 +35,14 @@ Builder solidBuilder(BuilderOptions options) => _SolidBuilder();
 /// "no annotation" file (SPEC Section 2).
 const String _solidAnnotationHint = '@Solid';
 
+/// Substrings that flag a file as a candidate for the `Provider` /
+/// `.environment<T>()` auto-dispose pass (SPEC §4.9 rule 7). The presence of
+/// either substring is a cheap pre-parse hint; the visitor still rejects
+/// false positives (comments, string literals, user types whose name
+/// happens to contain `Provider`).
+const String _providerCallHint = 'Provider';
+const String _environmentCallHint = '.environment';
+
 /// Shared formatter; `DartFormatter` construction allocates non-trivial
 /// internal state, so hoisting out of `_renderOutput` avoids per-file cost.
 final DartFormatter _formatter = DartFormatter(
@@ -44,7 +57,7 @@ final RegExp _environmentExtensionRef = RegExp(r'\.environment\b');
 class _SolidBuilder implements Builder {
   @override
   final Map<String, List<String>> buildExtensions = const {
-    '^source/{{}}.dart': ['lib/{{}}.dart'],
+    '^source/{{}}': ['lib/{{}}'],
   };
 
   @override
@@ -53,16 +66,45 @@ class _SolidBuilder implements Builder {
       buildStep.inputId.path.startsWith('source/'),
       'Input path must start with source/: ${buildStep.inputId.path}',
     );
+    // SPEC §9 "Empty-directory pruning". The `findAssets` call registers a
+    // glob dependency on the source tree so this builder is re-scheduled
+    // whenever any source file is added, modified, or deleted — without
+    // it, `build_runner` would skip surviving inputs after an unrelated
+    // source deletion and the orphan `lib/` parents would never be pruned.
+    // The prune runs before the rest of the build so the current input's
+    // about-to-be-written output never appears as a transient orphan.
+    await buildStep.findAssets(Glob('source/**')).drain<void>();
+    pruneOrphanedSubtree(Directory('lib'), Directory('source'));
+
     final outputId = AssetId(
       buildStep.inputId.package,
       buildStep.inputId.path.replaceFirst('source/', 'lib/'),
     );
+
+    // SPEC §2: non-`.dart` inputs (assets, configs, generated `.g.dart`
+    // parts from third-party generators, etc.) are copied byte-for-byte to
+    // the mirrored path under `lib/`. Only `.dart` files continue through
+    // the annotation / lowering pipeline below.
+    if (!buildStep.inputId.path.endsWith('.dart')) {
+      await buildStep.writeAsBytes(
+        outputId,
+        await buildStep.readAsBytes(buildStep.inputId),
+      );
+      return;
+    }
+
     final source = await buildStep.readAsString(buildStep.inputId);
 
     // SPEC Section 2: files without any @Solid* annotation pass through
-    // verbatim. A `source.contains` check is a cheap pre-parse guard — if the
-    // marker is absent the file cannot need transformation.
-    if (!source.contains(_solidAnnotationHint)) {
+    // verbatim — UNLESS they contain a `Provider(...)` or `.environment<T>()`
+    // call site, which the SPEC §4.9 rule 7 auto-dispose pass must visit. A
+    // `source.contains` check is a cheap pre-parse guard — if neither marker
+    // is present the file cannot need transformation.
+    final hasSolidAnnotation = source.contains(_solidAnnotationHint);
+    final hasProviderHint =
+        source.contains(_providerCallHint) ||
+        source.contains(_environmentCallHint);
+    if (!hasSolidAnnotation && !hasProviderHint) {
       await buildStep.writeAsString(outputId, source);
       return;
     }
@@ -103,10 +145,21 @@ class _SolidBuilder implements Builder {
 
     final annotatedClasses = _collectAnnotatedClasses(parsed.unit, source);
     if (annotatedClasses.every((c) => c.hasNoAnnotations)) {
-      // Hint matched, but no `@SolidState` field/getter, `@SolidEffect`
-      // method, or `@SolidQuery` method resolved — the file likely contains
-      // a comment or string literal mentioning `@Solid…`. Reserved
-      // annotations are caught upstream.
+      // No reactive annotations resolved. The file may still contain a
+      // `Provider(...)` or `.environment<T>()` call site that the SPEC §4.9
+      // rule 7 auto-dispose pass must visit; otherwise pass through verbatim.
+      if (hasProviderHint) {
+        final withDispose = addProviderDisposeAtCallSites(
+          source,
+          unit: parsed.unit,
+        );
+        if (identical(withDispose, source)) {
+          await buildStep.writeAsString(outputId, source);
+          return;
+        }
+        await buildStep.writeAsString(outputId, _formatter.format(withDispose));
+        return;
+      }
       await buildStep.writeAsString(outputId, source);
       return;
     }
@@ -309,6 +362,13 @@ String _renderOutput(
   final importBlock = imports.map((u) => "import '$u';").join('\n');
 
   final combined = '$importBlock\n\n$body\n';
+  // SPEC §4.9 rule 7. Inject
+  // `dispose: (context, provider) => provider.dispose()` into every
+  // `Provider(...)`, `Provider<T>(...)`, and `.environment<T>(...)` call site
+  // that omits `dispose:`. Runs before `addConstAtCallSites` so the injected
+  // closure (a `FunctionExpression`, never const-eligible) is part of the
+  // argument list when const promotion evaluates const-eligibility.
+  final withDispose = addProviderDisposeAtCallSites(combined);
   // SPEC §14 item 7 follow-up. M8-03 adds `const` to widget-ctor declarations;
   // this pass adds `const` to call sites of those declarations elsewhere in
   // the assembled output (top-level `main()`, rewritten `build` bodies,
@@ -317,7 +377,7 @@ String _renderOutput(
   final constCtorNames = <String>{
     for (final r in results) ...r.constCtorNames,
   };
-  final withConst = addConstAtCallSites(combined, constCtorNames);
+  final withConst = addConstAtCallSites(withDispose, constCtorNames);
   return _formatter.format(withConst);
 }
 

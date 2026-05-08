@@ -4,6 +4,8 @@ import 'package:solid_annotations/solid_annotations.dart';
 
 class Counter {
   int n = 0;
+
+  void dispose() {}
 }
 
 class App extends StatefulWidget {
@@ -24,6 +26,9 @@ class _AppState extends State<App> {
 
   @override
   Widget build(BuildContext context) {
-    return const Placeholder().environment<Counter>((_) => Counter());
+    return const Placeholder().environment<Counter>(
+      (_) => Counter(),
+      dispose: (context, provider) => provider.dispose(),
+    );
   }
 }

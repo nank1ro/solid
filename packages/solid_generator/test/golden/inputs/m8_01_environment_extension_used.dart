@@ -11,6 +11,8 @@ import 'package:flutter/widgets.dart';
 
 class Counter {
   int n = 0;
+
+  void dispose() {}
 }
 
 class App extends StatelessWidget {

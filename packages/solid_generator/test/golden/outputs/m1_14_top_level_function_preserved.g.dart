@@ -5,7 +5,12 @@ import 'package:solid_annotations/solid_annotations.dart';
 
 void main() {
   runApp(
-    MaterialApp(home: const CounterDisplay().environment((_) => Counter())),
+    MaterialApp(
+      home: const CounterDisplay().environment(
+        (_) => Counter(),
+        dispose: (context, provider) => provider.dispose(),
+      ),
+    ),
   );
 }
 

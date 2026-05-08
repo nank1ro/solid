@@ -12,10 +12,13 @@ import 'package:provider/provider.dart';
 /// Pass it explicitly to register under a supertype:
 /// `child.environment<AuthService>((_) => RealAuthService())`.
 ///
-/// There is no automatic dispose — pass `dispose` when cleanup is needed:
-/// `child.environment((_) => Counter(), dispose: (_, c) => c.dispose())`.
-/// See SPEC §3.6 for why `c.dispose()` requires a source-side `dispose()`
-/// declaration on the injected type.
+/// The Solid generator auto-injects
+/// `dispose: (context, provider) => provider.dispose()` when the call site
+/// omits `dispose:` (SPEC §4.9 rule 7). For source-layer typecheck of the
+/// auto-injected closure, declare an empty `void dispose() {}` on the
+/// injected type (SPEC §3.6) — Solid-lowered classes get a synthesized
+/// `dispose()` in `lib/`. Pass `dispose:` explicitly (any value, including
+/// `null`) to opt out.
 /// {@endtemplate}
 extension WidgetEnvironment on Widget {
   /// {@macro SolidAnnotations.WidgetEnvironment}
