@@ -85,6 +85,27 @@ I wanted to use `lib` as the input folder, but `flutter build` doesn't allow bui
 
 In addition, Solid is not a common generator because it transpiles your existing code to an optimized version of it.
 
+## Configuration
+
+To ensure Solid properly manages the lifecycle of your reactive atoms, configure `flutter_solidart` in your app's `main()` function:
+
+```dart title="source/main.dart" {6}
+import 'package:example/counter.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_solidart/flutter_solidart.dart';
+
+void main() {
+  SolidartConfig.autoDispose = false;
+  runApp(const MaterialApp(home: CounterPage()));
+}
+```
+
+Setting `SolidartConfig.autoDispose = false` tells the library to let Solid manage disposal of reactive atoms manually, rather than automatically disposing them when they go out of scope.
+
+<Aside>
+This is a temporary step. A future major release of `flutter_solidart` will disable `autoDispose` by default, at which point you won't need to set this flag anymore.
+</Aside>
+
 ## Usage
 
 Run the generator with `build_runner`:
