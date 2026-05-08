@@ -16,7 +16,7 @@ class QueryExample extends StatelessWidget {
 
   @SolidQuery()
   Future<String> fetchData() async {
-    await Future.delayed(const Duration(seconds: 1));
+    await Future<void>.delayed(const Duration(seconds: 1));
     return 'Fetched Data';
   }
 
@@ -26,8 +26,8 @@ class QueryExample extends StatelessWidget {
       appBar: AppBar(title: const Text('Query')),
       body: Center(
         child: fetchData().when(
-          ready: (data) => Text(data),
-          loading: () => CircularProgressIndicator(),
+          ready: Text.new,
+          loading: CircularProgressIndicator.new,
           error: (error, stackTrace) => Text('Error: $error'),
         ),
       ),
@@ -70,7 +70,7 @@ class QueryWithSourceExample extends StatelessWidget {
   @SolidQuery(debounce: Duration(seconds: 1))
   Future<String?> fetchData() async {
     if (userId == null) return null;
-    await Future.delayed(const Duration(seconds: 1));
+    await Future<void>.delayed(const Duration(seconds: 1));
     return 'Fetched Data for $userId';
   }
 
@@ -86,7 +86,7 @@ class QueryWithSourceExample extends StatelessWidget {
             }
             return Text(data);
           },
-          loading: () => CircularProgressIndicator(),
+          loading: CircularProgressIndicator.new,
           error: (error, stackTrace) => Text('Error: $error'),
         ),
       ),
