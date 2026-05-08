@@ -1,10 +1,15 @@
 import 'dart:io';
 
-/// Walks [libRoot] bottom-up and removes every orphan output: a file under
-/// `<libRoot>/X/Y/file.dart` whose `<sourceRoot>/X/Y/file.dart` counterpart
-/// no longer exists, and every directory `<libRoot>/X/Y/Z` that becomes
-/// empty after orphan-file removal AND whose `<sourceRoot>/X/Y/Z`
-/// counterpart no longer exists either.
+/// Walks [libRoot] bottom-up and removes:
+///
+/// 1. Every file under `<libRoot>/X/Y/file.ext` whose
+///    `<sourceRoot>/X/Y/file.ext` counterpart no longer exists (orphan
+///    output — the matching `source/` input was deleted).
+/// 2. Every directory under [libRoot] that ends up empty after step 1
+///    (regardless of whether its `source/` counterpart still exists). An
+///    empty `lib/X/` is a stale generator output: every dart input under
+///    `source/X/` would have produced a file there, so an empty `lib/X/`
+///    means there is no live mapping into it.
 ///
 /// Does NOT delete [libRoot] itself, even when its last subtree is pruned —
 /// the package's `lib/` is a fixed point. Returns the total number of
@@ -21,14 +26,14 @@ import 'dart:io';
 /// removed, populated dirs preserved — is reached either way.
 ///
 /// SPEC §9 "Empty-directory pruning". The build extension
-/// `^source/{{}}.dart -> lib/{{}}.dart` defines the pairing rule that
-/// determines which lib outputs are orphans.
+/// `^source/{{}} -> lib/{{}}` defines the pairing rule for files; empty
+/// directories are pruned unconditionally (other than the root).
 ///
 /// Safety guard: when [sourceRoot] does NOT exist on disk, the pruner
 /// returns 0 immediately without touching anything. A missing `source/`
 /// directory means the current working directory is not a consumer
-/// package using the `^source/{{}}.dart -> lib/{{}}.dart` build extension
-/// (e.g., the `solid_generator` package itself, or a test runner whose
+/// package using the `^source/{{}} -> lib/{{}}` build extension (e.g., the
+/// `solid_generator` package itself, or a test runner whose
 /// `Directory.current` is not a consumer root) — treating every `lib/`
 /// entry as an orphan in that case would erase legitimate code.
 int pruneOrphanedSubtree(Directory libRoot, Directory sourceRoot) {
@@ -37,11 +42,12 @@ int pruneOrphanedSubtree(Directory libRoot, Directory sourceRoot) {
   return _pruneInto(libRoot, libRoot, sourceRoot).removed;
 }
 
-/// Bottom-up walk: recurses into each `Directory` child first, then for each
-/// child decides whether to delete it. Returns the entries removed in the
-/// subtree rooted at [current], and whether [current] is empty after the
-/// pass — the caller uses `isEmpty` to decide whether [current] itself
-/// is a delete candidate, avoiding a second `listSync` of the same dir.
+/// Bottom-up walk: recurses into each `Directory` child first, then for
+/// each child decides whether to delete it. Returns the entries removed in
+/// the subtree rooted at [current], and whether [current] is empty after
+/// the pass — the caller uses `isEmpty` to decide whether [current] itself
+/// is a delete candidate. The top-level call uses [libRoot] as `current`
+/// and discards `isEmpty` so the root is never deleted.
 ({int removed, bool isEmpty}) _pruneInto(
   Directory libRoot,
   Directory current,
@@ -63,7 +69,7 @@ int pruneOrphanedSubtree(Directory libRoot, Directory sourceRoot) {
     if (entity is Directory) {
       final result = _pruneInto(libRoot, entity, sourceRoot);
       removed += result.removed;
-      if (result.isEmpty && !_counterpartExists(libRoot, entity, sourceRoot)) {
+      if (result.isEmpty) {
         if (_tryDelete(entity)) {
           removed++;
         } else {
@@ -73,7 +79,7 @@ int pruneOrphanedSubtree(Directory libRoot, Directory sourceRoot) {
         remaining++;
       }
     } else if (entity is File) {
-      if (!_counterpartExists(libRoot, entity, sourceRoot)) {
+      if (!_fileCounterpartExists(libRoot, entity, sourceRoot)) {
         if (_tryDelete(entity)) {
           removed++;
         } else {
@@ -89,21 +95,17 @@ int pruneOrphanedSubtree(Directory libRoot, Directory sourceRoot) {
   return (removed: removed, isEmpty: remaining == 0);
 }
 
-/// True iff [entity]'s `<sourceRoot>/<relative>` counterpart exists. Used
-/// for both files (`File(counterpath).existsSync()`) and directories
-/// (`Directory(counterpath).existsSync()`). The lib root itself is treated
-/// as always-present so the caller's recursion never deletes it.
-bool _counterpartExists(
+/// True iff [file]'s `<sourceRoot>/<relative>` counterpart exists. Used
+/// only for files: directories are pruned based on emptiness alone (see
+/// the file-level doc on [pruneOrphanedSubtree]).
+bool _fileCounterpartExists(
   Directory libRoot,
-  FileSystemEntity entity,
+  File file,
   Directory sourceRoot,
 ) {
-  final relative = _relativeUnder(libRoot, entity.path);
-  if (relative.isEmpty) return true;
-  final counterpath = '${sourceRoot.path}/$relative';
-  return entity is Directory
-      ? Directory(counterpath).existsSync()
-      : File(counterpath).existsSync();
+  final relative = _relativeUnder(libRoot, file.path);
+  if (relative.isEmpty) return true; // shouldn't happen for files, defensive
+  return File('${sourceRoot.path}/$relative').existsSync();
 }
 
 bool _tryDelete(FileSystemEntity entity) {

@@ -82,17 +82,42 @@ void main() {
       expect(Directory('${libRoot.path}/a').existsSync(), isTrue);
     });
 
-    test('mid-tree source still present -> stop ascending', () {
+    test('empty lib subtree pruned even when source counterparts exist', () {
+      // Empty lib subdirs are stale generator outputs regardless of whether
+      // their source counterpart still exists — every live source file
+      // would have produced a lib output, so an empty lib dir means nothing
+      // is mapped into it.
       Directory('${libRoot.path}/a/b/c').createSync(recursive: true);
-      // source/a/b exists, but source/a/b/c does not.
       Directory('${sourceRoot.path}/a/b').createSync(recursive: true);
 
       final removed = pruneOrphanedSubtree(libRoot, sourceRoot);
 
-      expect(removed, 1, reason: 'only c is orphaned');
-      expect(Directory('${libRoot.path}/a/b/c').existsSync(), isFalse);
-      expect(Directory('${libRoot.path}/a/b').existsSync(), isTrue);
+      expect(removed, 3, reason: 'c, b, a all empty -> all pruned');
+      expect(Directory('${libRoot.path}/a').existsSync(), isFalse);
     });
+
+    test(
+      'lib dir with empty source counterpart is also pruned (regression: '
+      'user reported lib/test/ persisting after deleting all files in '
+      'source/test/)',
+      () {
+        Directory('${libRoot.path}/test').createSync(recursive: true);
+        Directory('${sourceRoot.path}/test').createSync(recursive: true);
+
+        final removed = pruneOrphanedSubtree(libRoot, sourceRoot);
+
+        expect(
+          removed,
+          1,
+          reason:
+              'lib/test pruned despite source/test '
+              'existing as empty dir',
+        );
+        expect(Directory('${libRoot.path}/test').existsSync(), isFalse);
+        // source/test is left alone; the pruner only touches lib/.
+        expect(Directory('${sourceRoot.path}/test').existsSync(), isTrue);
+      },
+    );
 
     test('libRoot itself empty -> never deleted', () {
       libRoot.createSync(recursive: true);

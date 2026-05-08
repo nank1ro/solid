@@ -5,8 +5,8 @@ builders:
     builder_factories:
       - solidBuilder
     build_extensions:
-      "^source/{{}}.dart":
-        - "lib/{{}}.dart"
+      "^source/{{}}":
+        - "lib/{{}}"
     build_to: source
     auto_apply: dependents
     applies_builders: []

@@ -57,7 +57,7 @@ final RegExp _environmentExtensionRef = RegExp(r'\.environment\b');
 class _SolidBuilder implements Builder {
   @override
   final Map<String, List<String>> buildExtensions = const {
-    '^source/{{}}.dart': ['lib/{{}}.dart'],
+    '^source/{{}}': ['lib/{{}}'],
   };
 
   @override
@@ -80,6 +80,19 @@ class _SolidBuilder implements Builder {
       buildStep.inputId.package,
       buildStep.inputId.path.replaceFirst('source/', 'lib/'),
     );
+
+    // SPEC §2: non-`.dart` inputs (assets, configs, generated `.g.dart`
+    // parts from third-party generators, etc.) are copied byte-for-byte to
+    // the mirrored path under `lib/`. Only `.dart` files continue through
+    // the annotation / lowering pipeline below.
+    if (!buildStep.inputId.path.endsWith('.dart')) {
+      await buildStep.writeAsBytes(
+        outputId,
+        await buildStep.readAsBytes(buildStep.inputId),
+      );
+      return;
+    }
+
     final source = await buildStep.readAsString(buildStep.inputId);
 
     // SPEC Section 2: files without any @Solid* annotation pass through
