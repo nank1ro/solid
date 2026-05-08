@@ -66,6 +66,10 @@ import { Steps } from '@astrojs/starlight/components';
    ```
 </Steps>
 
+<Aside title="AI assistant setup (optional)">
+If you use Claude Code, Cursor, Codex, GitHub Copilot, or another supported agent, install the Solid skill so your assistant follows Solid's conventions (edit `source/`, never `lib/`; correct annotation targets; setup steps): `npx skills add nank1ro/solid`. Or copy `skills/solid/SKILL.md` from the [Solid repo](https://github.com/nank1ro/solid) into your editor's skill location.
+</Aside>
+
 ## How it works
 
 The code you write is the source of truth, and Solid generates the boilerplate code needed to make the app working.

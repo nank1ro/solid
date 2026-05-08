@@ -81,6 +81,16 @@ Solid ships four annotations:
 - **`@SolidQuery`** — wraps an async or stream call as a reactive resource with `.when(...)` UI states and refresh control. See [Query](https://solid.mariuti.com/guides/query).
 - **`@SolidEnvironment`** — injects a dependency from the nearest ancestor `Provider<T>` in the widget tree, SwiftUI `@Environment` style. See [Environment](https://solid.mariuti.com/guides/environment).
 
+## AI assistants
+
+Solid ships an agent skill at [`skills/solid/`](./skills/solid/) that teaches Claude Code, Cursor, Codex, GitHub Copilot, and other [skills.sh](https://skills.sh)-compatible agents how to write idiomatic Solid code — most importantly, that `source/` is the source of truth and `lib/` is generated. Install it with:
+
+```bash
+npx skills add nank1ro/solid
+```
+
+Or copy `skills/solid/SKILL.md` into your editor's skill location manually.
+
 ## License
 
 The Solid framework is open-source software licensed under the [MIT License](./LICENSE).
