@@ -34,7 +34,16 @@ The lookup is lazy. The field initializer runs the first time the field is read,
 
 ## Providing the instance
 
-Two equivalent surfaces. The SwiftUI-flavoured `.environment<T>()` extension on `Widget`, shipped by `solid_annotations`:
+Given a `Counter` class that looks like this:
+
+```dart title="source/counter.dart"
+class Counter {
+  @SolidState()
+  int value = 0;
+}
+```
+
+You can provide it with `.environment<T>()` extension on `Widget`, shipped by `solid_annotations`:
 
 ```dart {7} title="source/main.dart"
 class MyApp extends StatelessWidget {
@@ -97,39 +106,3 @@ MultiProvider(
 )
 ```
 
-Pass `dispose:` to either form when the injected instance owns resources that need to be torn down — see the next section.
-
-## Disposing the injected instance
-
-The host widget never disposes the injected instance — the providing scope owns disposal via the `dispose:` callback you pass to `.environment<T>()` or `Provider<T>`. Most of the time that callback wires an existing cleanup method on the injected type:
-
-```dart
-HomePage().environment(
-  (_) => DatabaseClient(),
-  dispose: (_, c) => c.close(),
-)
-```
-
-Solid does not constrain the cleanup-method name. `close()`, `cancel()`, `shutdown()`, or any other method already declared on your type works — you don't need to add anything to your source class.
-
-<Aside type="tip">
-Skip `dispose:` entirely when the injected instance has nothing to clean up — a stateless service, a config object, a logger that owns no resources.
-</Aside>
-
-The uncommon case is when the injected type is itself a Solid class — one carrying `@SolidState`, `@SolidEffect`, or `@SolidQuery` declarations. Solid synthesizes a `dispose()` on the generated `lib/` output that tears down all reactive declarations, but Dart's analyzer reads `source/`, not the generated output. To make `dispose: (_, c) => c.dispose()` typecheck, your source class needs to declare `void dispose()` itself. The minimal pattern is an empty stub:
-
-```dart {4} title="source/counter.dart"
-class Counter {
-  @SolidState()
-  int value = 0;
-  void dispose() {}
-}
-```
-
-Solid merges the disposal of every reactive declaration on the class (`value.dispose();`, etc.) into the body — you never write `value.dispose()` yourself.
-
-Most apps never reference the generated `Disposable` marker directly — it documents which generated classes carry a `dispose()` method. If you want to consume it (for example, a runtime `is Disposable` check inside your own helper), import it from `solid_annotations`:
-
-```dart
-import 'package:solid_annotations/solid_annotations.dart' show Disposable;
-```
