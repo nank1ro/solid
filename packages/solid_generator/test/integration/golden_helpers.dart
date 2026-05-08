@@ -76,6 +76,12 @@ const List<String> goldenNames = <String>[
   'm1_14_top_level_function_preserved',
   'm1_15_top_level_variable_preserved',
   'm1_16_top_level_extension_preserved',
+  'm9_01_provider_auto_dispose_simple',
+  'm9_02_multi_provider_recurse',
+  'm9_03_environment_extension_auto_dispose',
+  'm9_04_dispose_already_present_skipped',
+  'm9_05_provider_no_at_solid_annotations',
+  'm9_06_provider_value_skipped',
 ];
 
 /// Memoized golden directory resolution. Resolved relative to the package

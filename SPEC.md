@@ -327,16 +327,22 @@ extension WidgetEnvironment on Widget {
 }
 ```
 
-There is NO automatic dispose behavior — the `Disposable` marker (below) is invisible to the user's source layer (it appears only in the generated `lib/` output, added by the generator at Section 10). When the injected type owns resources, the user passes `dispose:` explicitly:
+**Auto-dispose injection.** When a `Provider(...)` / `Provider<T>(...)` / `.environment<T>(...)` call site omits the `dispose:` named argument, the generator inserts `dispose: (context, provider) => provider.dispose()` automatically (see §4.9 rule 7). The user writes the create-side only:
+
+```dart
+HomePage().environment<Counter>((context) => Counter())
+```
+
+and the lowered `lib/` emits:
 
 ```dart
 HomePage().environment<Counter>(
   (context) => Counter(),
-  dispose: (_, c) => c.dispose(),
+  dispose: (context, provider) => provider.dispose(),
 )
 ```
 
-The `c.dispose()` call expression typechecks at the source layer ONLY when the source-side `Counter` class itself declares a `void dispose()` method. The source analyzer cannot see the generator-synthesized `dispose()` (which exists only in lowered `lib/`). To enable this pattern for a Solid-lowered class, the user adds an empty `void dispose()` stub on the source class:
+The `provider.dispose()` call resolves at runtime because every Solid-lowered class implements `Disposable` and has a synthesized `dispose()` (Section 10). For source-layer typechecking, the user adds an empty `void dispose()` stub on the source class:
 
 ```dart
 class Counter {
@@ -349,37 +355,59 @@ class Counter {
 
 The empty body is appropriate because the Section 10 merge rule prepends the synthesized reactive disposals (`value.dispose();` etc.) to the user's body in the lowered output. Users don't need to write `value.dispose()` themselves; the generator handles it.
 
-If the source-side type already declares `dispose()` (e.g., a `ChangeNotifier` subclass) or some other cleanup method (`close()`, `cancel()`, `shutdown()`), the user wires that method directly: `dispose: (_, c) => c.close()`. Solid does not constrain the cleanup-method name on non-Solid types.
+To opt out of auto-injection (e.g., for a non-disposable type, or to wire a non-default cleanup method), supply `dispose:` explicitly — any value, including `dispose: null`, suppresses the injection:
+
+```dart
+HomePage().environment<AuthService>(
+  (context) => RealAuthService(),
+  dispose: (_, c) => c.close(),  // explicit override
+)
+```
+
+If the source-side type already declares `dispose()` with a different cleanup intent (e.g., a `ChangeNotifier` subclass whose `dispose()` is a Flutter lifecycle hook), the auto-injection still fires. Users who want a different cleanup method (`close()`, `cancel()`, `shutdown()`) wire it manually as above.
 
 Chained calls nest providers in source-declaration order:
 
 ```dart
 HomePage()
-  .environment((_) => Counter(), dispose: (_, c) => c.dispose())
+  .environment((_) => Counter())
   .environment((_) => Logger())
 ```
+
+(Each `.environment<T>(...)` call gets its own auto-injected `dispose:` in the lowered output.)
 
 ##### Widget form (uses `package:provider` directly)
 
 ```dart
 Provider<Counter>(
   create: (context) => Counter(),
-  dispose: (_, c) => c.dispose(),
   child: HomePage(),
 )
 ```
 
-The widget form is `package:provider`'s own surface and follows its conventions verbatim. For composing multiple providers, users import `MultiProvider` from `package:provider`:
+Lowers to:
+
+```dart
+Provider<Counter>(
+  create: (context) => Counter(),
+  child: HomePage(),
+  dispose: (context, provider) => provider.dispose(),
+)
+```
+
+The widget form is `package:provider`'s own surface and follows its conventions verbatim except for the auto-injected `dispose:`. For composing multiple providers, users import `MultiProvider` from `package:provider`:
 
 ```dart
 MultiProvider(
   providers: [
-    Provider<Counter>(create: (_) => Counter(), dispose: (_, c) => c.dispose()),
+    Provider<Counter>(create: (_) => Counter()),
     Provider<Logger>(create: (_) => Logger()),
   ],
   child: HomePage(),
 )
 ```
+
+`MultiProvider(...)` itself never receives a `dispose:` argument; the generator descends into its `providers:` list and applies the per-Provider auto-injection to each entry (§4.9 rule 7). `Provider<T>.value(...)` is not rewritten — it owns no instance and takes no `dispose:`.
 
 Solid does NOT ship its own provider widget or wrapper. Beyond the `.environment<T>()` extension (a one-line pass-through to `Provider<T>`), the DI surface is `package:provider` exactly as documented at <https://pub.dev/packages/provider>.
 
@@ -762,7 +790,13 @@ Rules:
 
 6. **Cross-class reactive reads use the §5.1 type-driven rewrite.** When the consumer body reads `counter.value` where `counter` is a `@SolidEnvironment` field of type `Counter` and `Counter.value` resolves to `Signal<int>`, the chain becomes `counter.value.value` per Section 5.1. The §7 SignalBuilder placement rule wraps the enclosing subtree.
 
-7. **`Provider<T>(...)` and `.environment<T>(...)` calls are NOT rewritten.** When the source uses `Provider<T>(create: ..., child: ...)` directly OR chains `.environment<T>(...)` on a child widget, source and lib are byte-identical for those call expressions. The `.environment<T>()` extension's body is a runtime helper in `solid_annotations` that wraps in `Provider<T>` at call time; no codegen rewrite is needed.
+7. **Auto-dispose injection.** When a `Provider<T>(...)`, `Provider(...)` (with inferred `T`), or `.environment<T>(...)` call site omits the `dispose:` named argument, the generator inserts `dispose: (context, provider) => provider.dispose()` automatically. `MultiProvider(...)` itself never receives a `dispose:` argument; the generator descends into its `providers:` list and applies the per-Provider rule to each inner entry. Other arguments (`create:`, `child:`, `lazy:`, etc.) pass through byte-identical. `Provider<T>.value(...)` is not rewritten — it owns no instance and takes no `dispose:`.
+
+   The user opts out by supplying any explicit `dispose:` value (including `dispose: null`) — the visitor leaves any call site that already has a `dispose:` named argument untouched.
+
+   The injected `provider.dispose()` always compiles for Solid-lowered types because Section 10 attaches `implements Disposable` and a synthesized `dispose()` to every annotated class. For non-Solid types, the user is responsible for either declaring `void dispose()` on the source class or opting out via explicit `dispose:`.
+
+   The pass runs over every source file — including files without any `@Solid*` annotations — so `main.dart`-style entry points that wire up `Provider(...)` at the app root receive the same auto-injection.
 
 8. **Import-add.** When at least one `@SolidEnvironment` field exists in the output file, the generator emits `import 'package:provider/provider.dart' show ReadContext;`. See Section 9. Users list `provider` in their own pubspec because they reference `Provider<T>` / `MultiProvider` / `context.read<T>()` in their source code (per the `depend_on_referenced_packages` lint).
 
@@ -1188,7 +1222,7 @@ Disposal order is **reverse declaration order**: dependents are disposed before 
 
 Solid-lowered plain classes (Section 8.3) — every class with reactive declarations that gets a synthesized `dispose()` — declare `implements Disposable` in their lowered output and annotate the synthesized `dispose()` with `@override`. `Disposable` is exported from `solid_annotations` (Section 3.6). The marker is added BY THE GENERATOR: it appears only in the lowered `lib/` output, never in the user's source class. So the user does not see `implements Disposable` on their own source declaration and cannot rely on it for compile-time resolution inside source code.
 
-Practical consequence: a user who wants to wire `Provider<Counter>(dispose: (_, c) => c.dispose())` (or the `.environment<T>()` extension's `dispose:` argument) MUST manually declare a `void dispose()` method on the source-side `Counter` class, because the source-layer analyzer cannot see the generator-synthesized `dispose()`. The empty-body convention is fine — the dispose-body merge rule below prepends the synthesized reactive disposals to whatever the user wrote:
+Practical consequence: a user who declares `void dispose() {}` on a source class can pass that class to `Provider<Counter>(...)` or `.environment<Counter>(...)` without writing `dispose:` themselves — the generator injects `dispose: (context, provider) => provider.dispose()` automatically (see §4.9 rule 7). The source-side `void dispose() {}` stub is still required so the source-layer analyzer accepts `provider.dispose()` without an unresolved-method error, and so the auto-injected closure typechecks against the user's source layer. The empty-body convention is fine — the dispose-body merge rule below prepends the synthesized reactive disposals to whatever the user wrote:
 
 ```dart
 // source/
@@ -1200,7 +1234,7 @@ class Counter {
 }
 ```
 
-After lowering, the merged dispose body contains the prepended `value.dispose();` plus the user's empty body. At runtime, calling `c.dispose()` from the Provider callback runs the merged body.
+After lowering, the merged dispose body contains the prepended `value.dispose();` plus the user's empty body. At runtime, the auto-injected `provider.dispose()` callback runs the merged body when the providing scope tears down.
 
 Merge rule for the implements clause:
 
