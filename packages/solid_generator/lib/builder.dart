@@ -88,7 +88,8 @@ class _SolidBuilder implements Builder {
     // `source.contains` check is a cheap pre-parse guard — if neither marker
     // is present the file cannot need transformation.
     final hasSolidAnnotation = source.contains(_solidAnnotationHint);
-    final hasProviderHint = source.contains(_providerCallHint) ||
+    final hasProviderHint =
+        source.contains(_providerCallHint) ||
         source.contains(_environmentCallHint);
     if (!hasSolidAnnotation && !hasProviderHint) {
       await buildStep.writeAsString(outputId, source);
@@ -135,8 +136,10 @@ class _SolidBuilder implements Builder {
       // `Provider(...)` or `.environment<T>()` call site that the SPEC §4.9
       // rule 7 auto-dispose pass must visit; otherwise pass through verbatim.
       if (hasProviderHint) {
-        final withDispose =
-            addProviderDisposeAtCallSites(source, unit: parsed.unit);
+        final withDispose = addProviderDisposeAtCallSites(
+          source,
+          unit: parsed.unit,
+        );
         if (identical(withDispose, source)) {
           await buildStep.writeAsString(outputId, source);
           return;

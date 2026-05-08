@@ -72,7 +72,11 @@ void main() {
 
       final removed = pruneOrphanedSubtree(libRoot, sourceRoot);
 
-      expect(removed, 1, reason: 'orphan.dart removed; a/ kept (has keep.dart)');
+      expect(
+        removed,
+        1,
+        reason: 'orphan.dart removed; a/ kept (has keep.dart)',
+      );
       expect(File('${libRoot.path}/a/orphan.dart').existsSync(), isFalse);
       expect(File('${libRoot.path}/a/keep.dart').existsSync(), isTrue);
       expect(Directory('${libRoot.path}/a').existsSync(), isTrue);

@@ -27,7 +27,8 @@ import 'package:solid_generator/src/value_rewriter.dart';
 /// emitted. Callers can rely on that identity to skip downstream work like
 /// re-formatting an unchanged file.
 String addProviderDisposeAtCallSites(String text, {CompilationUnit? unit}) {
-  final ast = unit ??
+  final ast =
+      unit ??
       parseString(
         content: text,
         featureSet: FeatureSet.latestLanguageVersion(),
