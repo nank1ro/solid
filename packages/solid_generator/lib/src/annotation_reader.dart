@@ -192,13 +192,12 @@ GetterModel? readSolidStateGetter(
 /// body so the visitor's name-set match fails for self-recursive calls,
 /// surfacing the SPEC §3.5 self-cycle as an explicit reader-level check
 /// upstream (see `readSolidQueryMethod`).
-(
-  {
-    String bodyText,
-    bool isBlockBody,
-    List<String> trackedNames,
-    List<String> trackedQueryNames,
-  })
+({
+  String bodyText,
+  bool isBlockBody,
+  List<String> trackedNames,
+  List<String> trackedQueryNames,
+})
 _readReactiveBody(
   FunctionBody body,
   Set<String> reactiveFields,
@@ -353,8 +352,12 @@ QueryModel? readSolidQueryMethod(
   // detect those below and reject explicitly.
   final peerQueryNames = queryNames.where((n) => n != methodName).toSet();
   // emptyDepsError: null — SPEC §3.5 waives the reactive-deps requirement.
-  final (:bodyText, :isBlockBody, :trackedNames, :trackedQueryNames) =
-      _readReactiveBody(
+  final (
+    :bodyText,
+    :isBlockBody,
+    :trackedNames,
+    :trackedQueryNames,
+  ) = _readReactiveBody(
     decl.body,
     reactiveFields,
     source,
@@ -418,8 +421,7 @@ class _SelfCycleVisitor extends RecursiveAstVisitor<void> {
   bool found = false;
   final List<Set<String>> _scopes = [<String>{}];
 
-  bool _isShadowed(String name) =>
-      _scopes.any((frame) => frame.contains(name));
+  bool _isShadowed(String name) => _scopes.any((frame) => frame.contains(name));
 
   @override
   void visitBlock(Block node) {

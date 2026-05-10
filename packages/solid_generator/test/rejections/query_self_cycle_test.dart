@@ -8,8 +8,7 @@ import '../integration/golden_helpers.dart';
 const List<({String name, String errorContains})> _cases = [
   (
     name: 'query_self_cycle_rejected',
-    errorContains:
-        "@SolidQuery 'fetchSelf' invokes itself in its own body",
+    errorContains: "@SolidQuery 'fetchSelf' invokes itself in its own body",
   ),
 ];
 
