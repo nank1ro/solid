@@ -79,6 +79,13 @@ RewriteResult rewriteStateClass(
   final queryNames = solidQueries.isEmpty
       ? const <String>{}
       : {for (final q in solidQueries) q.methodName};
+  // SPEC §4.8 rule 5: cross-query deps need each upstream's inner `T` to
+  // emit `ResourceState<T>` elements in the synthesized source-Computed
+  // Record. Built alongside [reactiveTypeTexts] so the per-query block emit
+  // can splice both maps without re-walking [solidQueries].
+  final queryInnerTypeTexts = solidQueries.isEmpty
+      ? const <String, String>{}
+      : {for (final q in solidQueries) q.methodName: q.innerTypeText};
   // SPEC §5.1 cross-class env-field receiver type map.
   final environmentFields = solidEnvironments.isEmpty
       ? const <String, String>{}
@@ -153,7 +160,13 @@ RewriteResult rewriteStateClass(
         // §14 item 4). The first reactive call site triggers the late-final
         // initializer.
         final query = queryByName[name]!;
-        emitQueryFields(query, reactiveTypeTexts, pieces, disposeNames);
+        emitQueryFields(
+          query,
+          reactiveTypeTexts,
+          queryInnerTypeTexts,
+          pieces,
+          disposeNames,
+        );
       } else {
         pieces.add(source.substring(member.offset, member.end));
       }

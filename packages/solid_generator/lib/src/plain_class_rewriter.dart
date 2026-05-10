@@ -95,6 +95,11 @@ RewriteResult rewritePlainClass(
   final reactiveTypeTexts = <String, String>{
     for (final f in solidFields) f.fieldName: f.typeText,
   };
+  // SPEC §4.8 rule 5 cross-query deps: each upstream's inner `T` is needed
+  // to emit `ResourceState<T>` elements in the synthesized source-Computed.
+  final queryInnerTypeTexts = solidQueries.isEmpty
+      ? const <String, String>{}
+      : {for (final q in solidQueries) q.methodName: q.innerTypeText};
   final reactiveNames = fieldByName.keys.toSet();
 
   final pieces = <String>[];
@@ -145,7 +150,13 @@ RewriteResult rewritePlainClass(
         // `effectNames`, so the synthesized constructor below skips them
         // (SPEC §4.8 rule 10 / §8.3).
         final query = queryByName[name]!;
-        emitQueryFields(query, reactiveTypeTexts, pieces, disposeNames);
+        emitQueryFields(
+          query,
+          reactiveTypeTexts,
+          queryInnerTypeTexts,
+          pieces,
+          disposeNames,
+        );
       } else {
         pieces.add(
           _rewriteUserMethod(member, reactiveNames, classRegistry, source),

@@ -189,6 +189,11 @@ _emitReactiveBlock(
     for (final f in solidFields) f.fieldName: f.typeText,
     for (final g in solidGetters) g.getterName: g.typeText,
   };
+  // SPEC §4.8 rule 5 cross-query deps: each upstream's inner `T` is needed
+  // to emit `ResourceState<T>` elements in the synthesized source-Computed.
+  final queryInnerTypeTexts = solidQueries.isEmpty
+      ? const <String, String>{}
+      : {for (final q in solidQueries) q.methodName: q.innerTypeText};
   final lines = <String>[];
   final disposeNames = <String>[];
   final effectNames = <String>[];
@@ -228,7 +233,13 @@ _emitReactiveBlock(
         }
         final q = queryByName[name];
         if (q != null) {
-          emitQueryFields(q, reactiveTypeTexts, lines, disposeNames);
+          emitQueryFields(
+            q,
+            reactiveTypeTexts,
+            queryInnerTypeTexts,
+            lines,
+            disposeNames,
+          );
         }
       }
     }

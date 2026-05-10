@@ -104,13 +104,19 @@ String emitResourceField(QueryModel q) {
   final ctorName = q.isStream
       ? 'Resource<${q.innerTypeText}>.stream'
       : 'Resource<${q.innerTypeText}>';
-  // SPEC §4.8 rule 5: a single-Signal Computed wrapper would be a no-op, so
-  // the one-name case passes the Signal/Computed directly as `source:`.
+  // SPEC §4.8 rule 5: a single-observable Computed wrapper would be a no-op,
+  // so the one-dep case (whether a state Signal or an upstream Resource)
+  // passes the observable directly as `source:`. State deps come from
+  // `trackedSignalNames`; query deps come from `trackedQueryNames` and pass
+  // the upstream `Resource<T>` field directly (Resource extends Signal so it
+  // qualifies as a `SignalBase<dynamic>` source — SPEC §3.5
+  // "Auto-tracking of upstream queries").
   // SPEC §4.8 rule 9: `useRefreshing: true` is the upstream default and is
   // omitted from emitted output to keep generated lines short.
-  final source = switch (q.trackedSignalNames) {
-    [] => null,
-    [final only] => only,
+  final source = switch ((q.trackedSignalNames, q.trackedQueryNames)) {
+    ([], []) => null,
+    ([final only], []) => only,
+    ([], [final only]) => only,
     _ => q.sourceFieldName,
   };
   final args = [
@@ -167,10 +173,16 @@ String emitEnvironmentField(EnvironmentModel e) {
 String? emitQuerySourceField(
   QueryModel q,
   Map<String, String> reactiveTypeTexts,
+  Map<String, String> queryInnerTypeTexts,
 ) {
   if (!q.needsSourceComputed) return null;
-  final names = q.trackedSignalNames;
-  final types = names.map((n) {
+  // SPEC §4.8 rule 5: state deps contribute element type `T` and read
+  // expression `<name>.value`; query deps contribute element type
+  // `ResourceState<T>` and read expression `<name>.state`. Source order
+  // is preserved across the merged list (state names first per body
+  // appearance, then query names per body appearance — matches the
+  // visitor's two parallel name lists).
+  final stateTypes = q.trackedSignalNames.map((n) {
     final t = reactiveTypeTexts[n];
     if (t == null || t.isEmpty) {
       throw CodeGenerationError(
@@ -184,8 +196,24 @@ String? emitQuerySourceField(
     }
     return t;
   }).toList();
-  final tupleType = '(${types.join(', ')})';
-  final tupleExpr = '(${names.map((n) => '$n.value').join(', ')})';
+  final queryTypes = q.trackedQueryNames.map((n) {
+    final t = queryInnerTypeTexts[n];
+    if (t == null || t.isEmpty) {
+      throw CodeGenerationError(
+        "@SolidQuery '${q.methodName}' depends on @SolidQuery '$n' which has "
+        'no inner type argument; declare an explicit `Future<T>` / `Stream<T>` '
+        'return type on the upstream query so the synthesized source-Computed '
+        'Record type can be emitted as `ResourceState<T>`',
+        null,
+        q.methodName,
+      );
+    }
+    return 'ResourceState<$t>';
+  }).toList();
+  final tupleType = '(${[...stateTypes, ...queryTypes].join(', ')})';
+  final stateReads = q.trackedSignalNames.map((n) => '$n.value');
+  final queryReads = q.trackedQueryNames.map((n) => '$n.state');
+  final tupleExpr = '(${[...stateReads, ...queryReads].join(', ')})';
   final fieldName = q.sourceFieldName;
   return '  late final $fieldName = '
       "Computed<$tupleType>(() => $tupleExpr, name: '$fieldName');";
@@ -197,13 +225,23 @@ String? emitQuerySourceField(
 /// declaration order, and their names are appended to [disposeNames] in the
 /// same order — so reverse-disposal tears down the Resource first, then the
 /// source Computed, then the underlying Signals.
+///
+/// [queryInnerTypeTexts] maps each `@SolidQuery` method name on the
+/// enclosing class to its inner `T` (e.g. `'int'` for a `Future<int>` query).
+/// Consumed by [emitQuerySourceField] to emit `ResourceState<T>` Record
+/// element types for cross-query deps.
 void emitQueryFields(
   QueryModel q,
   Map<String, String> reactiveTypeTexts,
+  Map<String, String> queryInnerTypeTexts,
   List<String> output,
   List<String> disposeNames,
 ) {
-  final sourceField = emitQuerySourceField(q, reactiveTypeTexts);
+  final sourceField = emitQuerySourceField(
+    q,
+    reactiveTypeTexts,
+    queryInnerTypeTexts,
+  );
   if (sourceField != null) {
     output.add(sourceField);
     disposeNames.add(q.sourceFieldName);

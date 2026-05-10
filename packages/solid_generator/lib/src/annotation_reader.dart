@@ -1,4 +1,5 @@
 import 'package:analyzer/dart/ast/ast.dart';
+import 'package:analyzer/dart/ast/visitor.dart';
 import 'package:solid_generator/src/effect_model.dart';
 import 'package:solid_generator/src/environment_model.dart';
 import 'package:solid_generator/src/field_model.dart';
@@ -122,8 +123,9 @@ EnvironmentModel? readSolidEnvironmentField(
 GetterModel? readSolidStateGetter(
   MethodDeclaration decl,
   Set<String> reactiveFields,
-  String source,
-) {
+  String source, {
+  Set<String> queryNames = const {},
+}) {
   if (!decl.isGetter || decl.isStatic) return null;
   final annotation = findAnnotationByName(solidStateName, decl.metadata);
   if (annotation == null) return null;
@@ -135,8 +137,16 @@ GetterModel? readSolidStateGetter(
 
   final body = decl.body;
   final getterName = decl.name.lexeme;
-  // Getters do not need tracked names; no `source:` wiring.
-  final (:bodyText, :isBlockBody, trackedNames: _) = _readReactiveBody(
+  // Getters do not need tracked names: the lowered Computed auto-tracks via
+  // its closure's reads at runtime — both `@SolidState` reads (rewritten
+  // with `.value`) and `@SolidQuery` calls subscribe through their respective
+  // upstream accessors (`Signal.value` / `Resource.call() → state`).
+  final (
+    :bodyText,
+    :isBlockBody,
+    trackedNames: _,
+    trackedQueryNames: _,
+  ) = _readReactiveBody(
     body,
     reactiveFields,
     source,
@@ -147,6 +157,7 @@ GetterModel? readSolidStateGetter(
     unsupportedBodyError:
         '@SolidState getter must have an expression body (=> ...) or a '
         'block body ({ ... }); abstract and native bodies are not supported',
+    queryNames: queryNames,
   );
 
   return GetterModel(
@@ -159,22 +170,35 @@ GetterModel? readSolidStateGetter(
 }
 
 /// Returns the rewritten body text, whether it came from a block body, and
-/// the dedup'd source-order list of `@SolidState` field/getter names read in
-/// tracked position inside the body. Shared between `readSolidStateGetter`,
-/// `readSolidEffectMethod`, and `readSolidQueryMethod`: all three
-/// discriminate `ExpressionFunctionBody` vs `BlockFunctionBody`, run the
-/// SPEC §5.1 `.value` rewrite, and reject abstract/native bodies. The
-/// zero-deps check (SPEC §4.5 / §3.4) fires only when [emptyDepsError] is
-/// non-null; queries pass `null` because SPEC §3.5 explicitly waives the
-/// reactive-deps requirement. Error wording differs per caller
-/// (SPEC §4.5 vs §3.4 vs §3.5) — pass it in.
+/// the dedup'd source-order lists of `@SolidState` field/getter and
+/// `@SolidQuery` method names read in tracked position inside the body.
+/// Shared between `readSolidStateGetter`, `readSolidEffectMethod`, and
+/// `readSolidQueryMethod`: all three discriminate `ExpressionFunctionBody`
+/// vs `BlockFunctionBody`, run the SPEC §5.1 `.value` rewrite, and reject
+/// abstract/native bodies. The zero-deps check (SPEC §4.5 / §3.4) fires only
+/// when [emptyDepsError] is non-null; queries pass `null` because SPEC §3.5
+/// explicitly waives the reactive-deps requirement. Error wording differs
+/// per caller (SPEC §4.5 vs §3.4 vs §3.5) — pass it in.
 ///
 /// `trackedReadOffsets` from the rewrite are intentionally discarded here —
 /// SignalBuilder placement is a `build()` concern, not a `Computed` /
-/// `Effect` / `Resource` body concern. `trackedNames` is consumed only by
-/// `readSolidQueryMethod` to wire the Resource's `source:` argument; getter
-/// and effect callers destructure it into `_`.
-({String bodyText, bool isBlockBody, List<String> trackedNames})
+/// `Effect` / `Resource` body concern. The two name lists feed
+/// `readSolidQueryMethod`'s `source:` argument synthesis (SPEC §4.8 rule 5);
+/// getter and effect callers destructure them into `_` since their lowered
+/// shapes (Computed, Effect) auto-track via the closure's reads at runtime.
+///
+/// [queryNames] is the per-class set of `@SolidQuery` method names — the
+/// caller MUST exclude the current method itself when reading a `@SolidQuery`
+/// body so the visitor's name-set match fails for self-recursive calls,
+/// surfacing the SPEC §3.5 self-cycle as an explicit reader-level check
+/// upstream (see `readSolidQueryMethod`).
+(
+  {
+    String bodyText,
+    bool isBlockBody,
+    List<String> trackedNames,
+    List<String> trackedQueryNames,
+  })
 _readReactiveBody(
   FunctionBody body,
   Set<String> reactiveFields,
@@ -182,6 +206,7 @@ _readReactiveBody(
   required String memberName,
   required String? emptyDepsError,
   required String unsupportedBodyError,
+  Set<String> queryNames = const {},
 }) {
   final AstNode node;
   final bool isBlockBody;
@@ -194,8 +219,19 @@ _readReactiveBody(
   } else {
     throw CodeGenerationError(unsupportedBodyError, null, memberName);
   }
-  final result = collectValueEdits(node, reactiveFields, source);
-  if (emptyDepsError != null && result.edits.isEmpty) {
+  final result = collectValueEdits(
+    node,
+    reactiveFields,
+    source,
+    queryNames: queryNames,
+  );
+  // SPEC §3.4 / §4.5: zero-deps Effect / Computed are rejected. A reactive
+  // dep is either a `.value`-rewritten state read OR a tracked query-call
+  // invocation (SPEC §3.5 "Auto-tracking of upstream queries"). Queries
+  // pass `null` here because §3.5 explicitly waives the deps requirement.
+  if (emptyDepsError != null &&
+      result.edits.isEmpty &&
+      result.trackedQueryNames.isEmpty) {
     throw CodeGenerationError(emptyDepsError, null, memberName);
   }
   final bodyText = applyEditsToRange(
@@ -207,6 +243,7 @@ _readReactiveBody(
     bodyText: bodyText,
     isBlockBody: isBlockBody,
     trackedNames: result.trackedReadNames,
+    trackedQueryNames: result.trackedQueryNames,
   );
 }
 
@@ -229,16 +266,23 @@ _readReactiveBody(
 EffectModel? readSolidEffectMethod(
   MethodDeclaration decl,
   Set<String> reactiveFields,
-  String source,
-) {
+  String source, {
+  Set<String> queryNames = const {},
+}) {
   if (decl.isGetter || decl.isSetter || decl.isStatic) return null;
   final annotation = findAnnotationByName(solidEffectName, decl.metadata);
   if (annotation == null) return null;
 
   final methodName = decl.name.lexeme;
   // Effects do not need tracked names: the autorun subscribes by running the
-  // body eagerly, no explicit `source:` wiring.
-  final (:bodyText, :isBlockBody, trackedNames: _) = _readReactiveBody(
+  // body eagerly. A `<query>()` call inside an effect body subscribes via
+  // `Resource.call() → state` at runtime, same mechanism as a state read.
+  final (
+    :bodyText,
+    :isBlockBody,
+    trackedNames: _,
+    trackedQueryNames: _,
+  ) = _readReactiveBody(
     decl.body,
     reactiveFields,
     source,
@@ -250,6 +294,7 @@ EffectModel? readSolidEffectMethod(
     unsupportedBodyError:
         '@SolidEffect method must have an expression body (=> ...) or a '
         'block body ({ ... }); abstract and native bodies are not supported',
+    queryNames: queryNames,
   );
 
   return EffectModel(
@@ -279,8 +324,9 @@ EffectModel? readSolidEffectMethod(
 QueryModel? readSolidQueryMethod(
   MethodDeclaration decl,
   Set<String> reactiveFields,
-  String source,
-) {
+  String source, {
+  Set<String> queryNames = const {},
+}) {
   if (decl.isGetter || decl.isSetter || decl.isStatic) return null;
   final annotation = findAnnotationByName(solidQueryName, decl.metadata);
   if (annotation == null) return null;
@@ -298,8 +344,17 @@ QueryModel? readSolidQueryMethod(
       : source.substring(typeArg.offset, typeArg.end);
 
   final methodName = decl.name.lexeme;
+  // SPEC §3.5: a `@SolidQuery` body MAY invoke other same-class queries to
+  // compose its result. Pass the per-class query name set (minus the current
+  // method) so the visitor records cross-query reads as `trackedQueryNames`
+  // for the synthesized `Resource.source:` argument (SPEC §4.8 rule 5). The
+  // self-name is excluded so the visitor's name-set match fails for
+  // recursive calls (`fetchData()` inside `fetchData()`'s own body) — we
+  // detect those below and reject explicitly.
+  final peerQueryNames = queryNames.where((n) => n != methodName).toSet();
   // emptyDepsError: null — SPEC §3.5 waives the reactive-deps requirement.
-  final (:bodyText, :isBlockBody, :trackedNames) = _readReactiveBody(
+  final (:bodyText, :isBlockBody, :trackedNames, :trackedQueryNames) =
+      _readReactiveBody(
     decl.body,
     reactiveFields,
     source,
@@ -308,7 +363,17 @@ QueryModel? readSolidQueryMethod(
     unsupportedBodyError:
         '@SolidQuery method must have an expression body (=> ...) or a '
         'block body ({ ... }); abstract and native bodies are not supported',
+    queryNames: peerQueryNames,
   );
+
+  // SPEC §3.5: a self-cycle (a query that invokes itself in its own body) is
+  // rejected at codegen with a clear error. Detection runs on the original
+  // body source (before rewriting) by re-walking the body for a
+  // `MethodInvocation` whose target is null, args are empty, and method name
+  // matches `methodName` — outside any local that shadows it. Inter-query
+  // cycles (A reads B, B reads A) are not validated at codegen and surface
+  // as a runtime error from `flutter_solidart`.
+  _rejectSelfCycle(decl.body, methodName);
 
   return QueryModel(
     methodName: methodName,
@@ -318,10 +383,79 @@ QueryModel? readSolidQueryMethod(
     bodyKeyword: decl.body.keyword?.lexeme ?? '',
     isStream: returnTypeName == streamLexeme,
     trackedSignalNames: trackedNames,
+    trackedQueryNames: trackedQueryNames,
     annotationName: extractNameArgument(annotation),
     debounce: extractDebounceArgument(annotation, source),
     useRefreshing: extractUseRefreshingArgument(annotation),
   );
+}
+
+/// Walks [body] and throws a [CodeGenerationError] if any zero-arg
+/// `MethodInvocation` has a bare target equal to [methodName] — i.e. the
+/// query body invokes itself. SPEC §3.5: self-cycles are rejected at
+/// codegen because solidart's runtime would loop indefinitely otherwise.
+/// Shadowing is handled by tracking declared local-variable names while
+/// walking; a local named [methodName] inside the body suppresses the check
+/// for occurrences in its scope (SPEC §5.5).
+void _rejectSelfCycle(FunctionBody body, String methodName) {
+  final visitor = _SelfCycleVisitor(methodName);
+  body.accept(visitor);
+  if (visitor.found) {
+    throw CodeGenerationError(
+      "@SolidQuery '$methodName' invokes itself in its own body — "
+      'self-cycles are rejected at codegen because the lowered Resource '
+      'would re-run indefinitely. Refactor the body to remove the recursive '
+      'call, or split into two queries.',
+      null,
+      methodName,
+    );
+  }
+}
+
+class _SelfCycleVisitor extends RecursiveAstVisitor<void> {
+  _SelfCycleVisitor(this._methodName);
+  final String _methodName;
+  bool found = false;
+  final List<Set<String>> _scopes = [<String>{}];
+
+  bool _isShadowed(String name) =>
+      _scopes.any((frame) => frame.contains(name));
+
+  @override
+  void visitBlock(Block node) {
+    _scopes.add(<String>{});
+    super.visitBlock(node);
+    _scopes.removeLast();
+  }
+
+  @override
+  void visitFunctionExpression(FunctionExpression node) {
+    _scopes.add(<String>{});
+    final params = node.parameters?.parameters ?? const <FormalParameter>[];
+    for (final p in params) {
+      final id = p.name?.lexeme;
+      if (id != null) _scopes.last.add(id);
+    }
+    super.visitFunctionExpression(node);
+    _scopes.removeLast();
+  }
+
+  @override
+  void visitVariableDeclaration(VariableDeclaration node) {
+    _scopes.last.add(node.name.lexeme);
+    super.visitVariableDeclaration(node);
+  }
+
+  @override
+  void visitMethodInvocation(MethodInvocation node) {
+    if (node.target == null &&
+        node.argumentList.arguments.isEmpty &&
+        node.methodName.name == _methodName &&
+        !_isShadowed(_methodName)) {
+      found = true;
+    }
+    super.visitMethodInvocation(node);
+  }
 }
 
 /// Returns the first `@<className>(...)` annotation in [metadata], or `null`.

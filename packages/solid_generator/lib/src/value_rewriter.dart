@@ -28,12 +28,13 @@ class ValueEdit {
 /// inside user-interaction callbacks (Section 6.2) or `<field>.untracked`
 /// reads (Section 6.4) are excluded.
 class ValueRewriteResult {
-  /// Creates a result holding [edits], [trackedReadOffsets], and
-  /// [trackedReadNames].
+  /// Creates a result holding [edits], [trackedReadOffsets],
+  /// [trackedReadNames], and [trackedQueryNames].
   const ValueRewriteResult(
     this.edits,
     this.trackedReadOffsets,
     this.trackedReadNames,
+    this.trackedQueryNames,
   );
 
   /// Source edits to apply for `.value` / interpolation rewrites.
@@ -44,13 +45,26 @@ class ValueRewriteResult {
   final List<int> trackedReadOffsets;
 
   /// Names of `@SolidState` field/getter identifiers read in tracked
-  /// position, in source-first-appearance order, deduplicated. Mirrors
-  /// [trackedReadOffsets] minus the offset → name lookup, restricted to
-  /// reactive-field reads (NOT query-call invocations). Consumed by
-  /// `readSolidQueryMethod` to wire the Resource's `source:`
-  /// argument: zero names → no source, one name → direct pass, two or
-  /// more names → synthesized Record-Computed source field.
+  /// position, in source-first-appearance order, deduplicated. Consumed by
+  /// `readSolidQueryMethod` to wire the Resource's `source:` argument
+  /// alongside [trackedQueryNames] (SPEC §4.8 rule 5).
   final List<String> trackedReadNames;
+
+  /// Names of same-class `@SolidQuery` methods invoked in tracked position
+  /// (zero-argument call) inside the body, in source-first-appearance order,
+  /// deduplicated. Disjoint from [trackedReadNames]: a query-call read
+  /// contributes element type `ResourceState<T>` (read via `<name>.state`)
+  /// to the synthesized Record-Computed source — see SPEC §3.5
+  /// "Auto-tracking of upstream queries" / §4.8 rule 5.
+  ///
+  /// Excludes:
+  /// * tear-offs (`<queryName>.refresh()`) — those aren't `MethodInvocation`s
+  ///   with a bare-identifier target;
+  /// * untracked reads (`<queryName>().untracked`) — handled by the
+  ///   `_AsReadyResult` / `_untrackedState` lowering (SPEC §6.4);
+  /// * the query body's own call to itself (the per-class set excludes
+  ///   the current method to fail-loud on self-cycles per SPEC §3.5).
+  final List<String> trackedQueryNames;
 }
 
 /// True if [name] matches the SPEC Section 6.2 untracked-callback pattern:
@@ -110,12 +124,12 @@ bool _isOnPrefixedCallbackName(String name) {
 /// identifier-rewrite contract; only `build()` consumes
 /// [ValueRewriteResult.trackedReadOffsets] for SignalBuilder placement.
 ///
-/// [ValueRewriteResult.trackedReadNames] is asymmetric with
-/// `trackedReadOffsets`: it includes only `@SolidState` field/getter reads
-/// (the source-Computed inputs), NOT query-call invocations. Query
-/// calls appear in `trackedReadOffsets` for SignalBuilder placement but not
-/// in `trackedReadNames` because they are not legal `Resource.source:`
-/// arguments.
+/// [ValueRewriteResult.trackedReadNames] holds only `@SolidState` field /
+/// getter reads. Same-class `@SolidQuery` calls in tracked position are
+/// recorded separately in [ValueRewriteResult.trackedQueryNames] so the
+/// emitter can pick the correct Record-Computed element type
+/// (`ResourceState<T>` vs `T`) and read expression (`.state` vs `.value`)
+/// per SPEC §4.8 rule 5.
 ValueRewriteResult collectValueEdits(
   AstNode node,
   Set<String> reactiveFields,
@@ -137,6 +151,7 @@ ValueRewriteResult collectValueEdits(
     visitor.edits,
     visitor.trackedReadOffsets,
     visitor.trackedReadNames,
+    visitor.trackedQueryNames,
   );
 }
 
@@ -166,6 +181,12 @@ const String _untrackedGetterName = 'untracked';
 /// `flutter_solidart`. Reading via this getter never subscribes the
 /// surrounding reactive context.
 const String _untrackedValueGetterName = 'untrackedValue';
+
+/// Name of the runtime opt-out accessor on `Resource<T>` from
+/// `flutter_solidart`. Reading via this getter returns the current
+/// `ResourceState<T>` without registering a subscription on the surrounding
+/// tracking context (SPEC §6.4 query-call form).
+const String _untrackedStateGetterName = 'untrackedState';
 
 /// AST visitor that accumulates [ValueEdit]s for reactive-field identifiers.
 ///
@@ -218,8 +239,15 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
 
   /// Reactive-field/getter identifier names read in tracked position, in
   /// source-first-appearance order. Deduplicated via [_recordTrackedReadName].
-  /// Excludes query-call invocations (those go to [trackedReadOffsets] only).
+  /// Excludes query-call invocations (those go to [trackedQueryNames]).
   final List<String> trackedReadNames = [];
+
+  /// Same-class `@SolidQuery` method names invoked as tracked zero-arg
+  /// calls in the body, in source-first-appearance order. Deduplicated via
+  /// [_recordTrackedQueryName]. Empty when the visitor was constructed with
+  /// no [_queryNames] (e.g. for non-query bodies that haven't been refit
+  /// to thread the per-class query set yet).
+  final List<String> trackedQueryNames = [];
 
   /// Stack of shadowed-name sets, one frame per enclosing block / function.
   final List<Set<String>> _scopeStack = [<String>{}];
@@ -278,21 +306,72 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
         'untracked() function-call form',
       );
     }
-    // SPEC §4.8 rule 3: a zero-argument call to an `@SolidQuery` method on
-    // the enclosing class is a tracked read for SignalBuilder placement —
-    // the runtime subscription happens inside `Resource.call()` → `state`.
-    // No source edit is emitted: `fetchData()` survives byte-identical
-    // because the lowered field is a `Resource<T>` whose upstream callable
-    // returns `ResourceState<T>` and the trailing chain resolves to upstream
-    // extensions. Shadowing follows SPEC §5.5.
+    // SPEC §4.8 rule 3 / rule 5: a zero-argument call to an `@SolidQuery`
+    // method on the enclosing class is a tracked read. Inside `build()` the
+    // offset drives SignalBuilder placement (rule 3); inside any other
+    // reactive body (`@SolidEffect`, `@SolidState` getter, `@SolidQuery`)
+    // the name drives `Resource.source:` / Effect / Computed dep wiring
+    // (rule 5). The runtime subscription happens inside `Resource.call()`
+    // → `state` → upstream `setCurrentSub`. No source edit is emitted:
+    // `fetchData()` survives byte-identical because the lowered field is a
+    // `Resource<T>` whose upstream callable returns `ResourceState<T>` and
+    // the trailing chain resolves to upstream extensions. Shadowing follows
+    // SPEC §5.5; query-call reads inside an untracked context (SPEC §6.2)
+    // or inside a `<query>().untracked` chain (SPEC §6.4) are excluded.
     if (node.target == null &&
         node.argumentList.arguments.isEmpty &&
         _queryNames.contains(node.methodName.name) &&
         !_isShadowed(node.methodName.name) &&
+        !_isUntrackedQueryCall(node) &&
         _untrackedDepth == 0) {
       trackedReadOffsets.add(node.offset);
+      _recordTrackedQueryName(node.methodName.name);
     }
     super.visitMethodInvocation(node);
+  }
+
+  /// True if [node] is the target of a `<query>().untracked` `PropertyAccess`
+  /// — i.e. the user opted out of tracking (SPEC §6.4 query-call form). The
+  /// surrounding `visitPropertyAccess` rewrites the whole sub-expression to
+  /// `<query>.untrackedState`, so the inner call must NOT count as a tracked
+  /// read for SignalBuilder placement OR `source:` wiring.
+  bool _isUntrackedQueryCall(MethodInvocation node) {
+    final parent = node.parent;
+    return parent is PropertyAccess &&
+        parent.target == node &&
+        parent.propertyName.name == _untrackedGetterName &&
+        _queryNames.contains(node.methodName.name) &&
+        !_isShadowed(node.methodName.name);
+  }
+
+  @override
+  void visitPropertyAccess(PropertyAccess node) {
+    // SPEC §6.4 query-call form: rewrite `<queryName>().untracked` to
+    // `<queryName>.untrackedState` (the runtime non-subscribing accessor on
+    // `Resource<T>`). The whole chain (inner MethodInvocation + outer
+    // PropertyAccess) is replaced; the trailing chain after `.untracked`
+    // — `.value`, `.when`, `.isReady`, etc. — is preserved verbatim because
+    // the edit ends at `node.end` (the property name), not beyond.
+    final target = node.target;
+    if (node.propertyName.name == _untrackedGetterName &&
+        target is MethodInvocation &&
+        target.target == null &&
+        target.argumentList.arguments.isEmpty &&
+        _queryNames.contains(target.methodName.name) &&
+        !_isShadowed(target.methodName.name)) {
+      edits.add(
+        ValueEdit(
+          node.offset,
+          node.end,
+          '${target.methodName.name}.$_untrackedStateGetterName',
+        ),
+      );
+      // Skip super: descending would let visitMethodInvocation re-process
+      // the inner `<queryName>()` which we have already accounted for via
+      // [_isUntrackedQueryCall].
+      return;
+    }
+    super.visitPropertyAccess(node);
   }
 
   @override
@@ -467,6 +546,14 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
   /// name exactly once to the source-Computed tuple.
   void _recordTrackedReadName(String name) {
     if (!trackedReadNames.contains(name)) trackedReadNames.add(name);
+  }
+
+  /// Appends [name] to [trackedQueryNames] iff not already present,
+  /// preserving source-first-appearance order. A query body that calls the
+  /// same upstream `<query>()` at multiple offsets must contribute the name
+  /// exactly once to the synthesized source-Computed tuple (SPEC §4.8 rule 5).
+  void _recordTrackedQueryName(String name) {
+    if (!trackedQueryNames.contains(name)) trackedQueryNames.add(name);
   }
 
   /// Detects `counter.value` shapes where appending another `.value` would

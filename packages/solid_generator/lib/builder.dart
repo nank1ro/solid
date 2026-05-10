@@ -253,6 +253,13 @@ List<_AnnotatedClass> _collectAnnotatedClasses(
     final queries = <QueryModel>[];
     final environments = <EnvironmentModel>[];
     final reactiveNames = <String>{};
+    // SPEC §3.5 / §4.8 rule 5: a query / effect / state-getter body MAY
+    // invoke same-class `@SolidQuery` methods to compose its result; the
+    // body-rewrite visitor needs the per-class name set up-front to detect
+    // these cross-query reads. Pre-scan members once for `@SolidQuery`
+    // annotations so each reader sees the full set independent of source
+    // order (a query A can call a query B declared later).
+    final queryNames = _collectClassQueryNames(decl);
     for (final member in decl.members) {
       if (member is FieldDeclaration) {
         final model = readSolidStateField(member, source);
@@ -271,7 +278,12 @@ List<_AnnotatedClass> _collectAnnotatedClasses(
         continue;
       }
       if (member is MethodDeclaration) {
-        final getter = readSolidStateGetter(member, reactiveNames, source);
+        final getter = readSolidStateGetter(
+          member,
+          reactiveNames,
+          source,
+          queryNames: queryNames,
+        );
         if (getter != null) {
           getters.add(getter);
           reactiveNames.add(getter.getterName);
@@ -281,13 +293,24 @@ List<_AnnotatedClass> _collectAnnotatedClasses(
         // `reactiveNames`: `@SolidEffect` lowers to a `void`-returning
         // `Effect` with no observable `.value`, and `@SolidQuery` lowers to
         // a `Resource<T>` field whose call sites are byte-identical (no
-        // `.value` rewrite) — see SPEC §4.8 rule 2 / §5.1.
-        final effect = readSolidEffectMethod(member, reactiveNames, source);
+        // `.value` rewrite) — see SPEC §4.8 rule 2 / §5.1. Cross-query
+        // dependency wiring is driven by [queryNames] separately.
+        final effect = readSolidEffectMethod(
+          member,
+          reactiveNames,
+          source,
+          queryNames: queryNames,
+        );
         if (effect != null) {
           effects.add(effect);
           continue;
         }
-        final query = readSolidQueryMethod(member, reactiveNames, source);
+        final query = readSolidQueryMethod(
+          member,
+          reactiveNames,
+          source,
+          queryNames: queryNames,
+        );
         if (query != null) {
           queries.add(query);
         }
@@ -305,6 +328,26 @@ List<_AnnotatedClass> _collectAnnotatedClasses(
     );
   }
   return result;
+}
+
+/// Pre-scans [decl]'s members for `@SolidQuery`-annotated methods and
+/// returns their declared names as a set. Used by `_collectAnnotatedClasses`
+/// to build the per-class query-name set BEFORE the per-member reader walk,
+/// so any reader (state getter / effect / query) sees the complete set
+/// independent of declaration order — a `@SolidQuery` body may invoke a
+/// peer query declared later in the class.
+///
+/// Returns the shared empty set when no `@SolidQuery` methods are present
+/// to keep the zero-query path allocation-free.
+Set<String> _collectClassQueryNames(ClassDeclaration decl) {
+  Set<String>? names;
+  for (final member in decl.members) {
+    if (member is! MethodDeclaration) continue;
+    if (member.isGetter || member.isSetter) continue;
+    if (findAnnotationByName(solidQueryName, member.metadata) == null) continue;
+    (names ??= <String>{}).add(member.name.lexeme);
+  }
+  return names ?? const <String>{};
 }
 
 /// Renders the full `lib/` output for a file that has at least one annotated

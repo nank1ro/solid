@@ -22,8 +22,6 @@
 /// placeholder type against the lib-side `solidart` type.
 library;
 
-import 'package:flutter/widgets.dart';
-
 const String _stubMessage = 'This is just a stub for code generation.';
 
 /// State-read getters and pattern-match helpers on `Future<T>` (Future-form
@@ -95,6 +93,7 @@ extension FutureWhen<T> on Future<T> {
   /// when the resource is ready, `null` otherwise. The recommended safe-read
   /// shape is `<queryName>().asReady?.value` (returns `T?`, never throws).
   /// At lib-time this resolves to upstream `ResourceReady<T>?`.
+  // ignore: library_private_types_in_public_api
   _AsReadyResult<T>? get asReady {
     throw Exception(_stubMessage);
   }
@@ -104,6 +103,7 @@ extension FutureWhen<T> on Future<T> {
   /// `<queryName>().asError?.error` for the error object and
   /// `<queryName>().asError?.stackTrace` for the stack trace. At lib-time
   /// this resolves to upstream `ResourceError<T>?`.
+  // ignore: library_private_types_in_public_api
   _AsErrorResult<T>? get asError {
     throw Exception(_stubMessage);
   }
@@ -114,7 +114,8 @@ extension FutureWhen<T> on Future<T> {
 extension StreamWhen<T> on Stream<T> {
   /// Source-time stub for `<query>().when({ready, loading, error})`. After
   /// lowering, this resolves to the upstream `flutter_solidart` extension on
-  /// `ResourceState<T>` via `Resource<T>.call() => state`. See [FutureWhen.when].
+  /// `ResourceState<T>` via `Resource<T>.call() => state`. See
+  /// [FutureWhen.when].
   R when<R>({
     required R Function(T data) ready,
     required R Function() loading,
@@ -165,11 +166,13 @@ extension StreamWhen<T> on Stream<T> {
   }
 
   /// Mirrors `ResourceExtensions.asReady`. See [FutureWhen.asReady].
+  // ignore: library_private_types_in_public_api
   _AsReadyResult<T>? get asReady {
     throw Exception(_stubMessage);
   }
 
   /// Mirrors `ResourceExtensions.asError`. See [FutureWhen.asError].
+  // ignore: library_private_types_in_public_api
   _AsErrorResult<T>? get asError {
     throw Exception(_stubMessage);
   }

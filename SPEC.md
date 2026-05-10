@@ -217,12 +217,12 @@ This is type-correct because `Resource<T>` extends `Signal<ResourceState<T>>`, w
 Query-call tracking extends beyond `@SolidQuery` bodies: `@SolidEffect` bodies and `@SolidState` getter (Computed) bodies that invoke a same-class `@SolidQuery` also subscribe to its emissions. The call expression itself is left byte-identical (no `.value` rewrite — see Section 5.1); subscription happens at runtime through `Resource.call() → state` registering with the surrounding tracking context.
 
 ```dart
-@SolidQuery(useRefreshing: false)
+@SolidQuery()
 Stream<int> watchTicks() {
   return Stream.periodic(const Duration(seconds: 1), (i) => i);
 }
 
-@SolidQuery(useRefreshing: false)
+@SolidQuery()
 Future<double> halveLatestTick() async {
   return (watchTicks().asReady?.value ?? 0).toDouble() / 2.0;
 }
@@ -738,12 +738,12 @@ late final fetchUser = Resource<User?>(
 Input (Future form, body reads ONE upstream `@SolidQuery` — auto-tracking, direct source; uses the safe `.asReady?.value` chain so an upstream error becomes the fallback instead of rethrowing):
 
 ```dart
-@SolidQuery(useRefreshing: false)
+@SolidQuery()
 Stream<int> watchTicks() {
   return Stream.periodic(const Duration(seconds: 1), (i) => i);
 }
 
-@SolidQuery(useRefreshing: false)
+@SolidQuery()
 Future<double> halveLatestTick() async {
   return (watchTicks().asReady?.value ?? 0).toDouble() / 2.0;
 }
@@ -754,7 +754,6 @@ Output (the `.asReady?.value` chain is byte-identical to source — at lib-time 
 ```dart
 late final watchTicks = Resource<int>.stream(
   () => Stream.periodic(const Duration(seconds: 1), (i) => i),
-  useRefreshing: false,
   name: 'watchTicks',
 );
 
@@ -763,7 +762,6 @@ late final halveLatestTick = Resource<double>(
     return (watchTicks().asReady?.value ?? 0).toDouble() / 2.0;
   },
   source: watchTicks,
-  useRefreshing: false,
   name: 'halveLatestTick',
 );
 ```
@@ -773,12 +771,12 @@ Input (Future form, body reads ONE `@SolidState` AND ONE `@SolidQuery` — synth
 ```dart
 @SolidState() int divisor = 2;
 
-@SolidQuery(useRefreshing: false)
+@SolidQuery()
 Stream<int> watchTicks() {
   return Stream.periodic(const Duration(seconds: 1), (i) => i);
 }
 
-@SolidQuery(useRefreshing: false)
+@SolidQuery()
 Future<double> scaledTick() async {
   return (watchTicks().asReady?.value ?? 0) / divisor.toDouble();
 }
@@ -791,7 +789,6 @@ final divisor = Signal<int>(2, name: 'divisor');
 
 late final watchTicks = Resource<int>.stream(
   () => Stream.periodic(const Duration(seconds: 1), (i) => i),
-  useRefreshing: false,
   name: 'watchTicks',
 );
 
@@ -805,7 +802,6 @@ late final scaledTick = Resource<double>(
     return (watchTicks().asReady?.value ?? 0) / divisor.value.toDouble();
   },
   source: _scaledTickSource,
-  useRefreshing: false,
   name: 'scaledTick',
 );
 ```
@@ -1196,7 +1192,7 @@ Rules:
 - **String interpolations.** Only the long form `'${counter.untracked}'` / `'${fetchData().untracked.value}'` expresses the untracked intent. The short form `'$counter.untracked'` parses as `${counter}` followed by a literal `.untracked` string suffix and rewrites as a normal tracked read of `counter`.
 - **Detection is name-based** for both read kinds (the M3-05 type-resolution deferral); the existing shadowing guard (Section 5.5) suppresses the rewrite when a local variable shadows the underlying field or query name.
 
-**Migration from the v1 function-call form:** `untracked(() => ...)` is no longer supported. Writing it in source produces a build-time `CodeGenerationError` directing the user to the extension form. Replace each occurrence: `untracked(() => counter)` → `counter.untracked`; `untracked(() => fetchData())` → `fetchData().untracked`.
+The function-call form `untracked(() => …)` is rejected at build time with a `CodeGenerationError` directing the user to the extension form (`counter.untracked` for state reads, `fetchData().untracked` for query reads).
 
 ### 6.5 Everything else is tracked
 
