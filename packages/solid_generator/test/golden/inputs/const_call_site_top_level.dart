@@ -1,5 +1,4 @@
-// SPEC §14 item 7 follow-up — `const` at call sites of generator-emitted
-// const-eligible widget classes. After `const` is added to the constructor
+// `const` at call sites of generator-emitted const-eligible widget classes. After `const` is added to the constructor
 // declaration, this rewrite adds `const` to invocations of those constructors
 // elsewhere in the output so `prefer_const_constructors` stays silent
 // end-to-end.

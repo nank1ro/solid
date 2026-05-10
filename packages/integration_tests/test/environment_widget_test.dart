@@ -1,7 +1,7 @@
-// Fences SPEC §3.6 (`.environment<T>()` extension, source-side
-// `dispose()` stub requirement), §7 (`SignalBuilder` placement on cross-class
-// chain read), and §10 (synthesized reactive disposal merged into the user's
-// empty `dispose()` body for plain classes) at runtime.
+// Fences the `.environment<T>()` extension (source-side `dispose()` stub
+// requirement), `SignalBuilder` placement on cross-class chain reads, and
+// synthesized reactive disposal merged into the user's empty `dispose()` body
+// for plain classes at runtime.
 //
 // `Counter` and `CounterDisplay` are imported from the generator-lowered
 // `package:integration_tests/environment_app.dart` — this is the only

@@ -1,6 +1,5 @@
-// SPEC §14 item 7 clause (c) reject-path: any `AssertInitializer` in the
-// init list disqualifies the ctor — the generator preserves the ctor
-// declaration verbatim. The `assert(label.isNotEmpty)` here deliberately
+// Reject-path: any `AssertInitializer` in the init list disqualifies the
+// ctor — the generator preserves the ctor declaration verbatim. The `assert(label.isNotEmpty)` here deliberately
 // invokes a non-const getter on `String` so analyzer's `canBeConst`
 // returns false and the lowered output is also lint-clean
 // (`prefer_const_constructors_in_immutables` does not fire).

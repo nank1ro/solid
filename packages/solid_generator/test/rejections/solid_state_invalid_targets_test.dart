@@ -1,8 +1,8 @@
-// Rejection suite for invalid `@SolidState` placements per SPEC §3.1.
+// Rejection suite for invalid `@SolidState` placements.
 
 import '../integration/golden_helpers.dart';
 
-/// Each case pairs a fixture name with the SPEC phrase the resulting error
+/// Each case pairs a fixture name with the phrase the resulting error
 /// must contain.
 const List<({String name, String errorContains})> _cases = [
   (

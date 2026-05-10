@@ -4,7 +4,7 @@ library;
 import 'package:meta/meta_meta.dart';
 
 /// {@template SolidAnnotations.SolidState}
-/// Marks a field or getter as reactive state. See SPEC Section 3.1.
+/// Marks a field or getter as reactive state.
 /// {@endtemplate}
 @Target({TargetKind.field, TargetKind.getter})
 class SolidState {
@@ -16,7 +16,7 @@ class SolidState {
 }
 
 /// {@template SolidAnnotations.SolidEffect}
-/// Marks an instance method as a reactive side effect. See SPEC Section 3.4.
+/// Marks an instance method as a reactive side effect.
 ///
 /// The annotated method must declare a `void` return type and take no
 /// parameters; its body must read at least one reactive declaration. The
@@ -33,7 +33,7 @@ class SolidEffect {
 }
 
 /// {@template SolidAnnotations.SolidQuery}
-/// Marks an instance method as an async reactive source. See SPEC Section 3.5.
+/// Marks an instance method as an async reactive source.
 ///
 /// The annotated method must declare a `Future<T>` return type with an `async`
 /// body, or a `Stream<T>` return type whose body either returns a pre-existing
@@ -66,7 +66,6 @@ class SolidQuery {
 
 /// {@template SolidAnnotations.SolidEnvironment}
 /// Marks a `late` instance field as a dependency-injection binding.
-/// See SPEC Section 3.6.
 ///
 /// The generator lowers `@SolidEnvironment() late T name;` to
 /// `late final name = context.read<T>();` in the produced `lib/` output.
@@ -80,7 +79,7 @@ class SolidEnvironment {
 }
 
 /// {@template SolidAnnotations.UntrackedExtension}
-/// Marks a reactive field read as untracked at the call site (SPEC §6.4).
+/// Marks a reactive field read as untracked at the call site.
 ///
 /// When `solid_generator` sees `<field>.untracked` for a `@SolidState` field,
 /// it rewrites the expression to `<field>.untrackedValue` and excludes the

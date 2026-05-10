@@ -1,4 +1,4 @@
-// SPEC §3.5 / §4.8 rule 9: both annotation parameters combine; emitted order
+// Both annotation parameters combine; emitted order
 // is closure (positional), source:, debounceDelay:, useRefreshing:, name:.
 // This case has no tracked signals — the source: arg is absent, so the
 // adjacency between debounceDelay: and useRefreshing: is exercised directly.

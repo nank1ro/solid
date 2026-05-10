@@ -70,7 +70,7 @@ void main() {
     );
   });
 
-  group('computeOutputImports alphabetical sort (SPEC §9)', () {
+  group('computeOutputImports alphabetical sort', () {
     List<String> sortOnly(List<String> uris) => computeOutputImports(
       uris,
       addSolidart: false,

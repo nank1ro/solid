@@ -1,6 +1,6 @@
-// SPEC §14 item 7 clause (c) keep-path: a named ctor whose initializer
-// list contains only `ConstructorFieldInitializer` entries with literal
-// RHS values is const-eligible. `: label = 'Named'` is a SimpleStringLiteral
+// Keep-path: a named ctor whose initializer list contains only
+// `ConstructorFieldInitializer` entries with literal RHS values is
+// const-eligible. `: label = 'Named'` is a SimpleStringLiteral
 // — `const Greeter.named({super.key}) : label = 'Named'` is valid Dart and
 // the generator emits `const`.
 

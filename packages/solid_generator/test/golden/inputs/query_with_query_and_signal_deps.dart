@@ -1,10 +1,9 @@
-// SPEC §3.5 / §4.8 rule 5: a query body that mixes ONE @SolidState read AND
-// ONE @SolidQuery call synthesizes a Record-Computed source whose tuple
-// contains both a `T` element (state read via `<name>.value`) and a
-// `ResourceState<T>` element (query read via `<name>.state`). The synthesized
-// Computed disposes AFTER the downstream Resource (reverse-declaration order
-// in dispose()) so the Resource tears down its subscription before its
-// source is released.
+// A query body that mixes ONE @SolidState read AND ONE @SolidQuery call
+// synthesizes a Record-Computed source whose tuple contains both a `T`
+// element (state read via `<name>.value`) and a `ResourceState<T>` element
+// (query read via `<name>.state`). The synthesized Computed disposes AFTER
+// the downstream Resource (reverse-declaration order in dispose()) so the
+// Resource tears down its subscription before its source is released.
 
 import 'package:solid_annotations/solid_annotations.dart';
 import 'package:flutter/widgets.dart';

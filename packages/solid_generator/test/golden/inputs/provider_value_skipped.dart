@@ -1,4 +1,4 @@
-// SPEC §4.9 rule 7. `Provider<T>.value(...)` does not own its instance and
+// `Provider<T>.value(...)` does not own its instance and
 // takes no `dispose:` — the visitor must skip the named-ctor form.
 
 import 'package:flutter/widgets.dart';

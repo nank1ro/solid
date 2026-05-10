@@ -6,10 +6,9 @@
 /// `source/` class never declares this interface; the source-layer analyzer
 /// cannot see it. The generator auto-injects
 /// `dispose: (context, provider) => provider.dispose()` into `Provider<T>`
-/// and `.environment<T>()` call sites that omit `dispose:` (SPEC §4.9
-/// rule 7). For source-layer typecheck of the auto-injected closure, users
-/// declare an empty `void dispose() {}` stub on their source class (SPEC
-/// §3.6 Provider-side note).
+/// and `.environment<T>()` call sites that omit `dispose:`. For source-layer
+/// typecheck of the auto-injected closure, users declare an empty
+/// `void dispose() {}` stub on their source class.
 /// {@endtemplate}
 // `one_member_abstracts` is silenced: this is a marker interface consumed by
 // the generator (`implements Disposable` in lowered output), not a

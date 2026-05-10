@@ -1,4 +1,4 @@
-/// Source-time stub extensions for `@SolidQuery` (SPEC §3.5).
+/// Source-time stub extensions for `@SolidQuery`.
 ///
 /// These extensions exist solely so that user source — written under
 /// `source/` — typechecks without referencing the codegen-internal
@@ -12,8 +12,8 @@
 /// are never executed at runtime — the runtime artifact lives entirely in
 /// `lib/`, where these extensions are unreachable.
 ///
-/// `solid_annotations` does NOT depend on `package:solidart` (SPEC §14
-/// item 5). For the two stubs whose upstream return type is a
+/// `solid_annotations` does NOT depend on `package:solidart`. For the two
+/// stubs whose upstream return type is a
 /// `solidart`-internal class (`asReady` returns `ResourceReady<T>?`,
 /// `asError` returns `ResourceError<T>?`), this library declares
 /// **library-private placeholder classes** [_AsReadyResult] and

@@ -2,7 +2,7 @@ import 'package:flutter/widgets.dart';
 import 'package:provider/provider.dart';
 
 /// {@template SolidAnnotations.WidgetEnvironment}
-/// SwiftUI-flavoured `.environment<T>()` extension on `Widget` (SPEC §3.6).
+/// SwiftUI-flavoured `.environment<T>()` extension on `Widget`.
 ///
 /// Wraps `this` widget in a `Provider<T>` — the SwiftUI-flavoured
 /// alternative to writing `Provider<T>(create: …, child: this)` directly.
@@ -14,11 +14,10 @@ import 'package:provider/provider.dart';
 ///
 /// The Solid generator auto-injects
 /// `dispose: (context, provider) => provider.dispose()` when the call site
-/// omits `dispose:` (SPEC §4.9 rule 7). For source-layer typecheck of the
-/// auto-injected closure, declare an empty `void dispose() {}` on the
-/// injected type (SPEC §3.6) — Solid-lowered classes get a synthesized
-/// `dispose()` in `lib/`. Pass `dispose:` explicitly (any value, including
-/// `null`) to opt out.
+/// omits `dispose:`. For source-layer typecheck of the auto-injected closure,
+/// declare an empty `void dispose() {}` on the injected type — Solid-lowered
+/// classes get a synthesized `dispose()` in `lib/`. Pass `dispose:` explicitly
+/// (any value, including `null`) to opt out.
 /// {@endtemplate}
 extension WidgetEnvironment on Widget {
   /// {@macro SolidAnnotations.WidgetEnvironment}

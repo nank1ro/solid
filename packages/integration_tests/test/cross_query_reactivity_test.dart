@@ -1,5 +1,5 @@
-// Fences SPEC §3.5 "Auto-tracking of upstream queries" / §4.8 rule 5 at
-// runtime: the downstream Resource auto-refreshes when the upstream emits.
+// Fences cross-query auto-tracking at runtime: the downstream Resource
+// auto-refreshes when the upstream emits.
 //
 // `_CrossQueryPage` mirrors the lowered shape that the generator emits for
 // a Stream-form upstream (`watchTicks`) feeding a Future-form downstream

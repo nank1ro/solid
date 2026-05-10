@@ -1,7 +1,7 @@
 // The `final`-without-`late`, uninitialized field IS the rejection target —
 // the validator flags it as `'final field'` (the `isFinal && !isLate`
 // check fires before the initializer-presence check). `late final Counter c;`
-// is the *valid* shape per SPEC §3.6; the realistic user mistake is
+// is the *valid* shape; the realistic user mistake is
 // forgetting `late`, with no manual constructor call (`@SolidEnvironment` is
 // the initialization). Suppress the corresponding analyzer error so
 // `dart analyze` stays clean on this fixture.

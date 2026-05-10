@@ -1,6 +1,6 @@
-// SPEC §4.9 rule 7. When the user supplies `dispose:` explicitly the visitor
-// MUST NOT inject a second argument — even if the user's callback names a
-// non-default cleanup method.
+// When the user supplies `dispose:` explicitly the visitor MUST NOT inject
+// a second argument — even if the user's callback names a non-default
+// cleanup method.
 // ignore_for_file: prefer_const_constructors_in_immutables, unreachable_from_main
 
 import 'package:solid_annotations/solid_annotations.dart';

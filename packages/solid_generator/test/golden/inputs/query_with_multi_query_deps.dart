@@ -1,8 +1,8 @@
-// SPEC §3.5 / §4.8 rule 5: a query body that invokes TWO OR MORE same-class
-// `@SolidQuery` methods (and zero `@SolidState` reads) synthesizes a
-// Record-Computed source whose tuple contains a `ResourceState<T>` per
-// upstream query (read via `<name>.state`). All-query Record case — no
-// state-typed elements interleave.
+// A query body that invokes TWO OR MORE same-class `@SolidQuery` methods
+// (and zero `@SolidState` reads) synthesizes a Record-Computed source
+// whose tuple contains a `ResourceState<T>` per upstream query (read via
+// `<name>.state`). All-query Record case — no state-typed elements
+// interleave.
 // ignore_for_file: prefer_const_constructors_in_immutables
 
 import 'package:solid_annotations/solid_annotations.dart';

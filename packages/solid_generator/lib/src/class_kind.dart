@@ -1,29 +1,26 @@
 import 'package:analyzer/dart/ast/ast.dart';
 
 /// The four kinds of class that `@SolidState` can attach to.
-///
-/// See SPEC Section 8.
 enum ClassKind {
   /// A `class Foo extends StatelessWidget` declaration.
   ///
-  /// Transformed per SPEC Section 8.1 — the class is rewritten as a
-  /// `StatefulWidget` + `State<X>` pair.
+  /// The class is rewritten as a `StatefulWidget` + `State<X>` pair.
   statelessWidget,
 
   /// A `class Foo extends StatefulWidget` declaration.
   ///
   /// No direct transformation; the sibling `State<X>` subclass (if any) is
-  /// the rewrite target per SPEC Section 8.2.
+  /// the rewrite target.
   statefulWidget,
 
   /// A `class _FooState extends State<Foo>` declaration.
   ///
-  /// Transformed in-place per SPEC Section 8.2 (fix for issue #3).
+  /// Transformed in-place (fix for issue #3).
   stateClass,
 
   /// Any other class (no widget supertype, or no `extends` clause at all).
   ///
-  /// Transformed in-place per SPEC Section 8.3.
+  /// Transformed in-place.
   plainClass,
 }
 

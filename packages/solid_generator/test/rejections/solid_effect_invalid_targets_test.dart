@@ -1,9 +1,9 @@
-// Rejection suite for invalid `@SolidEffect` placements per SPEC §3.4.
+// Rejection suite for invalid `@SolidEffect` placements.
 
 import '../integration/golden_helpers.dart';
 
-/// Each case pairs a fixture name with the SPEC §3.4 phrase the resulting
-/// error must contain. Cases ordered to mirror the SPEC §3.4 bullet list:
+/// Each case pairs a fixture name with the phrase the resulting error must
+/// contain. Cases ordered to mirror the bullet list:
 /// parameterized → non-void → static → abstract/external → getter → setter →
 /// top-level function → field.
 const List<({String name, String errorContains})> _cases = [

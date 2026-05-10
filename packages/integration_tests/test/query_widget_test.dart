@@ -1,4 +1,4 @@
-// Fences SPEC §3.5 (Refresh) and §10 (Resource disposal) at runtime.
+// Fences the Refresh contract and Resource disposal at runtime.
 // `_QueryCounterPage` mirrors the lowered shape but swaps
 // the constant fetcher `() async => 0` for a closure over the top-level
 // `_testCounter` so invocation count is observable.

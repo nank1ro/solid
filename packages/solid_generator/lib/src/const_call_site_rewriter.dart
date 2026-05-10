@@ -8,12 +8,11 @@ import 'package:solid_generator/src/value_rewriter.dart';
 /// whose constructor name is in [constCtorNames] and whose arguments are all
 /// statically const-evaluable.
 ///
-/// SPEC §14 item 7 follow-up: a sibling pass adds `const` to the constructor
-/// *declaration* of an eligible lowered widget. This pass closes the gap on
-/// the call site — `runApp(CounterDisplay())` becomes
-/// `runApp(const CounterDisplay())` so the analyzer's
-/// `prefer_const_constructors` lint stays silent without requiring the user
-/// to run `dart fix --apply` after every build.
+/// A sibling pass adds `const` to the constructor *declaration* of an eligible
+/// lowered widget. This pass closes the gap on the call site —
+/// `runApp(CounterDisplay())` becomes `runApp(const CounterDisplay())` so the
+/// analyzer's `prefer_const_constructors` lint stays silent without requiring
+/// the user to run `dart fix --apply` after every build.
 ///
 /// The pass parses [text] without resolution, so a bare constructor call like
 /// `Foo()` (no `const` / `new` keyword) appears in the AST as

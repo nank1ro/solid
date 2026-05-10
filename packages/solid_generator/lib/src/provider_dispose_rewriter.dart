@@ -8,11 +8,11 @@ import 'package:solid_generator/src/value_rewriter.dart';
 /// injected into every `Provider(...)`, `Provider<T>(...)`, and
 /// `.environment<T>(...)` call site that omits the `dispose:` named argument.
 ///
-/// SPEC §4.9 rule 7: every Solid-lowered class implements `Disposable` and
-/// has a synthesized `dispose()` (SPEC §10), so the injected closure resolves
-/// at runtime for any annotated reactive class. Non-Solid types whose creator
-/// has no `dispose()` method must opt out by supplying an explicit `dispose:`
-/// (including `dispose: null`).
+/// Every Solid-lowered class implements `Disposable` and has a synthesized
+/// `dispose()`, so the injected closure resolves at runtime for any annotated
+/// reactive class. Non-Solid types whose creator has no `dispose()` method
+/// must opt out by supplying an explicit `dispose:` (including
+/// `dispose: null`).
 ///
 /// `MultiProvider(...)` itself never receives a `dispose:` argument — the
 /// visitor descends into its `providers:` list naturally and applies the

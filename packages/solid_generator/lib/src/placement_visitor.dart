@@ -2,7 +2,7 @@ import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/dart/ast/visitor.dart';
 
 /// Computes the set of widget expressions that must be wrapped in
-/// `SignalBuilder` for SPEC Section 7 placement.
+/// `SignalBuilder`.
 ///
 /// Algorithm:
 ///
@@ -12,28 +12,27 @@ import 'package:analyzer/dart/ast/visitor.dart';
 ///    (explicit `const`/`new` form) or a `MethodInvocation` whose callee is
 ///    an UpperCamelCase identifier (the `Text(...)` style used without
 ///    `const` or `new`; the analyzer only upgrades these to
-///    `InstanceCreationExpression` during resolution, which we defer per
-///    SPEC 5.4). The collector also recognizes the SPEC §3.5 /
-///    §4.8 query-state chain `<queryName>().when(...)` and
-///    `<queryName>().maybeWhen(...)` — the `FutureWhen` / `StreamWhen`
-///    extensions on `Future<T>` / `Stream<T>` from `solid_annotations`
-///    return `Widget`, so the entire chain is a valid SignalBuilder wrap
-///    target even though its callee is the lowercase `when` / `maybeWhen`.
-///    Constructor expressions used as the value of a `key:` named argument
-///    are filtered out — Keys are not Widgets and cannot host a
-///    `SignalBuilder` wrapper (see `_isAtKeyPosition`).
+///    `InstanceCreationExpression` during resolution, which we defer). The
+///    collector also recognizes the query-state chain
+///    `<queryName>().when(...)` and `<queryName>().maybeWhen(...)` — the
+///    `FutureWhen` / `StreamWhen` extensions on `Future<T>` / `Stream<T>`
+///    from `solid_annotations` return `Widget`, so the entire chain is a
+///    valid SignalBuilder wrap target even though its callee is the lowercase
+///    `when` / `maybeWhen`. Constructor expressions used as the value of a
+///    `key:` named argument are filtered out — Keys are not Widgets and
+///    cannot host a `SignalBuilder` wrapper (see `_isAtKeyPosition`).
 /// 2. For each tracked-read offset T (from `value_rewriter`), pick the
 ///    smallest (deepest) widget expression whose source range contains T —
-///    SPEC Section 7.2's minimum-subtree rule.
+///    the minimum-subtree rule.
 /// 3. Prune ancestors: if both an outer and inner widget appear in the
-///    wrap set, drop the outer (SPEC Section 7.5 nested-reads rule).
+///    wrap set, drop the outer (nested-reads rule).
 /// 4. Suppress any wrap whose ancestor chain already contains a
-///    hand-written `SignalBuilder` (SPEC Section 7.3).
+///    hand-written `SignalBuilder`.
 ///
 /// [queryNames] is the per-class set of `@SolidQuery` method names. It is
 /// consulted only to recognize the `<queryName>().when(...)` /
-/// `<queryName>().maybeWhen(...)` widget-shape (SPEC §4.8 rule 3); the
-/// recorded tracked-read offsets themselves come from `value_rewriter`.
+/// `<queryName>().maybeWhen(...)` widget-shape; the recorded tracked-read
+/// offsets themselves come from `value_rewriter`.
 Set<Expression> computeWrapSet(
   MethodDeclaration buildMethod,
   List<int> trackedReadOffsets, {
@@ -63,7 +62,7 @@ Set<Expression> computeWrapSet(
 }
 
 /// Removes any entry from [wrapSet] that strictly contains another entry
-/// (SPEC Section 7.5). After this call, no two entries are in an
+/// (nested-reads rule). After this call, no two entries are in an
 /// ancestor / descendant relationship.
 void _pruneAncestors(Set<Expression> wrapSet) {
   final toRemove = <Expression>{};
@@ -80,8 +79,8 @@ void _pruneAncestors(Set<Expression> wrapSet) {
 }
 
 /// Drops any entry whose ancestor chain already contains a hand-written
-/// `SignalBuilder` (SPEC Section 7.3). Checks both `InstanceCreationExpression`
-/// and `MethodInvocation` forms because pre-resolution Dart AST may parse
+/// `SignalBuilder`. Checks both `InstanceCreationExpression` and
+/// `MethodInvocation` forms because pre-resolution Dart AST may parse
 /// `SignalBuilder(...)` without an explicit `const` as a `MethodInvocation`.
 void _suppressAlreadyWrapped(Set<Expression> wrapSet) {
   final toRemove = <Expression>{};
@@ -108,7 +107,7 @@ bool _isSignalBuilder(AstNode node) {
   return false;
 }
 
-/// SPEC §3.5 query-state extension methods — both `<query>().when(...)` and
+/// Query-state extension methods — both `<query>().when(...)` and
 /// `<query>().maybeWhen(...)` resolve to `Widget`-returning extensions, so
 /// either is a valid SignalBuilder wrap target.
 const Set<String> _queryStateChainMethods = {'when', 'maybeWhen'};
@@ -118,8 +117,8 @@ class _WidgetCollector extends RecursiveAstVisitor<void> {
 
   /// Per-class set of `@SolidQuery` method names — consumed by
   /// [_isQueryStateChain] to recognize `<query>().when(...)` /
-  /// `<query>().maybeWhen(...)` chains as widget expressions (SPEC §4.8
-  /// rule 3). Empty when the enclosing class has no `@SolidQuery` methods.
+  /// `<query>().maybeWhen(...)` chains as widget expressions. Empty when the
+  /// enclosing class has no `@SolidQuery` methods.
   final Set<String> _queryNames;
 
   final List<Expression> widgets = [];
@@ -141,10 +140,9 @@ class _WidgetCollector extends RecursiveAstVisitor<void> {
     }
   }
 
-  /// True if [node] is a SPEC §3.5 / §4.8 query-state chain
-  /// `<queryName>().when(...)` / `.maybeWhen(...)`. The query-name guard
-  /// prevents matches on user-defined `.when` / `.maybeWhen` methods on
-  /// non-query targets.
+  /// True if [node] is a query-state chain `<queryName>().when(...)` /
+  /// `.maybeWhen(...)`. The query-name guard prevents matches on user-defined
+  /// `.when` / `.maybeWhen` methods on non-query targets.
   bool _isQueryStateChain(MethodInvocation node) {
     if (_queryNames.isEmpty) return false;
     if (!_queryStateChainMethods.contains(node.methodName.name)) return false;

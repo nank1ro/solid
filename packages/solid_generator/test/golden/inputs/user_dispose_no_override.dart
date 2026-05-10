@@ -1,4 +1,4 @@
-// SPEC §10 example uses `print` as the user-dispose-body sample statement.
+// Uses `print` as the user-dispose-body sample statement.
 // ignore_for_file: avoid_print
 
 import 'package:solid_annotations/solid_annotations.dart';

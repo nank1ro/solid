@@ -1,9 +1,8 @@
-// SPEC §3.5: a `@SolidQuery` whose body invokes itself is rejected at
-// codegen because the lowered Resource would re-run indefinitely. The
-// reader-level `_rejectSelfCycle` walk fires regardless of whether the
-// recursive call sits inside a conditional, a closure, or a deeper
-// expression — only block-local shadowing of the method name suppresses
-// it (SPEC §5.5).
+// A `@SolidQuery` whose body invokes itself is rejected at codegen because
+// the lowered Resource would re-run indefinitely. Detection fires
+// regardless of whether the recursive call sits inside a conditional, a
+// closure, or a deeper expression — only block-local shadowing of the
+// method name suppresses it.
 // ignore_for_file: prefer_const_constructors_in_immutables
 
 import 'package:solid_annotations/solid_annotations.dart';

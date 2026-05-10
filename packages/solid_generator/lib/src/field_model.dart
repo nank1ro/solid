@@ -22,25 +22,25 @@ class FieldModel {
 
   /// Raw source text of the declared type annotation (e.g. `'int'`, `'int?'`,
   /// `'List<String>'`). Empty string only if the field has no declared type —
-  /// not expected for `@SolidState` fields per SPEC Section 3.1.
+  /// not expected for `@SolidState` fields (a type annotation is required).
   final String typeText;
 
   /// Raw source text of the initializer expression (e.g. `'0'`), or empty
   /// string if the field has no initializer (valid for `late` or nullable
-  /// fields — see SPEC Section 4.2 / 4.3).
+  /// fields).
   final String initializerText;
 
   /// Value of the `name:` argument on `@SolidState(name: '…')`, or `null` if
-  /// the annotation had no `name:` argument (SPEC Section 4.4).
+  /// the annotation had no `name:` argument.
   final String? annotationName;
 
-  /// Whether the source field was declared with the `late` modifier (SPEC
-  /// Section 4.2). Preserved verbatim on the emitted `Signal` field so that
-  /// `Signal` construction is deferred until first access.
+  /// Whether the source field was declared with the `late` modifier. Preserved
+  /// verbatim on the emitted `Signal` field so that `Signal` construction is
+  /// deferred until first access.
   final bool isLate;
 
-  /// Whether the field's declared top-level type is nullable (SPEC Section
-  /// 4.3). True when the type annotation ends with `?` (e.g. `int?`,
+  /// Whether the field's declared top-level type is nullable. True when the
+  /// type annotation ends with `?` (e.g. `int?`,
   /// `List<int>?`); false for non-nullable types (e.g. `int`, `List<int?>` —
   /// the inner `?` does not make the outer type nullable). Determined from
   /// the analyzer's `TypeAnnotation.question` token so nested generics are

@@ -1,4 +1,4 @@
-// SPEC §4.9 rule 7. The auto-dispose pass must run on files WITHOUT any
+// The auto-dispose pass must run on files WITHOUT any
 // `@Solid*` annotation — a top-level `main()` that wires `Provider(...)` is
 // the canonical app-entry shape and must receive the injection.
 // ignore_for_file: unreachable_from_main

@@ -5,17 +5,16 @@ import 'package:meta/meta.dart';
 /// Populated by `annotation_reader.dart` from unresolved AST and consumed by
 /// the rewriters (currently `stateless_rewriter.dart`). All string members are
 /// the raw source text of the corresponding AST node — except [bodyText],
-/// which is the source-substring of the method body with the SPEC §5.1
-/// `.value` rewrites already applied so the emitter can splice it directly
+/// which is the source-substring of the method body with the `.value`
+/// rewrites already applied so the emitter can splice it directly
 /// into the `Resource(...)` fetcher closure.
 ///
 /// Mirrors `EffectModel` for the parallel `@SolidEffect` method → `Effect`
-/// lowering (SPEC §4.7). The two models share an identical body-rewrite
+/// lowering. The two models share an identical body-rewrite
 /// contract; the differences are (a) queries carry an [innerTypeText] for the
 /// `Resource<T>` type argument, (b) queries preserve the [bodyKeyword] to
 /// splice into the emitted closure, and (c) queries do NOT enforce a
-/// reactive-deps requirement (SPEC §3.5 — a query body MAY have zero reactive
-/// reads).
+/// reactive-deps requirement (a query body MAY have zero reactive reads).
 @immutable
 class QueryModel {
   /// Creates a [QueryModel] describing an annotated method.
@@ -34,18 +33,18 @@ class QueryModel {
   });
 
   /// Declared identifier of the method (e.g. `'fetchData'`). Used as the
-  /// public field name on the lowered class — no underscore prefix per
-  /// SPEC §4.8 rule 1.
+  /// public field name on the lowered class — no underscore prefix (a single
+  /// emitted declaration per query).
   final String methodName;
 
-  /// Source text of the method's body with the SPEC §5.1 reactive-read
+  /// Source text of the method's body with the reactive-read
   /// rewrite already applied. The shape depends on [isBlockBody]:
   ///
-  /// * **Expression body** (SPEC §4.8, [isBlockBody] is `false`): the
+  /// * **Expression body** ([isBlockBody] is `false`): the
   ///   rewritten expression text alone — for an input
   ///   `Future<int> fetchOne() async => 1;`, this is the string `'1'`.
   ///   The emitter wraps it in `() async => <text>`.
-  /// * **Block body** (SPEC §4.8, [isBlockBody] is `true`): the rewritten
+  /// * **Block body** ([isBlockBody] is `true`): the rewritten
   ///   block including its braces — for an input
   ///   `Future<int> fetchOne() async { return 1; }`, this is
   ///   `'{ return 1; }'`. The emitter wraps it in `() async <text>`.
@@ -74,8 +73,7 @@ class QueryModel {
 
   /// Names of `@SolidState` field/getter identifiers read in the query body's
   /// tracked position, in source-first-appearance order, deduplicated. Drives
-  /// source-Computed synthesis together with [trackedQueryNames] (SPEC §4.8
-  /// rule 5):
+  /// source-Computed synthesis together with [trackedQueryNames]:
   ///
   /// * **0 deps total** → no `source:` argument on the lowered Resource.
   /// * **1 dep total** → the Signal/Computed/Resource is passed directly as
@@ -90,14 +88,15 @@ class QueryModel {
   ///
   /// The list is populated by `readSolidQueryMethod` from the body-rewriter's
   /// [`ValueRewriteResult.trackedReadNames`]; a query body with zero reactive
-  /// reads is permitted (SPEC §3.5 waives the `@SolidEffect` deps requirement).
+  /// reads is permitted (`@SolidQuery` waives the `@SolidEffect` deps
+  /// requirement).
   final List<String> trackedSignalNames;
 
   /// Names of same-class `@SolidQuery` methods invoked as zero-arg calls in
   /// the query body's tracked position, in source-first-appearance order,
   /// deduplicated. Disjoint from [trackedSignalNames]; combined dep count
-  /// drives the SPEC §4.8 rule 5 source-synthesis branches (zero / one /
-  /// many) — see [totalTrackedDeps].
+  /// drives the source-synthesis branches (zero / one / many) —
+  /// see [totalTrackedDeps].
   ///
   /// The list is populated by `readSolidQueryMethod` from the body-rewriter's
   /// [`ValueRewriteResult.trackedQueryNames`]. A self-cycle (this query's own
@@ -107,7 +106,7 @@ class QueryModel {
   final List<String> trackedQueryNames;
 
   /// Combined dep count: sum of state and query reads in tracked position.
-  /// Drives the SPEC §4.8 rule 5 wiring branches (zero / one / many).
+  /// Drives the wiring branches (zero / one / many).
   int get totalTrackedDeps =>
       trackedSignalNames.length + trackedQueryNames.length;
 
@@ -138,6 +137,6 @@ class QueryModel {
   final bool? useRefreshing;
 
   /// Value of the `name:` argument on `@SolidQuery(name: '…')`, or `null` if
-  /// the annotation had no `name:` argument (SPEC §3.5 / §4.8 rule 8).
+  /// the annotation had no `name:` argument.
   final String? annotationName;
 }

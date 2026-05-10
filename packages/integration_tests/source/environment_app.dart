@@ -16,7 +16,7 @@ class Counter {
   // the `.environment<Counter>(... dispose: (_, c) => c.dispose())` callback;
   // it cannot see the `Disposable` interface that the generator emits in
   // `lib/`. The generator merges the synthesized `value.dispose()` into this
-  // body per SPEC §10 (dispose-body merge for plain classes).
+  // body (dispose-body merge for plain classes).
   void dispose() {}
 }
 

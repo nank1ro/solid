@@ -11,10 +11,10 @@ import 'package:solid_generator/src/transformation_error.dart';
 
 /// Rewrites a `StatelessWidget` class containing `@SolidState` fields,
 /// `@SolidState` getters, `@SolidEffect` methods, and/or `@SolidQuery`
-/// methods as a `StatefulWidget` + `State<X>` pair. See SPEC §8.1 for the
-/// full field-partition and constructor-preservation contract; SPEC §4.5 for
-/// the getter→`Computed` lowering; SPEC §4.7 for the method→`Effect`
-/// lowering; SPEC §4.8 for the method→`Resource` lowering.
+/// methods as a `StatefulWidget` + `State<X>` pair. The class is rewritten
+/// as a `StatefulWidget` + `State<X>` pair with full field-partition and
+/// constructor-preservation, getter→`Computed` lowering, method→`Effect`
+/// lowering, and method→`Resource` lowering.
 ///
 /// The emitted string is syntactically valid Dart but is not guaranteed to be
 /// pretty-printed — run through `DartFormatter` before writing.
@@ -34,9 +34,9 @@ RewriteResult rewriteStatelessWidget(
     ...solidFields.map((f) => f.fieldName),
     ...solidGetters.map((g) => g.getterName),
   };
-  // SPEC §4.8 rule 3: query call expressions in `build` are tracked reads.
-  // Names are kept separate from `reactiveNames` so the `.value` rewrite
-  // (SPEC §5.1) does not fire on `<queryName>` identifiers.
+  // Query call expressions in `build` are tracked reads. Names are kept
+  // separate from `reactiveNames` so the `.value` rewrite does not fire on
+  // `<queryName>` identifiers.
   final queryNames = solidQueries.isEmpty
       ? const <String>{}
       : {for (final q in solidQueries) q.methodName};
@@ -68,15 +68,15 @@ RewriteResult rewriteStatelessWidget(
     classFieldsAreConstSafe,
     className,
   );
-  // SPEC §5.1 cross-class env-field receiver type map.
+  // Cross-class env-field receiver type map.
   final environmentFields = solidEnvironments.isEmpty
       ? const <String, String>{}
       : {for (final e in solidEnvironments) e.fieldName: e.typeText};
-  // SPEC §8.1 widget→State scope shift: bare references inside `build` to
-  // a widget-bound non-`@SolidState` field need a `widget.` prefix so the
+  // Widget→State scope shift: bare references inside `build` to a
+  // widget-bound non-`@SolidState` field need a `widget.` prefix so the
   // State class resolves them through the widget config object. Subtract
-  // `partitionExcludeNames` so reactive / env-field names (which leave
-  // the widget half) are not mis-prefixed.
+  // `partitionExcludeNames` so reactive / env-field names (which leave the
+  // widget half) are not mis-prefixed.
   final widgetBoundForBuild = widgetBoundNames.difference(
     partitionExcludeNames,
   );
@@ -116,10 +116,10 @@ RewriteResult rewriteStatelessWidget(
     buildMethodText: buildMethodText,
   );
 
-  // SPEC §9 import-add gates. `Signal` and `SignalBuilder` are only emitted
-  // when there's a same-class reactive declaration to wrap. An env-only
-  // class (simple-environment shape) has no Signal/SignalBuilder reference
-  // in its lowered output and so does NOT pull in `flutter_solidart`.
+  // `Signal` and `SignalBuilder` are only emitted when there's a same-class
+  // reactive declaration to wrap. An env-only class (simple-environment shape)
+  // has no Signal/SignalBuilder reference in its lowered output and so does
+  // NOT pull in `flutter_solidart`.
   final hasReactive =
       solidFields.isNotEmpty ||
       solidGetters.isNotEmpty ||
@@ -158,15 +158,14 @@ RewriteResult rewriteStatelessWidget(
 /// `effectNamesInDeclarationOrder` is the Effect-only subset of
 /// `disposeNamesInDeclarationOrder`, pulled out so the rewriter can
 /// synthesize `initState()` that materializes each `late final` Effect field
-/// at mount time (SPEC §4.7). Queries are intentionally NOT in this list —
-/// per SPEC §4.8 rule 10 / §14 item 4, Resources are lazy and the late-final
-/// initializer fires on first call-site read, never via `initState`.
+/// at mount time. Queries are intentionally NOT in this list — Resources are
+/// lazy and the late-final initializer fires on first call-site read, never
+/// via `initState`.
 ///
-/// `@SolidEnvironment` env fields are emitted in source-declaration
-/// order alongside Signal/Computed/Effect/Resource fields but are NEVER added
-/// to `disposeNames` (SPEC §10 — env fields are not host-disposed) and NEVER
-/// added to `effectNames` (SPEC §4.9 rule 2 — env fields are lazy and need
-/// no initState materialization).
+/// `@SolidEnvironment` env fields are emitted in source-declaration order
+/// alongside Signal/Computed/Effect/Resource fields but are NEVER added to
+/// `disposeNames` (env fields are not host-disposed) and NEVER added to
+/// `effectNames` (env fields are lazy and need no initState materialization).
 ({
   String fieldsText,
   List<String> disposeNamesInDeclarationOrder,
@@ -189,8 +188,8 @@ _emitReactiveBlock(
     for (final f in solidFields) f.fieldName: f.typeText,
     for (final g in solidGetters) g.getterName: g.typeText,
   };
-  // SPEC §4.8 rule 5 cross-query deps: each upstream's inner `T` is needed
-  // to emit `ResourceState<T>` elements in the synthesized source-Computed.
+  // Cross-query deps: each upstream's inner `T` is needed to emit
+  // `ResourceState<T>` elements in the synthesized source-Computed.
   final queryInnerTypeTexts = solidQueries.isEmpty
       ? const <String, String>{}
       : {for (final q in solidQueries) q.methodName: q.innerTypeText};
@@ -210,7 +209,7 @@ _emitReactiveBlock(
       final env = envByName[name];
       if (env != null) {
         // No disposeNames / effectNames push — env fields are not host-
-        // disposed (SPEC §10) and not initState-materialized (SPEC §4.9).
+        // disposed and not initState-materialized.
         lines.add(emitEnvironmentField(env));
       }
       continue;
@@ -256,7 +255,7 @@ _emitReactiveBlock(
 /// the rewriter cares about: every `ConstructorDeclaration`, every
 /// `FieldDeclaration`, and the (required) `build` method. Throws
 /// [AnalysisError] if no `build` method is present — not a valid
-/// `StatelessWidget` per SPEC §8.1.
+/// `StatelessWidget`.
 ({
   List<ConstructorDeclaration> ctors,
   List<FieldDeclaration> fields,
@@ -351,9 +350,8 @@ _FieldPartition _partitionFields(
 
 /// Emits every constructor 2-space indented and joined by blank lines,
 /// prefixing `const ` on each ctor that is statically determinable
-/// const-eligible per SPEC §14 item 7. Returns an empty `text` when [ctors]
-/// is empty (Dart synthesises the implicit default constructor on the
-/// rewritten class).
+/// const-eligible. Returns an empty `text` when [ctors] is empty (Dart
+/// synthesises the implicit default constructor on the rewritten class).
 ///
 /// [classFieldsAreConstSafe] is the class-level gate: false when any
 /// retained widget-bound non-`@SolidState` instance field is non-final
@@ -389,14 +387,14 @@ _FieldPartition _partitionFields(
 }
 
 /// Returns true iff [ctor] alone meets the per-ctor const-eligibility
-/// conditions of SPEC §14 item 7: it is generative (not factory/external)
-/// and not already declared `const`; every parameter forwards via
-/// `this.<name>` (FieldFormalParameter) or `super.<name>`
-/// (SuperFormalParameter); the body is empty (`;` or `{}`); the
-/// initializer list is either absent or contains only
-/// [ConstructorFieldInitializer] entries whose RHS is a basic literal
-/// per [_isLiteralRhs]. AssertInitializer, RedirectingConstructorInvocation,
-/// SuperConstructorInvocation, and any non-literal RHS disqualify.
+/// conditions: it is generative (not factory/external) and not already
+/// declared `const`; every parameter forwards via `this.<name>`
+/// (FieldFormalParameter) or `super.<name>` (SuperFormalParameter); the
+/// body is empty (`;` or `{}`); the initializer list is either absent or
+/// contains only [ConstructorFieldInitializer] entries whose RHS is a basic
+/// literal per [_isLiteralRhs]. AssertInitializer,
+/// RedirectingConstructorInvocation, SuperConstructorInvocation, and any
+/// non-literal RHS disqualify.
 ///
 /// The class-level gate (every retained widget-bound instance field is
 /// final) is checked separately by [_classFieldsAreConstSafe] — this
@@ -424,10 +422,10 @@ bool _isConstEligibleCtor(ConstructorDeclaration ctor) {
 }
 
 /// Returns true iff [expr] is one of the basic literal forms that are
-/// always const-evaluable. Conservative subset of the spec's "contains
-/// only const expressions" clause (SPEC §14 item 7); covers the known
-/// corpus and is trivially extensible to cover other forms (`const C(...)`,
-/// `AdjacentStrings`, identifier reads of static const fields, ...) later.
+/// always const-evaluable. Conservative subset of the Dart spec's "contains
+/// only const expressions" clause; covers the known corpus and is trivially
+/// extensible to cover other forms (`const C(...)`, `AdjacentStrings`,
+/// identifier reads of static const fields, ...) later.
 bool _isLiteralRhs(Expression expr) {
   return expr is BooleanLiteral ||
       expr is DoubleLiteral ||
@@ -465,7 +463,7 @@ bool _classFieldsAreConstSafe(
   return true;
 }
 
-/// Emits the public `StatefulWidget` half of the class split (SPEC §8.1).
+/// Emits the public `StatefulWidget` half of the class split.
 ///
 /// [ctorsBlock] is the verbatim original constructors (unnamed, named, and
 /// factory) — possibly empty if the class had no explicit constructor and
@@ -489,10 +487,10 @@ String _emitWidgetClass(
       '}';
 }
 
-/// Emits the private `State<X>` half of the class split (SPEC §8.1).
+/// Emits the private `State<X>` half of the class split.
 ///
 /// `State<T>` has `dispose()` in its supertype chain, so the synthesized
-/// `dispose()` is `@override` and ends with `super.dispose();` (SPEC §10).
+/// `dispose()` is `@override` and ends with `super.dispose();`.
 /// [stateFieldsText] is the verbatim source of every non-`@SolidState`
 /// non-widget-bound field that has been moved off the widget; emitted before
 /// the synthesized reactive fields so original declaration order is preserved.
@@ -503,14 +501,13 @@ String _emitWidgetClass(
 /// [effectNamesInDeclarationOrder] is the Effect-only subset of
 /// [disposeNamesInDeclarationOrder]. When non-empty, this method emits a
 /// synthesized `initState()` that materializes each `late final` Effect field
-/// at mount time so its autorun fires (SPEC §4.7). When empty, no `initState`
-/// is emitted — preserving byte-equality with every golden that has no
-/// Effects.
+/// at mount time so its autorun fires. When empty, no `initState` is emitted
+/// — preserving byte-equality with every golden that has no Effects.
 ///
 /// `dispose()` is similarly gated on [disposeNamesInDeclarationOrder] being
-/// non-empty (SPEC §10): an env-only host class has no reactive
-/// declarations to dispose, so no `dispose()` override is emitted — the
-/// inherited `State<T>.dispose()` runs unchanged.
+/// non-empty: an env-only host class has no reactive declarations to dispose,
+/// so no `dispose()` override is emitted — the inherited `State<T>.dispose()`
+/// runs unchanged.
 String _emitStateClass({
   required String className,
   required String stateClassName,

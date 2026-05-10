@@ -1,7 +1,7 @@
 // Idempotency suite: every golden runs through the builder twice and
 // the two outputs must be byte-identical. Regression fence against
 // accidental builder state — see plans/features/m1-solid-state-field.md
-// Stage D and SPEC §5.4.
+// Stage D.
 
 import 'package:test/test.dart';
 

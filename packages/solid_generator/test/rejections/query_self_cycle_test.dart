@@ -1,7 +1,6 @@
-// Rejection suite for self-cycling `@SolidQuery` (SPEC §3.5
-// "Auto-tracking of upstream queries"). A query whose body invokes itself
-// is rejected at codegen because the lowered Resource would re-run
-// indefinitely.
+// Rejection suite for self-cycling `@SolidQuery`. A query whose body
+// invokes itself is rejected at codegen because the lowered Resource would
+// re-run indefinitely.
 
 import '../integration/golden_helpers.dart';
 
