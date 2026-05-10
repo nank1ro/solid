@@ -69,7 +69,7 @@ Docs: <https://solid.mariuti.com/guides/query>.
 | Option | Effect |
 | --- | --- |
 | `debounce: Duration(...)` | Wait this long after the last input change before re-running. |
-| `useRefreshing: false` | On re-execution, drop back into `loading` state instead of staying on the current value. Default: `true`. |
+| `useRefreshing` (default `true`) | On re-execution from a dependency change, the resource stays on the current value while refetching, and `.isRefreshing` becomes `true` (smoother UX, no loading flash). Pass `useRefreshing: false` to drop back into the `loading` state on each re-execution instead. |
 
 ## `@SolidEnvironment()` — inject from widget tree
 
@@ -108,3 +108,39 @@ The type argument is inferred from the closure's return type. Pass it explicitly
 
 - Non-`late` field. The lookup is lazy and needs `late` to defer initialization.
 - Static or top-level field.
+
+## `.untracked` — opt out of subscription at the call site
+
+Docs: <https://solid.mariuti.com/guides/untracked>.
+
+Not an annotation — an extension getter shipped by `solid_annotations`:
+
+```dart
+extension UntrackedExtension<T> on T {
+  T get untracked => this;
+}
+```
+
+`counter.untracked` typechecks identically to `counter` and is a no-op at runtime. The generator detects the pattern at source level and rewrites it to the underlying `untrackedValue` primitive, **excluding the read from `SignalBuilder` placement** so the surrounding widget subtree is not subscribed.
+
+### Two ways reads become untracked
+
+| Form | How |
+| --- | --- |
+| Auto-untracked: read inside an `on*` callback parameter (`onPressed`, `onTap`, `onChanged`, …) | Solid recognizes user-interaction handlers — the read does not subscribe. No source change required. |
+| Manual: `field.untracked` at the read site | Use anywhere outside an `on*` callback to read the current value without subscribing. Example: `key: ValueKey(counter.untracked)`. |
+
+### Hard rules
+
+- **String interpolation form**: only `'${counter.untracked}'` works. The short form `'$counter.untracked'` parses as `${counter}` followed by a literal `.untracked` suffix and is still a tracked read.
+- **Shadowing**: a local variable that shadows the field disables the rewrite for that scope (the analyzer's identifier resolution wins).
+- **No-op on non-reactive types**: applied to a non-`@SolidState` value the extension is identity at compile time *and* runtime — safe to leave in code that may or may not target a reactive field.
+- **Migration from v1**: the old function-call form `untracked(() => counter)` is no longer supported. Replace with `counter.untracked`.
+
+### When to reach for it
+
+- One-time `Key` / `ValueKey` construction from a reactive field.
+- Inside an effect that writes to a signal, reading that same signal's current value to avoid a self-dependency loop: `history = [...history.untracked, counter];`.
+- Logging or analytics calls that should not cause rebuilds.
+
+If `.untracked` shows up everywhere, prefer a `@SolidState` getter (derived state) or a plain non-reactive field instead.

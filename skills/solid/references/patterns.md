@@ -220,3 +220,39 @@ HomePage()
 ```
 
 Reads of `@SolidState` members on the injected instance stay reactive — only the dependent UI rebuilds.
+
+## 7. Reading reactive state without subscribing — `.untracked`
+
+Docs: <https://solid.mariuti.com/guides/untracked>. Append `.untracked` to read the current value without subscribing the surrounding widget subtree to changes.
+
+```dart title="source/keyed_container.dart"
+class KeyedContainer extends StatelessWidget {
+  KeyedContainer({super.key});
+
+  @SolidState()
+  int counter = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      // ValueKey reads counter once; it does NOT rebuild on counter changes.
+      key: ValueKey(counter.untracked),
+      child: const Text('hi'),
+    );
+  }
+}
+```
+
+Inside a `@SolidEffect` that writes to a signal, use `.untracked` on the signal you're writing to so the effect doesn't re-trigger itself:
+
+```dart
+@SolidState()
+List<int> history = const [];
+
+@SolidEffect()
+void recordHistory() {
+  history = [...history.untracked, counter]; // counter is tracked, history is not
+}
+```
+
+Reads inside `on*` callback parameters (`onPressed`, `onTap`, `onChanged`, …) are auto-untracked — no `.untracked` needed. In string interpolations only the long form `'${counter.untracked}'` works; `'$counter.untracked'` is still tracked.

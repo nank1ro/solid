@@ -91,6 +91,8 @@ npx skills add nank1ro/solid
 
 Or copy `skills/solid/SKILL.md` into your editor's skill location manually.
 
+If your tool fetches documentation over HTTP (Cursor `@docs`, ChatGPT custom GPTs, claude.ai web search, …), point it at [`/llms-full.txt`](https://solid.mariuti.com/llms-full.txt) — the full docs as a single LLM-friendly file. A short index lives at [`/llms.txt`](https://solid.mariuti.com/llms.txt).
+
 ## License
 
 The Solid framework is open-source software licensed under the [MIT License](./LICENSE).

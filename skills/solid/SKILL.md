@@ -36,6 +36,15 @@ Each annotation goes on a class member of a `StatelessWidget` (or any class — 
   - Provide via `.environment<T>()` extension or `Provider<T>` from `package:provider`.
   - Example: `@SolidEnvironment() late Counter counter;` then `child: CounterDisplay().environment((_) => Counter())`.
 
+## Untracked reads
+
+By default every read of a `@SolidState` field inside `build`, `@SolidEffect`, or `@SolidQuery` subscribes the enclosing widget subtree. Two ways to read without subscribing:
+
+- **Automatic**: reads inside callback parameters whose name starts with `on` (`onPressed`, `onTap`, `onChanged`, …) are untracked — Solid treats them as gesture handlers. You don't write anything special.
+- **Manual**: append `.untracked` to the field for a one-off untracked read. Common case is `key: ValueKey(counter.untracked)` (build the key once, don't rebuild on later changes), or reading the same signal you're writing to inside an effect to avoid a self-dependency loop: `history = [...history.untracked, counter];`.
+
+In string interpolations use the long form `'${counter.untracked}'` — the short form `'$counter.untracked'` parses as `${counter}` followed by a literal suffix (still tracked). Docs: <https://solid.mariuti.com/guides/untracked>.
+
 For full target rules (every valid/invalid form with rationale) see `references/annotation-contract.md`. For canonical idioms see `references/patterns.md`. For error messages and fixes see `references/troubleshooting.md`.
 
 ## Setup checklist
