@@ -223,7 +223,7 @@ Reads of `@SolidState` members on the injected instance stay reactive — only t
 
 ## 7. Reading reactive state without subscribing — `.untracked`
 
-Docs: <https://solid.mariuti.com/guides/untracked>. Append `.untracked` to read the current value without subscribing the surrounding widget subtree to changes.
+Docs: <https://solid.mariuti.com/guides/untracked>. Append `.untracked` to read the current value without registering a dependency on the surrounding `build`, effect, or query.
 
 ```dart title="source/keyed_container.dart"
 class KeyedContainer extends StatelessWidget {
@@ -247,7 +247,7 @@ Inside a `@SolidEffect` that writes to a signal, use `.untracked` on the signal 
 
 ```dart
 @SolidState()
-List<int> history = const [];
+List<int> history = [];
 
 @SolidEffect()
 void recordHistory() {

@@ -38,7 +38,7 @@ Each annotation goes on a class member of a `StatelessWidget` (or any class — 
 
 ## Untracked reads
 
-By default every read of a `@SolidState` field inside `build`, `@SolidEffect`, or `@SolidQuery` subscribes the enclosing widget subtree. Two ways to read without subscribing:
+By default every read of a `@SolidState` field inside `build`, `@SolidEffect`, or `@SolidQuery` registers a dependency on the surrounding computation — `build` re-renders the read site, effects re-fire, queries re-execute. Two ways to read without registering a dependency:
 
 - **Automatic**: reads inside callback parameters whose name starts with `on` (`onPressed`, `onTap`, `onChanged`, …) are untracked — Solid treats them as gesture handlers. You don't write anything special.
 - **Manual**: append `.untracked` to the field for a one-off untracked read. Common case is `key: ValueKey(counter.untracked)` (build the key once, don't rebuild on later changes), or reading the same signal you're writing to inside an effect to avoid a self-dependency loop: `history = [...history.untracked, counter];`.

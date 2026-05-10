@@ -121,7 +121,7 @@ extension UntrackedExtension<T> on T {
 }
 ```
 
-`counter.untracked` typechecks identically to `counter` and is a no-op at runtime. The generator detects the pattern at source level and rewrites it to the underlying `untrackedValue` primitive, **excluding the read from `SignalBuilder` placement** so the surrounding widget subtree is not subscribed.
+`counter.untracked` typechecks identically to `counter` and is a no-op at runtime. The generator detects the pattern at source level and rewrites it to the underlying `untrackedValue` primitive and excludes the read from the dependency set — `SignalBuilder` doesn't wrap it inside `build`, and an enclosing `@SolidEffect` / `@SolidQuery` won't re-fire on changes to it.
 
 ### Two ways reads become untracked
 
@@ -135,7 +135,6 @@ extension UntrackedExtension<T> on T {
 - **String interpolation form**: only `'${counter.untracked}'` works. The short form `'$counter.untracked'` parses as `${counter}` followed by a literal `.untracked` suffix and is still a tracked read.
 - **Shadowing**: a local variable that shadows the field disables the rewrite for that scope (the analyzer's identifier resolution wins).
 - **No-op on non-reactive types**: applied to a non-`@SolidState` value the extension is identity at compile time *and* runtime — safe to leave in code that may or may not target a reactive field.
-- **Migration from v1**: the old function-call form `untracked(() => counter)` is no longer supported. Replace with `counter.untracked`.
 
 ### When to reach for it
 

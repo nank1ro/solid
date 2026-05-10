@@ -1,18 +1,18 @@
 ---
 title: Untracked
-description: Read reactive state without subscribing the surrounding widget subtree.
+description: Read reactive state without re-running the surrounding build, effect, or query.
 sidebar:
   order: 6
 ---
 import { Aside } from '@astrojs/starlight/components';
 
-By default, every read of a `@SolidState` field inside a `build` method, `@SolidEffect` body, or `@SolidQuery` body **subscribes** the enclosing widget subtree to that field — when the field changes, the subtree rebuilds. That's how fine-grained reactivity stays automatic.
+By default, every read of a `@SolidState` field inside a reactive context — a `build` method, an `@SolidEffect` body, or an `@SolidQuery` body — **registers a dependency**. When the field changes, the surrounding computation re-runs: `build` re-renders the widget subtree at the read site, an effect re-fires, a query re-executes. That's how fine-grained reactivity stays automatic.
 
 Occasionally you need to read the current value *without* subscribing. Solid covers two cases.
 
 ## Inside `on*` callbacks (automatic)
 
-Reads inside `onPressed`, `onTap`, `onChanged`, and other named-callback parameters starting with `on` are **automatically untracked**. Solid treats those as user-interaction handlers — they fire in response to gestures, not signal changes — so subscribing the surrounding widget would be wrong.
+Reads inside `onPressed`, `onTap`, `onChanged`, and other named-callback parameters starting with `on` are **automatically untracked**. Solid treats those as user-interaction handlers — they fire in response to gestures, not signal changes — so registering a dependency on every read inside them would be wrong.
 
 ```dart title="source/conditional_dialog.dart"
 class ConditionalDialog extends StatelessWidget {
@@ -58,7 +58,7 @@ class KeyedContainer extends StatelessWidget {
 }
 ```
 
-`.untracked` is a typed identity extension shipped by `solid_annotations` — `counter.untracked` has the same type as `counter` and at runtime is a no-op. Only the source-time presence matters: the generator rewrites `counter.untracked` to the underlying `untrackedValue` primitive and excludes the read from `SignalBuilder` placement.
+`.untracked` is a typed identity extension shipped by `solid_annotations` — `counter.untracked` has the same type as `counter` and at runtime is a no-op. Only the source-time presence matters: the generator rewrites `counter.untracked` to the underlying `untrackedValue` primitive and excludes the read from the dependency set, so `SignalBuilder` doesn't wrap it inside `build` and an enclosing effect or query won't re-fire on changes to it.
 
 <Aside type="caution">
 Inside string interpolations only the long form works: `'${counter.untracked}'`. The short form `'$counter.untracked'` parses as `${counter}` followed by a literal `.untracked` suffix — that read is tracked.
