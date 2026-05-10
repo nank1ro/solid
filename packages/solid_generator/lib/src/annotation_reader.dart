@@ -1,5 +1,4 @@
 import 'package:analyzer/dart/ast/ast.dart';
-import 'package:analyzer/dart/ast/visitor.dart';
 import 'package:solid_generator/src/effect_model.dart';
 import 'package:solid_generator/src/environment_model.dart';
 import 'package:solid_generator/src/field_model.dart';
@@ -146,6 +145,7 @@ GetterModel? readSolidStateGetter(
     :isBlockBody,
     trackedNames: _,
     trackedQueryNames: _,
+    selfCycleFound: _,
   ) = _readReactiveBody(
     body,
     reactiveFields,
@@ -187,16 +187,16 @@ GetterModel? readSolidStateGetter(
 /// getter and effect callers destructure them into `_` since their lowered
 /// shapes (Computed, Effect) auto-track via the closure's reads at runtime.
 ///
-/// [queryNames] is the per-class set of `@SolidQuery` method names — the
-/// caller MUST exclude the current method itself when reading a `@SolidQuery`
-/// body so the visitor's name-set match fails for self-recursive calls,
-/// surfacing the SPEC §3.5 self-cycle as an explicit reader-level check
-/// upstream (see `readSolidQueryMethod`).
+/// [currentMember] is the enclosing method's name when reading a
+/// `@SolidQuery` body — passed through to the visitor so a zero-arg call
+/// to it sets [ValueRewriteResult.selfCycleFound] for SPEC §3.5 rejection.
+/// Pass `null` for state-getter / effect callers.
 ({
   String bodyText,
   bool isBlockBody,
   List<String> trackedNames,
   List<String> trackedQueryNames,
+  bool selfCycleFound,
 })
 _readReactiveBody(
   FunctionBody body,
@@ -206,6 +206,7 @@ _readReactiveBody(
   required String? emptyDepsError,
   required String unsupportedBodyError,
   Set<String> queryNames = const {},
+  String? currentMember,
 }) {
   final AstNode node;
   final bool isBlockBody;
@@ -223,6 +224,7 @@ _readReactiveBody(
     reactiveFields,
     source,
     queryNames: queryNames,
+    currentMember: currentMember,
   );
   // SPEC §3.4 / §4.5: zero-deps Effect / Computed are rejected. A reactive
   // dep is either a `.value`-rewritten state read OR a tracked query-call
@@ -243,6 +245,7 @@ _readReactiveBody(
     isBlockBody: isBlockBody,
     trackedNames: result.trackedReadNames,
     trackedQueryNames: result.trackedQueryNames,
+    selfCycleFound: result.selfCycleFound,
   );
 }
 
@@ -281,6 +284,7 @@ EffectModel? readSolidEffectMethod(
     :isBlockBody,
     trackedNames: _,
     trackedQueryNames: _,
+    selfCycleFound: _,
   ) = _readReactiveBody(
     decl.body,
     reactiveFields,
@@ -343,20 +347,13 @@ QueryModel? readSolidQueryMethod(
       : source.substring(typeArg.offset, typeArg.end);
 
   final methodName = decl.name.lexeme;
-  // SPEC §3.5: a `@SolidQuery` body MAY invoke other same-class queries to
-  // compose its result. Pass the per-class query name set (minus the current
-  // method) so the visitor records cross-query reads as `trackedQueryNames`
-  // for the synthesized `Resource.source:` argument (SPEC §4.8 rule 5). The
-  // self-name is excluded so the visitor's name-set match fails for
-  // recursive calls (`fetchData()` inside `fetchData()`'s own body) — we
-  // detect those below and reject explicitly.
-  final peerQueryNames = queryNames.where((n) => n != methodName).toSet();
   // emptyDepsError: null — SPEC §3.5 waives the reactive-deps requirement.
   final (
     :bodyText,
     :isBlockBody,
     :trackedNames,
     :trackedQueryNames,
+    :selfCycleFound,
   ) = _readReactiveBody(
     decl.body,
     reactiveFields,
@@ -366,17 +363,23 @@ QueryModel? readSolidQueryMethod(
     unsupportedBodyError:
         '@SolidQuery method must have an expression body (=> ...) or a '
         'block body ({ ... }); abstract and native bodies are not supported',
-    queryNames: peerQueryNames,
+    queryNames: queryNames,
+    currentMember: methodName,
   );
 
-  // SPEC §3.5: a self-cycle (a query that invokes itself in its own body) is
-  // rejected at codegen with a clear error. Detection runs on the original
-  // body source (before rewriting) by re-walking the body for a
-  // `MethodInvocation` whose target is null, args are empty, and method name
-  // matches `methodName` — outside any local that shadows it. Inter-query
-  // cycles (A reads B, B reads A) are not validated at codegen and surface
-  // as a runtime error from `flutter_solidart`.
-  _rejectSelfCycle(decl.body, methodName);
+  // SPEC §3.5: a self-cycle is rejected at codegen — solidart would re-run
+  // indefinitely otherwise. Inter-query cycles (A reads B, B reads A) are
+  // not validated at codegen and surface as a runtime error.
+  if (selfCycleFound) {
+    throw CodeGenerationError(
+      "@SolidQuery '$methodName' invokes itself in its own body — "
+      'self-cycles are rejected at codegen because the lowered Resource '
+      'would re-run indefinitely. Refactor the body to remove the recursive '
+      'call, or split into two queries.',
+      null,
+      methodName,
+    );
+  }
 
   return QueryModel(
     methodName: methodName,
@@ -391,73 +394,6 @@ QueryModel? readSolidQueryMethod(
     debounce: extractDebounceArgument(annotation, source),
     useRefreshing: extractUseRefreshingArgument(annotation),
   );
-}
-
-/// Walks [body] and throws a [CodeGenerationError] if any zero-arg
-/// `MethodInvocation` has a bare target equal to [methodName] — i.e. the
-/// query body invokes itself. SPEC §3.5: self-cycles are rejected at
-/// codegen because solidart's runtime would loop indefinitely otherwise.
-/// Shadowing is handled by tracking declared local-variable names while
-/// walking; a local named [methodName] inside the body suppresses the check
-/// for occurrences in its scope (SPEC §5.5).
-void _rejectSelfCycle(FunctionBody body, String methodName) {
-  final visitor = _SelfCycleVisitor(methodName);
-  body.accept(visitor);
-  if (visitor.found) {
-    throw CodeGenerationError(
-      "@SolidQuery '$methodName' invokes itself in its own body — "
-      'self-cycles are rejected at codegen because the lowered Resource '
-      'would re-run indefinitely. Refactor the body to remove the recursive '
-      'call, or split into two queries.',
-      null,
-      methodName,
-    );
-  }
-}
-
-class _SelfCycleVisitor extends RecursiveAstVisitor<void> {
-  _SelfCycleVisitor(this._methodName);
-  final String _methodName;
-  bool found = false;
-  final List<Set<String>> _scopes = [<String>{}];
-
-  bool _isShadowed(String name) => _scopes.any((frame) => frame.contains(name));
-
-  @override
-  void visitBlock(Block node) {
-    _scopes.add(<String>{});
-    super.visitBlock(node);
-    _scopes.removeLast();
-  }
-
-  @override
-  void visitFunctionExpression(FunctionExpression node) {
-    _scopes.add(<String>{});
-    final params = node.parameters?.parameters ?? const <FormalParameter>[];
-    for (final p in params) {
-      final id = p.name?.lexeme;
-      if (id != null) _scopes.last.add(id);
-    }
-    super.visitFunctionExpression(node);
-    _scopes.removeLast();
-  }
-
-  @override
-  void visitVariableDeclaration(VariableDeclaration node) {
-    _scopes.last.add(node.name.lexeme);
-    super.visitVariableDeclaration(node);
-  }
-
-  @override
-  void visitMethodInvocation(MethodInvocation node) {
-    if (node.target == null &&
-        node.argumentList.arguments.isEmpty &&
-        node.methodName.name == _methodName &&
-        !_isShadowed(_methodName)) {
-      found = true;
-    }
-    super.visitMethodInvocation(node);
-  }
 }
 
 /// Returns the first `@<className>(...)` annotation in [metadata], or `null`.
