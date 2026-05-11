@@ -15,6 +15,17 @@ analyzer:
     invalid_annotation_target: ignore
     avoid_print: ignore
     unnecessary_statements: ignore
+    # Generated `lib/` interpolated tab labels like
+    # `'incomplete (${todosController.incompleteTodos.value.length})'`
+    # exceed 80 chars after `dart format` chooses a single-line wrap.
+    # The text is intentionally not split (interpolation contents are not
+    # line-breakable); suppress at the example level.
+    lines_longer_than_80_chars: ignore
+    # Generated env-injection fields are `late final foo =
+    # context.read<Foo>();` (no explicit type). The Dart analyzer infers
+    # `Foo` from the generic call but `very_good_analysis` treats this as
+    # non-obvious. The type IS clear from the receiver; suppress here.
+    specify_nonobvious_property_types: ignore
 linter:
   rules:
     public_member_api_docs: false

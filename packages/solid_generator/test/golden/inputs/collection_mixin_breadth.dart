@@ -14,7 +14,10 @@
 // `[i] = v`, `[k] = v`, `putIfAbsent`). Every one of them must round-trip
 // without a `.value` between the signal and the member.
 
-// ignore_for_file: avoid_print
+// `print` is the canonical Effect side-effect demonstration; cascades are
+// pinned by a sibling fixture (`collection_cascade.dart`), so the bare
+// repeat-receiver calls in `mutate()` below are intentional.
+// ignore_for_file: avoid_print, cascade_invocations
 
 import 'package:flutter/widgets.dart';
 import 'package:solid_annotations/solid_annotations.dart';

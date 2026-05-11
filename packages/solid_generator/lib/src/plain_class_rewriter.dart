@@ -150,9 +150,10 @@ RewriteResult rewritePlainClass(
     if (member is MethodDeclaration) {
       final name = member.name.lexeme;
       if (member.isGetter && getterByName.containsKey(name)) {
-        // `@SolidState` getter on a plain class → `late final … = Computed<T>(…)`.
-        // Source-order disposal puts the Computed after its dependencies so
-        // the reverse-iteration `dispose()` body tears it down first.
+        // `@SolidState` getter on a plain class lowers to
+        // `late final … = Computed<T>(…)`. Source-order disposal puts the
+        // Computed after its dependencies so the reverse-iteration
+        // `dispose()` body tears it down first.
         final getter = getterByName[name]!;
         pieces.add(emitComputedField(getter));
         disposeNames.add(getter.getterName);

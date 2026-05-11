@@ -498,12 +498,12 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
     }
   }
 
-  /// True if [node] is the `target` of its parent expression — `PropertyAccess`,
-  /// `MethodInvocation`, `IndexExpression`, or `CascadeExpression`. Every
-  /// chain shape carries its receiver on a `target` field on the outer
-  /// node, so checking the parent is the only way to detect a cascade
-  /// (whose implicit receiver bypasses a member-chain on the inner
-  /// identifier entirely).
+  /// True if [node] is the `target` of its parent expression — any of
+  /// `PropertyAccess`, `MethodInvocation`, `IndexExpression`, or
+  /// `CascadeExpression`. Every chain shape carries its receiver on a
+  /// `target` field on the outer node, so checking the parent is the only
+  /// way to detect a cascade (whose implicit receiver bypasses a
+  /// member-chain on the inner identifier entirely).
   ///
   /// Used by both same-class ([_isChainPrefix]) and cross-class
   /// ([_isCrossClassChainPrefix]) branches.

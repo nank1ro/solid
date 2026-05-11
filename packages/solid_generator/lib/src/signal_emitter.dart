@@ -65,10 +65,14 @@ bool isCollectionSignalField(FieldModel f) {
 }
 
 /// Returns the empty-literal source for a collection-signal initializer
-/// when the source field has no explicit `= …` clause. `List<T>` → `const
-/// <T>[]`, `Set<T>` → `const <T>{}`, `Map<K, V>` → `const <K, V>{}`. The
-/// inner-type text is spliced verbatim so generic args round-trip
-/// (`List<List<int>>` → `const <List<int>>[]`).
+/// when the source field has no explicit `= …` clause:
+///
+/// - `List<T>` → `const <T>[]`
+/// - `Set<T>`  → `const <T>{}`
+/// - `Map<K, V>` → `const <K, V>{}`
+///
+/// The inner-type text is spliced verbatim so generic args round-trip —
+/// `List<List<int>>` → `const <List<int>>[]`.
 String _emptyCollectionLiteral(CollectionSignalKind kind) {
   switch (kind.ctorName) {
     case 'ListSignal':
