@@ -64,6 +64,18 @@ class SourceEdit {
 /// config object. Empty set → no-op for callers whose `build` body does not
 /// change scope (state-class / plain-class).
 ///
+/// [collectionFields] is the subset of [reactiveFields] whose emitted ctor
+/// is a collection signal (`ListSignal<T>` / `SetSignal<T>` /
+/// `MapSignal<K, V>`). Threaded through to the value-rewrite visitor so
+/// chain accesses and bare reads on these fields skip the `.value` append
+/// (they resolve through the collection-signal mixin directly). Writes
+/// still rewrite to `.value =`.
+///
+/// [classCollectionFields] is the cross-class collection-field map (class
+/// name → collection field names). Mirrors [classRegistry] for the
+/// collection-signal slice: `<envField>.<collectionField>` shapes skip
+/// `.value` and resolve through the mixin on the receiver chain directly.
+///
 /// [source] is the full source text of the input file. The returned string
 /// is the rewritten build method (from `@override` through the closing `}`),
 /// ready for the caller to embed into the emitted `State` class.
@@ -75,6 +87,8 @@ String rewriteBuildMethod(
   Map<String, Set<String>> classRegistry = const {},
   Map<String, String> environmentFields = const {},
   Set<String> widgetBoundFields = const {},
+  Set<String> collectionFields = const {},
+  Map<String, Set<String>> classCollectionFields = const {},
 }) {
   final methodStart = buildMethod.offset;
   final methodEnd = buildMethod.end;
@@ -88,6 +102,8 @@ String rewriteBuildMethod(
     classRegistry: classRegistry,
     environmentFields: environmentFields,
     widgetBoundFields: widgetBoundFields,
+    collectionFields: collectionFields,
+    classCollectionFields: classCollectionFields,
   );
   final wrapNodes = computeWrapSet(
     buildMethod,

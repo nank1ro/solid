@@ -26,6 +26,7 @@ RewriteResult rewriteStatelessWidget(
   List<QueryModel> solidQueries,
   List<EnvironmentModel> solidEnvironments,
   Map<String, Set<String>> classRegistry,
+  Map<String, Set<String>> classCollectionFields,
   String source,
 ) {
   final className = classDecl.name.lexeme;
@@ -33,6 +34,14 @@ RewriteResult rewriteStatelessWidget(
   final reactiveNames = <String>{
     ...solidFields.map((f) => f.fieldName),
     ...solidGetters.map((g) => g.getterName),
+  };
+  // Subset of `reactiveNames` whose emitter produces a collection signal
+  // (`ListSignal<T>` / `SetSignal<T>` / `MapSignal<K, V>`). Used by the
+  // value-rewriter to skip `.value` on chain accesses and bare reads of
+  // these fields — the mixin API resolves through the signal directly.
+  final collectionNames = <String>{
+    for (final f in solidFields)
+      if (isCollectionSignalField(f)) f.fieldName,
   };
   // Query call expressions in `build` are tracked reads. Names are kept
   // separate from `reactiveNames` so the `.value` rewrite does not fire on
@@ -88,6 +97,8 @@ RewriteResult rewriteStatelessWidget(
     classRegistry: classRegistry,
     environmentFields: environmentFields,
     widgetBoundFields: widgetBoundForBuild,
+    collectionFields: collectionNames,
+    classCollectionFields: classCollectionFields,
   );
 
   final reactiveBlock = _emitReactiveBlock(
@@ -116,17 +127,44 @@ RewriteResult rewriteStatelessWidget(
     buildMethodText: buildMethodText,
   );
 
-  // `Signal` and `SignalBuilder` are only emitted when there's a same-class
-  // reactive declaration to wrap. An env-only class (simple-environment shape)
-  // has no Signal/SignalBuilder reference in its lowered output and so does
-  // NOT pull in `flutter_solidart`.
+  // `Signal` and `SignalBuilder` are emitted when EITHER the class has its
+  // own same-class reactive declaration OR the build body wraps a
+  // cross-class tracked read in `SignalBuilder` (the env-injected receiver
+  // shape — the consumer has no own state but reads through to a sibling
+  // class's `@SolidState`). The textual scan on `buildMethodText` catches
+  // the cross-class case without re-walking the AST.
   final hasReactive =
       solidFields.isNotEmpty ||
       solidGetters.isNotEmpty ||
       solidQueries.isNotEmpty;
+  final buildEmitsSignalBuilder = buildMethodText.contains('SignalBuilder(');
+  // A field's emitted ctor is one of: Signal / ListSignal / SetSignal /
+  // MapSignal. Collection emitters bypass `Signal` entirely, so the import
+  // set follows the per-field decision rather than blanket-adding `Signal`.
+  final hasScalarSignalField = solidFields.any(
+    (f) => !isCollectionSignalField(f),
+  );
+  final hasListSignalField = solidFields.any(
+    (f) =>
+        isCollectionSignalField(f) &&
+        parseCollectionTypeText(f.typeText)?.ctorName == 'ListSignal',
+  );
+  final hasSetSignalField = solidFields.any(
+    (f) =>
+        isCollectionSignalField(f) &&
+        parseCollectionTypeText(f.typeText)?.ctorName == 'SetSignal',
+  );
+  final hasMapSignalField = solidFields.any(
+    (f) =>
+        isCollectionSignalField(f) &&
+        parseCollectionTypeText(f.typeText)?.ctorName == 'MapSignal',
+  );
   final solidartNames = <String>{
-    if (solidFields.isNotEmpty) 'Signal',
-    if (hasReactive) 'SignalBuilder',
+    if (hasScalarSignalField) 'Signal',
+    if (hasListSignalField) 'ListSignal',
+    if (hasSetSignalField) 'SetSignal',
+    if (hasMapSignalField) 'MapSignal',
+    if (hasReactive || buildEmitsSignalBuilder) 'SignalBuilder',
   };
   if (solidGetters.isNotEmpty) solidartNames.add('Computed');
   if (solidEffects.isNotEmpty) solidartNames.add('Effect');

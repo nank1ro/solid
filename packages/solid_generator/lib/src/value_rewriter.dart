@@ -87,9 +87,13 @@ bool _isOnPrefixedCallbackName(String name) {
 /// [reactiveFields] is the name-set of `@SolidState` fields and getters
 /// declared on the enclosing class. The rewrite is name-based; the
 /// `type_aware_no_double_append` golden locks in the no-double-append
-/// guarantee at the name-set boundary. Full type-driven resolution
-/// (`buildStep.resolver.compilationUnitFor` + `staticType` subtype queries)
-/// is deferred — it is the architectural prerequisite for shadowing support.
+/// guarantee at the name-set boundary. Cross-file resolution for
+/// `@SolidEnvironment` types is now wired via `BuildStep.resolver` (see
+/// `builder.dart::_populateCrossFileTypes`) — `[classRegistry]` and
+/// `[classCollectionFields]` already include cross-file entries by the
+/// time this function is called. Full `staticType` subtype queries
+/// (covering arbitrary parameter / local-receiver shapes) remain deferred
+/// — they are the architectural prerequisite for shadowing support.
 ///
 /// [queryNames] is the name-set of `@SolidQuery` methods declared on the
 /// enclosing class. Zero-argument `MethodInvocation`s whose target is
@@ -141,6 +145,8 @@ ValueRewriteResult collectValueEdits(
   Map<String, Set<String>> classRegistry = const {},
   Map<String, String> environmentFields = const {},
   Set<String> widgetBoundFields = const {},
+  Set<String> collectionFields = const {},
+  Map<String, Set<String>> classCollectionFields = const {},
 }) {
   final visitor = _ValueRewriteVisitor(
     reactiveFields,
@@ -149,6 +155,8 @@ ValueRewriteResult collectValueEdits(
     classRegistry,
     environmentFields,
     widgetBoundFields,
+    collectionFields,
+    classCollectionFields,
   );
   node.accept(visitor);
   return ValueRewriteResult(
@@ -207,6 +215,8 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
     this._classRegistry,
     this._environmentFields,
     this._widgetBoundFields,
+    this._collectionFields,
+    this._classCollectionFields,
   );
 
   final Set<String> _reactiveFields;
@@ -247,6 +257,23 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
   /// set before passing). Empty for callers that do NOT move bodies between
   /// scopes (state-class rewriter, plain-class rewriter).
   final Set<String> _widgetBoundFields;
+
+  /// Same-class `@SolidState` field names whose emitted constructor is a
+  /// collection signal (`ListSignal<T>` / `SetSignal<T>` / `MapSignal<K, V>`).
+  /// Subset of [_reactiveFields]. Collection signals expose the full
+  /// `ListMixin` / `SetMixin` / `MapMixin` API directly on the signal, so
+  /// chain accesses (`xs.length`, `xs.add(x)`, `xs[i]`) and bare-read
+  /// references (`final l = xs;`) do NOT receive a `.value` append. Writes
+  /// (`xs = newList`) still rewrite to `xs.value = newList` via the Signal
+  /// setter — that path is shared with scalar fields.
+  final Set<String> _collectionFields;
+
+  /// Cross-class collection-field map (class name → collection field names).
+  /// Subset of [_classRegistry]. Drives the same no-`.value`-on-chain rule as
+  /// [_collectionFields] but for `<envField>.<collectionField>` shapes —
+  /// `controller.todos.length` resolves to `ListSignal<Todo>.length` and
+  /// must NOT receive a `.value` append between `todos` and `length`.
+  final Map<String, Set<String>> _classCollectionFields;
 
   final List<ValueEdit> edits = [];
   final List<int> trackedReadOffsets = [];
@@ -435,6 +462,19 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
   /// [_isShadowed] (which covers only `visitFunctionExpression` and
   /// block-local declarations), so the lookup ORDER carries the
   /// parameter-vs-field shadowing semantics here.
+  ///
+  /// Collection-field branch: if the resolved field is in
+  /// [_classCollectionFields] for its receiver type AND the whole
+  /// `<receiver>.<field>` shape is used as the prefix of a longer chain
+  /// (parent is `PropertyAccess` / `MethodInvocation` / `IndexExpression` /
+  /// `PrefixedIdentifier`), the rewrite skips the `.value` append — the
+  /// trailing `.length` / `.where(…)` / `[i]` resolves through the
+  /// collection-signal mixin directly. For a bare cross-class collection
+  /// read (used as the whole return value, argument, or RHS), `.value` is
+  /// inserted so the reactive context subscribes — without it, the
+  /// returned `ListSignal` reference is identity-stable and a `Computed`
+  /// body would never invalidate. Tracking always fires so the surrounding
+  /// widget subtree is wrapped in `SignalBuilder`.
   void _maybeRewriteCrossClass(PrefixedIdentifier node) {
     if (_isShadowed(node.prefix.name)) return;
     if (_isAccessedValueProperty(node.identifier)) return;
@@ -445,10 +485,35 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
     final fieldsOfType = _classRegistry[declaredTypeName];
     if (fieldsOfType == null) return;
     if (!fieldsOfType.contains(node.identifier.name)) return;
-    edits.add(ValueEdit(node.end, node.end, '.value'));
+    final collectionFieldsOfType = _classCollectionFields[declaredTypeName];
+    final isCollection =
+        collectionFieldsOfType != null &&
+        collectionFieldsOfType.contains(node.identifier.name);
+    final isChainPrefix = _isCrossClassChainPrefix(node);
+    if (!isCollection || !isChainPrefix) {
+      edits.add(ValueEdit(node.end, node.end, '.value'));
+    }
     if (_untrackedDepth == 0) {
       trackedReadOffsets.add(node.offset);
     }
+  }
+
+  /// True if [node] (a `<receiver>.<field>` PrefixedIdentifier) is itself
+  /// used as the prefix of a longer chain — i.e. the parent expression
+  /// reaches a member access, method invocation, or index expression on
+  /// top of it. Mirrors [_isChainPrefix] for the same-class branch.
+  ///
+  /// `PrefixedIdentifier.prefix` is always a `SimpleIdentifier`, so an
+  /// `a.b.c` chain parses as `PropertyAccess(target=PrefixedIdentifier(a,
+  /// b), property=c)` — never as nested `PrefixedIdentifier`s. The
+  /// PropertyAccess / MethodInvocation / IndexExpression branches cover
+  /// every legal chain-prefix shape.
+  bool _isCrossClassChainPrefix(PrefixedIdentifier node) {
+    final parent = node.parent;
+    if (parent is PropertyAccess && parent.target == node) return true;
+    if (parent is MethodInvocation && parent.target == node) return true;
+    if (parent is IndexExpression && parent.target == node) return true;
+    return false;
   }
 
   /// If [prefix] resolves to a method/function parameter declared with a
@@ -532,6 +597,36 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
     final name = node.name;
     if (_isTrackedField(name)) {
       if (_isAccessedValueProperty(node)) return;
+
+      // Collection-typed `@SolidState` fields: ListSignal / SetSignal /
+      // MapSignal expose their underlying collection API directly via
+      // mixin, so chain accesses (`xs.length`, `xs.add(x)`, `xs[i]`)
+      // resolve through the mixin and notify subscribers from inside the
+      // reactive primitive. A bare reference is different — the local
+      // variable, return value, or argument captures the ListSignal
+      // object identity, which does NOT subscribe the surrounding
+      // reactive context (a `Computed` body that just returns the
+      // collection signal would never invalidate). So bare reads STILL
+      // get the standard `.value` append; only chain prefixes skip it.
+      if (_collectionFields.contains(name)) {
+        if (_isChainPrefix(node)) {
+          if (_untrackedDepth == 0) {
+            trackedReadOffsets.add(node.offset);
+            _recordTrackedReadName(name);
+          }
+          return;
+        }
+        if (!_isBareReferenceToField(node)) return;
+        edits.add(ValueEdit(node.end, node.end, '.value'));
+        final isGet = node.inGetterContext();
+        final isSet = node.inSetterContext();
+        if (isGet && !isSet && _untrackedDepth == 0) {
+          trackedReadOffsets.add(node.offset);
+          _recordTrackedReadName(name);
+        }
+        return;
+      }
+
       if (!_isBareReferenceToField(node)) return;
 
       edits.add(ValueEdit(node.end, node.end, '.value'));
@@ -555,6 +650,22 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
       if (!_isBareReferenceToField(node)) return;
       edits.add(ValueEdit(node.offset, node.offset, 'widget.'));
     }
+  }
+
+  /// True if [id] occupies the receiver position of a chain access —
+  /// the prefix of a `PrefixedIdentifier`, the target of a `PropertyAccess`
+  /// / `MethodInvocation` / `IndexExpression`. Used by the collection-field
+  /// branch of [visitSimpleIdentifier] to recognise `xs.<member>`,
+  /// `xs.method(...)`, `xs[i]`, and `xs.cascade...` shapes, all of which
+  /// resolve through the collection-signal mixin and must NOT receive a
+  /// `.value` append.
+  bool _isChainPrefix(SimpleIdentifier id) {
+    final parent = id.parent;
+    if (parent is PrefixedIdentifier && parent.prefix == id) return true;
+    if (parent is PropertyAccess && parent.target == id) return true;
+    if (parent is MethodInvocation && parent.target == id) return true;
+    if (parent is IndexExpression && parent.target == id) return true;
+    return false;
   }
 
   /// Appends [name] to [trackedReadNames] iff not already present, preserving

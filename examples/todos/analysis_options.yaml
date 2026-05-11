@@ -1,0 +1,20 @@
+include: package:very_good_analysis/analysis_options.yaml
+analyzer:
+  # `source/` is the user-written input to the Solid generator. The
+  # analyzer resolves `package:todos_example/...` imports to the generated
+  # `lib/` types (post-transformation), so cross-class chain reads in
+  # `source/` appear as type errors against `Signal<T>` / `ListSignal<T>`
+  # — which the generator rewrites in lib/. Excluding the directory keeps
+  # the IDE focused on the actual runnable output without losing source
+  # control of the inputs (still under git).
+  exclude:
+    - source/**
+  errors:
+    must_be_immutable: ignore
+    always_put_required_named_parameters_first: ignore
+    invalid_annotation_target: ignore
+    avoid_print: ignore
+    unnecessary_statements: ignore
+linter:
+  rules:
+    public_member_api_docs: false

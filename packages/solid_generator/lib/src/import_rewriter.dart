@@ -36,6 +36,12 @@ const Set<String> solidartNames = {
   'Resource',
   'SignalBuilder',
   'SolidartConfig',
+  // Collection-typed `@SolidState` fields lower to one of these
+  // (`List<T>` → ListSignal, `Set<T>` → SetSignal, `Map<K, V>` → MapSignal)
+  // via `parseCollectionTypeText` in `signal_emitter.dart`.
+  'ListSignal',
+  'SetSignal',
+  'MapSignal',
 };
 
 /// One annotated class's contribution to the generated output.

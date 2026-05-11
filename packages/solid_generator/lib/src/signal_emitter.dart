@@ -8,29 +8,97 @@ import 'package:solid_generator/src/transformation_error.dart';
 
 /// Shared signal-emission helpers used by every class-kind rewriter.
 
+/// Parsed shape of a collection-type `@SolidState` field — the constructor
+/// name (`'ListSignal'` / `'SetSignal'` / `'MapSignal'`) and the inner type-
+/// argument text (e.g. `'Todo'` for `List<Todo>`, `'String, int'` for
+/// `Map<String, int>`).
+///
+/// Returned by [parseCollectionTypeText]; consumed by [emitSignalField] and
+/// the rewriters that build the collection-fields name set.
+typedef CollectionSignalKind = ({String ctorName, String innerType});
+
+/// Returns the collection-signal kind for [typeText] when it names a
+/// top-level `List<T>`, `Set<T>`, or `Map<K, V>` — otherwise `null`.
+///
+/// Pure textual: matches `^(List|Set|Map)<...>$` shapes. Nested generics
+/// (`List<List<int>>`) round-trip through the inner-text slice. The match
+/// is conservative — `Iterable<int>`, namespace-prefixed aliases
+/// (`core.List<int>`), and user-defined names that happen to start with
+/// `List<` (none exist in `dart:core`) are intentionally NOT matched and
+/// fall through to plain `Signal<T>`.
+CollectionSignalKind? parseCollectionTypeText(String typeText) {
+  if (typeText.startsWith('List<') && typeText.endsWith('>')) {
+    return (
+      ctorName: 'ListSignal',
+      innerType: typeText.substring(5, typeText.length - 1),
+    );
+  }
+  if (typeText.startsWith('Set<') && typeText.endsWith('>')) {
+    return (
+      ctorName: 'SetSignal',
+      innerType: typeText.substring(4, typeText.length - 1),
+    );
+  }
+  if (typeText.startsWith('Map<') && typeText.endsWith('>')) {
+    return (
+      ctorName: 'MapSignal',
+      innerType: typeText.substring(4, typeText.length - 1),
+    );
+  }
+  return null;
+}
+
+/// True iff [emitSignalField] would emit a collection-signal constructor
+/// (`ListSignal` / `SetSignal` / `MapSignal`) for [f]. The contract: the
+/// declared type matches [parseCollectionTypeText], the field has an
+/// initializer (collection signals have no `.lazy` ctor), and the field is
+/// non-nullable (collection signals reject null). Late + nullable + no-init
+/// fields fall back to plain `Signal<T>` and are reported as non-collection
+/// here so callers don't include them in the same-class collection set used
+/// by the value-rewriter's no-`.value`-on-chain rule.
+bool isCollectionSignalField(FieldModel f) {
+  if (f.isLate) return false;
+  if (f.isNullable) return false;
+  if (f.initializerText.isEmpty) return false;
+  return parseCollectionTypeText(f.typeText) != null;
+}
+
 /// Emits one `[late ]final <name> = Signal<T>(…, name: '<debug>');` line.
 ///
 /// Three cases, in priority order:
 ///
 /// 1. **Has initializer** →
-///    `Signal<T>(<init>, name: '<debug>')`. The `late` modifier (if any)
-///    is preserved verbatim so that `Signal` construction itself is deferred
-///    to first access.
+///    `Signal<T>(<init>, name: '<debug>')` — OR `ListSignal<T>` / `SetSignal<T>`
+///    / `MapSignal<K, V>` when the declared type is a collection
+///    (per [parseCollectionTypeText]) AND the field is non-nullable.
+///    The `late` modifier (if any) is preserved verbatim so that `Signal`
+///    construction itself is deferred to first access.
 /// 2. **No initializer, nullable type** →
 ///    `Signal<T?>(null, name: '<debug>')`. No `late` needed because `null`
-///    is a valid default.
+///    is a valid default. Collection signals are not used here because they
+///    reject null at the signal level.
 /// 3. **No initializer, non-nullable type** →
 ///    `Signal<T>.lazy(name: '<debug>')`. The source field must have been
 ///    declared `late` (the only way Dart accepts a non-nullable field with
 ///    no initializer); the modifier is preserved on the emitted field so
 ///    reads before the first write throw `StateError`, matching Dart's own
-///    `late` semantics.
+///    `late` semantics. Collection signals are not used here because they
+///    have no `.lazy` constructor.
 String emitSignalField(FieldModel f) {
   final debugName = f.annotationName ?? f.fieldName;
   final lateKw = f.isLate ? 'late ' : '';
   final String ctor;
   if (f.initializerText.isNotEmpty) {
-    ctor = "Signal<${f.typeText}>(${f.initializerText}, name: '$debugName')";
+    final collection = isCollectionSignalField(f)
+        ? parseCollectionTypeText(f.typeText)
+        : null;
+    if (collection != null) {
+      ctor =
+          '${collection.ctorName}<${collection.innerType}>'
+          "(${f.initializerText}, name: '$debugName')";
+    } else {
+      ctor = "Signal<${f.typeText}>(${f.initializerText}, name: '$debugName')";
+    }
   } else if (f.isNullable) {
     ctor = "Signal<${f.typeText}>(null, name: '$debugName')";
   } else {
@@ -399,4 +467,65 @@ String emitConstructor(
   }
   buffer.write('  }');
   return buffer.toString();
+}
+
+/// Splices Effect-materialization reads (`<effectName>;`, in declaration
+/// order) into the END of a user-declared plain-class constructor body,
+/// after any user statements. The user's body is preserved verbatim — only
+/// the trailing `}` is shifted to make room for the materialization lines.
+///
+/// Empty bodies (`;` / `{}`) are normalized to `{}` with the
+/// materialization lines as the only contents. Initializer lists, factory
+/// keywords, named/redirecting ctors, and `const` modifiers round-trip
+/// verbatim; the merge only edits the BODY, not the header.
+///
+/// `const` is stripped from the lowered constructor: a plain class lowered
+/// by this rewriter holds mutable `Signal<T>` / `Computed<T>` / `Effect`
+/// fields, so `const ClassName()` is no longer compile-valid. Same rule as
+/// the StatelessWidget → State split.
+///
+/// Throws [CodeGenerationError] for expression-body ctors (`=> …`) — Dart
+/// constructors cannot have expression bodies, so this is a defense-in-
+/// depth guard rather than an expected user path.
+String mergeConstructor(
+  ConstructorDeclaration ctor,
+  List<String> effectNamesInDeclarationOrder,
+  String source,
+  String className,
+) {
+  final body = ctor.body;
+  // Slice the constructor header verbatim, then attach a normalised body.
+  // The header includes constructor name + parameter list + initializer
+  // list (everything from `ctor.offset` up to the body's start).
+  final headerEnd = body.offset;
+  var header = source.substring(ctor.offset, headerEnd);
+  // Strip a leading `const ` from the header — the class fields are no
+  // longer const-eligible (they hold Signal/Computed/Effect instances).
+  // Match `const` followed by whitespace; only the user-declared modifier
+  // is stripped, not appearances elsewhere in the header (initializer
+  // list literals etc.).
+  header = header.replaceFirst(RegExp(r'^\s*const\s+'), '');
+  final reads = effectNamesInDeclarationOrder
+      .map((name) => '    $name;')
+      .join('\n');
+  if (body is EmptyFunctionBody) {
+    // `Foo();` → `Foo() { ... }`.
+    if (reads.isEmpty) return source.substring(ctor.offset, ctor.end);
+    return '$header{\n$reads\n  }';
+  }
+  if (body is BlockFunctionBody) {
+    final rbrace = body.block.rightBracket.offset;
+    final bodyPrefix = source.substring(body.offset, rbrace);
+    if (reads.isEmpty) {
+      return '$header${source.substring(body.offset, body.end)}';
+    }
+    // Splice `\n<reads>\n` immediately before the closing `}`.
+    return '$header$bodyPrefix\n$reads\n  }';
+  }
+  throw CodeGenerationError(
+    'plain-class constructor must have a block body or no body for '
+    'Effect-materialization merge',
+    null,
+    className,
+  );
 }

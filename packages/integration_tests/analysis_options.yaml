@@ -1,5 +1,12 @@
 include: package:very_good_analysis/analysis_options.yaml
 analyzer:
+  # `source/` is generator input — the analyzer resolves
+  # `package:integration_tests/...` imports to the generated `lib/` types,
+  # so cross-file source files appear as type errors against `Signal<T>`
+  # / `ListSignal<T>` (which the generator rewrites in lib/). Exclude the
+  # directory to keep the IDE focused on the actual runnable output.
+  exclude:
+    - source/**
   errors:
     must_be_immutable: ignore
     always_put_required_named_parameters_first: ignore

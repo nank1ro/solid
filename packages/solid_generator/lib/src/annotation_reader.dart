@@ -124,6 +124,9 @@ GetterModel? readSolidStateGetter(
   Set<String> reactiveFields,
   String source, {
   Set<String> queryNames = const {},
+  Map<String, Set<String>> classRegistry = const {},
+  Map<String, Set<String>> classCollectionFields = const {},
+  Map<String, String> environmentFields = const {},
 }) {
   if (!decl.isGetter || decl.isStatic) return null;
   final annotation = findAnnotationByName(solidStateName, decl.metadata);
@@ -158,6 +161,9 @@ GetterModel? readSolidStateGetter(
         '@SolidState getter must have an expression body (=> ...) or a '
         'block body ({ ... }); abstract and native bodies are not supported',
     queryNames: queryNames,
+    classRegistry: classRegistry,
+    classCollectionFields: classCollectionFields,
+    environmentFields: environmentFields,
   );
 
   return GetterModel(
@@ -207,6 +213,9 @@ _readReactiveBody(
   required String unsupportedBodyError,
   Set<String> queryNames = const {},
   String? currentMember,
+  Map<String, Set<String>> classRegistry = const {},
+  Map<String, Set<String>> classCollectionFields = const {},
+  Map<String, String> environmentFields = const {},
 }) {
   final AstNode node;
   final bool isBlockBody;
@@ -225,14 +234,19 @@ _readReactiveBody(
     source,
     queryNames: queryNames,
     currentMember: currentMember,
+    classRegistry: classRegistry,
+    classCollectionFields: classCollectionFields,
+    environmentFields: environmentFields,
   );
   // Zero-deps Effect / Computed are rejected. A reactive dep is either a
-  // `.value`-rewritten state read OR a tracked query-call invocation.
-  // Queries pass `null` here because the deps requirement is waived for
-  // them.
+  // `.value`-rewritten state read, a tracked query-call invocation, OR a
+  // cross-class read that produced a tracked-read offset (cross-class reads
+  // record offsets even when the rewrite emits no edit — e.g. `xs.length`
+  // on a ListSignal field reached via env-injection).
   if (emptyDepsError != null &&
       result.edits.isEmpty &&
-      result.trackedQueryNames.isEmpty) {
+      result.trackedQueryNames.isEmpty &&
+      result.trackedReadOffsets.isEmpty) {
     throw CodeGenerationError(emptyDepsError, null, memberName);
   }
   final bodyText = applyEditsToRange(
@@ -269,6 +283,9 @@ EffectModel? readSolidEffectMethod(
   Set<String> reactiveFields,
   String source, {
   Set<String> queryNames = const {},
+  Map<String, Set<String>> classRegistry = const {},
+  Map<String, Set<String>> classCollectionFields = const {},
+  Map<String, String> environmentFields = const {},
 }) {
   if (decl.isGetter || decl.isSetter || decl.isStatic) return null;
   final annotation = findAnnotationByName(solidEffectName, decl.metadata);
@@ -297,6 +314,9 @@ EffectModel? readSolidEffectMethod(
         '@SolidEffect method must have an expression body (=> ...) or a '
         'block body ({ ... }); abstract and native bodies are not supported',
     queryNames: queryNames,
+    classRegistry: classRegistry,
+    classCollectionFields: classCollectionFields,
+    environmentFields: environmentFields,
   );
 
   return EffectModel(
@@ -328,6 +348,9 @@ QueryModel? readSolidQueryMethod(
   Set<String> reactiveFields,
   String source, {
   Set<String> queryNames = const {},
+  Map<String, Set<String>> classRegistry = const {},
+  Map<String, Set<String>> classCollectionFields = const {},
+  Map<String, String> environmentFields = const {},
 }) {
   if (decl.isGetter || decl.isSetter || decl.isStatic) return null;
   final annotation = findAnnotationByName(solidQueryName, decl.metadata);
@@ -365,6 +388,9 @@ QueryModel? readSolidQueryMethod(
         'block body ({ ... }); abstract and native bodies are not supported',
     queryNames: queryNames,
     currentMember: methodName,
+    classRegistry: classRegistry,
+    classCollectionFields: classCollectionFields,
+    environmentFields: environmentFields,
   );
 
   // A self-cycle is rejected at codegen — solidart would re-run

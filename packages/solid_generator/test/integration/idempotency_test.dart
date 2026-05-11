@@ -11,6 +11,13 @@ void main() {
   group('idempotency', () {
     for (final name in goldenNames) {
       test('$name produces byte-identical output across two runs', () async {
+        if (await isMultiFileFixture(name)) {
+          final inputs = await loadGoldenMultiInput(name);
+          final first = await runMultiFileBuilderCapture(name, inputs);
+          final second = await runMultiFileBuilderCapture(name, inputs);
+          expect(second, equals(first));
+          return;
+        }
         final input = await loadGoldenInput(name);
 
         final first = await runBuilderCapture(name, input);
