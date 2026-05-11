@@ -244,9 +244,9 @@ Map<String, Set<String>> _prescanClassRegistry(CompilationUnit unit) {
 ///
 /// Mirrors the collection-detection rule in `signal_emitter.dart` so the
 /// cross-file scan agrees with same-file emission: a field qualifies iff
-/// (a) the declared type matches `parseCollectionTypeText`, (b) it has an
-/// initializer (collection signals have no `.lazy` ctor), and (c) it is
-/// non-nullable (collection signals reject null).
+/// the declared type matches `parseCollectionTypeText` AND it is
+/// non-nullable. `late` is irrelevant — collection signals are emitted
+/// even for `late` fields (with an empty default literal).
 Map<String, Set<String>> _prescanClassCollectionFields(CompilationUnit unit) {
   final registry = <String, Set<String>>{};
   for (final decl in unit.declarations) {
@@ -258,9 +258,7 @@ Map<String, Set<String>> _prescanClassCollectionFields(CompilationUnit unit) {
       final variable = member.fields.variables.first;
       final type = member.fields.type;
       if (type == null) continue;
-      if (member.fields.isLate) continue;
       if (type.question != null) continue;
-      if (variable.initializer == null) continue;
       if (parseCollectionTypeText(type.toSource()) == null) continue;
       names.add(variable.name.lexeme);
     }
@@ -753,13 +751,12 @@ Future<void> _populateCrossFileTypes(
           final fieldName = variable.name.lexeme;
           scalarNames.add(fieldName);
           // Mirror the collection-detection rule in signal_emitter.dart so
-          // the cross-file collection set agrees with the same-file one.
+          // the cross-file collection set agrees with the same-file one:
+          // collection signals are emitted for any non-nullable `List<T>`
+          // / `Set<T>` / `Map<K, V>` field — `late` does not exclude.
           final type = member.fields.type;
           if (type == null) continue;
-          final isNullable = type.question != null;
-          final hasInitializer = variable.initializer != null;
-          final isLate = member.fields.isLate;
-          if (isLate || isNullable || !hasInitializer) continue;
+          if (type.question != null) continue;
           if (parseCollectionTypeText(type.toSource()) != null) {
             collectionNames.add(fieldName);
           }

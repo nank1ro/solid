@@ -50,55 +50,72 @@ CollectionSignalKind? parseCollectionTypeText(String typeText) {
 
 /// True iff [emitSignalField] would emit a collection-signal constructor
 /// (`ListSignal` / `SetSignal` / `MapSignal`) for [f]. The contract: the
-/// declared type matches [parseCollectionTypeText], the field has an
-/// initializer (collection signals have no `.lazy` ctor), and the field is
-/// non-nullable (collection signals reject null). Late + nullable + no-init
-/// fields fall back to plain `Signal<T>` and are reported as non-collection
-/// here so callers don't include them in the same-class collection set used
-/// by the value-rewriter's no-`.value`-on-chain rule.
+/// declared type matches [parseCollectionTypeText] AND the field is
+/// non-nullable.
+///
+/// `late` is NOT a barrier — collection signals are mutated in place (the
+/// reference stays final; the contents change via mixin methods), so a
+/// `late List<T> xs;` source field can still lower to a `ListSignal<T>`
+/// initialised to an empty literal. Only nullable types still fall back
+/// to plain `Signal<T?>` because collection signals reject null at the
+/// signal level.
 bool isCollectionSignalField(FieldModel f) {
-  if (f.isLate) return false;
   if (f.isNullable) return false;
-  if (f.initializerText.isEmpty) return false;
   return parseCollectionTypeText(f.typeText) != null;
+}
+
+/// Returns the empty-literal source for a collection-signal initializer
+/// when the source field has no explicit `= …` clause. `List<T>` → `const
+/// <T>[]`, `Set<T>` → `const <T>{}`, `Map<K, V>` → `const <K, V>{}`. The
+/// inner-type text is spliced verbatim so generic args round-trip
+/// (`List<List<int>>` → `const <List<int>>[]`).
+String _emptyCollectionLiteral(CollectionSignalKind kind) {
+  switch (kind.ctorName) {
+    case 'ListSignal':
+      return 'const <${kind.innerType}>[]';
+    case 'SetSignal':
+    case 'MapSignal':
+      return 'const <${kind.innerType}>{}';
+  }
+  // Unreachable — `parseCollectionTypeText` only produces these three names.
+  throw StateError('unknown collection ctor: ${kind.ctorName}');
 }
 
 /// Emits one `[late ]final <name> = Signal<T>(…, name: '<debug>');` line.
 ///
-/// Three cases, in priority order:
+/// Collection fields (`List<T>` / `Set<T>` / `Map<K, V>`, non-nullable)
+/// lower to `ListSignal<T>` / `SetSignal<T>` / `MapSignal<K, V>` regardless
+/// of `late`. The user's `= …` clause is spliced verbatim when present;
+/// otherwise an empty literal (`const <T>[]` / `const <T>{}` /
+/// `const <K, V>{}`) is used. The collection-signal mixin tracks reads
+/// through the same channels `.value` would, so `late` adds no value here
+/// (and collection signals don't expose `.lazy` anyway).
 ///
-/// 1. **Has initializer** →
-///    `Signal<T>(<init>, name: '<debug>')` — OR `ListSignal<T>` / `SetSignal<T>`
-///    / `MapSignal<K, V>` when the declared type is a collection
-///    (per [parseCollectionTypeText]) AND the field is non-nullable.
-///    The `late` modifier (if any) is preserved verbatim so that `Signal`
+/// Non-collection (scalar) cases, in priority order:
+///
+/// 1. **Has initializer** → `Signal<T>(<init>, name: '<debug>')`. The
+///    `late` modifier (if any) is preserved verbatim so that `Signal`
 ///    construction itself is deferred to first access.
-/// 2. **No initializer, nullable type** →
-///    `Signal<T?>(null, name: '<debug>')`. No `late` needed because `null`
-///    is a valid default. Collection signals are not used here because they
-///    reject null at the signal level.
+/// 2. **No initializer, nullable type** → `Signal<T?>(null, name: '…')`.
+///    No `late` needed because `null` is a valid default.
 /// 3. **No initializer, non-nullable type** →
-///    `Signal<T>.lazy(name: '<debug>')`. The source field must have been
-///    declared `late` (the only way Dart accepts a non-nullable field with
-///    no initializer); the modifier is preserved on the emitted field so
-///    reads before the first write throw `StateError`, matching Dart's own
-///    `late` semantics. Collection signals are not used here because they
-///    have no `.lazy` constructor.
+///    `Signal<T>.lazy(name: '…')`. The source field must have been
+///    declared `late`; reads before the first write throw `StateError`,
+///    matching Dart's own `late` semantics.
 String emitSignalField(FieldModel f) {
   final debugName = f.annotationName ?? f.fieldName;
   final lateKw = f.isLate ? 'late ' : '';
   final String ctor;
-  if (f.initializerText.isNotEmpty) {
-    final collection = isCollectionSignalField(f)
-        ? parseCollectionTypeText(f.typeText)
-        : null;
-    if (collection != null) {
-      ctor =
-          '${collection.ctorName}<${collection.innerType}>'
-          "(${f.initializerText}, name: '$debugName')";
-    } else {
-      ctor = "Signal<${f.typeText}>(${f.initializerText}, name: '$debugName')";
-    }
+  if (isCollectionSignalField(f)) {
+    final collection = parseCollectionTypeText(f.typeText)!;
+    final init = f.initializerText.isNotEmpty
+        ? f.initializerText
+        : _emptyCollectionLiteral(collection);
+    ctor =
+        '${collection.ctorName}<${collection.innerType}>'
+        "($init, name: '$debugName')";
+  } else if (f.initializerText.isNotEmpty) {
+    ctor = "Signal<${f.typeText}>(${f.initializerText}, name: '$debugName')";
   } else if (f.isNullable) {
     ctor = "Signal<${f.typeText}>(null, name: '$debugName')";
   } else {

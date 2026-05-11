@@ -570,7 +570,7 @@ final counter = Signal<int>(0, name: 'myCounter');
 
 ### 4.4b Collection field → ListSignal / SetSignal / MapSignal
 
-When a `@SolidState` field's declared type is `List<T>`, `Set<T>`, or `Map<K, V>` and the field has an initializer (not `late`, not nullable), the generator emits `ListSignal<T>(<init>, name: '…')`, `SetSignal<T>(<init>, name: '…')`, or `MapSignal<K, V>(<init>, name: '…')` respectively.
+When a `@SolidState` field's declared type is `List<T>`, `Set<T>`, or `Map<K, V>` and the field is non-nullable, the generator emits `ListSignal<T>(<init>, name: '…')`, `SetSignal<T>(<init>, name: '…')`, or `MapSignal<K, V>(<init>, name: '…')` respectively. The `late` and `final` modifiers are not barriers: collection signals are mutated in place through their mixin (`ListMixin` / `SetMixin` / `MapMixin`) methods, so the reference being final — or its construction being lazy — doesn't affect reactivity.
 
 Input:
 
@@ -583,6 +583,16 @@ Set<String> tags = const {};
 
 @SolidState()
 Map<String, int> scores = const {};
+
+// late — no initializer — emitter supplies an empty literal for each.
+@SolidState()
+late List<int> ys;
+
+@SolidState()
+late Set<String> markers;
+
+@SolidState()
+late Map<String, int> hits;
 ```
 
 Output:
@@ -591,13 +601,16 @@ Output:
 final xs = ListSignal<int>(const [], name: 'xs');
 final tags = SetSignal<String>(const {}, name: 'tags');
 final scores = MapSignal<String, int>(const {}, name: 'scores');
+late final ys = ListSignal<int>(const <int>[], name: 'ys');
+late final markers = SetSignal<String>(const <String>{}, name: 'markers');
+late final hits = MapSignal<String, int>(const <String, int>{}, name: 'hits');
 ```
 
-`ListSignal<T>` / `SetSignal<T>` / `MapSignal<K, V>` extend `Signal<List<T>>` / `Signal<Set<T>>` / `Signal<Map<K, V>>` and mix in `ListMixin<T>` / `SetMixin<T>` / `MapMixin<K, V>`, exposing the full collection API directly on the signal. Chain reads (`xs.length`, `xs.where(...)`, `xs[i]`, `scores.containsKey(...)`) and direct mutations (`xs.add`, `xs.removeAt`, `xs[i] = v`, `scores[k] = v`) do not receive a `.value` insertion — the rewriter recognises collection fields and leaves the chain verbatim. Writes through the bare field name (`xs = newList`) still rewrite to `xs.value = newList` so the underlying Signal setter notifies subscribers.
+When the source has no `= …` clause, the emitter splices an empty literal (`const <T>[]` for `List`, `const <T>{}` for `Set`, `const <K, V>{}` for `Map`). The source `late` modifier is preserved on the emitted field so signal construction still defers to first access.
 
-Fallbacks (matching the scalar paths so the existing `late` / nullable rules still apply):
-- `@SolidState() late List<T> xs;` (no initializer) → `Signal<List<T>>.lazy(name: 'xs')` — collection signals have no `.lazy` constructor.
-- `@SolidState() List<T>? xs;` (nullable) → `Signal<List<T>?>(null, name: 'xs')` — collection signals reject null at the signal level.
+`ListSignal<T>` / `SetSignal<T>` / `MapSignal<K, V>` extend `Signal<List<T>>` / `Signal<Set<T>>` / `Signal<Map<K, V>>` and mix in `ListMixin<T>` / `SetMixin<T>` / `MapMixin<K, V>`, exposing the full collection API directly on the signal. Chain reads (`xs.length`, `xs.where(...)`, `xs[i]`, `scores.containsKey(...)`), direct mutations (`xs.add`, `xs.removeAt`, `xs[i] = v`, `scores[k] = v`), and cascades (`xs..add(1)..add(2)..sort()`) do not receive a `.value` insertion — the rewriter recognises collection fields and leaves the chain verbatim. Writes through the bare field name (`xs = newList`) still rewrite to `xs.value = newList` so the underlying Signal setter notifies subscribers.
+
+Nullable fallback: `T?` collection types fall back to plain `Signal<List<T>?>(null, name: 'xs')` — collection signals reject null at the signal level.
 
 Cross-class rule: when a `@SolidEnvironment late T x;` field's receiver type carries a `@SolidState` collection field on a sibling class (same file OR another file resolved via the import-pass), the cross-class chain rewrite skips the `.value` insertion between receiver and field — `controller.todos.length` resolves through `ListSignal<Todo>.length` directly. Tracking still fires so the surrounding widget subtree is wrapped in `SignalBuilder`.
 

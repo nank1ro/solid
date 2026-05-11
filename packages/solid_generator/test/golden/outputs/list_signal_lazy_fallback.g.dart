@@ -1,18 +1,22 @@
 import 'package:flutter/widgets.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
 
-class LateListProbe extends StatefulWidget {
-  const LateListProbe({super.key});
+class LateCollectionProbe extends StatefulWidget {
+  const LateCollectionProbe({super.key});
 
   @override
-  State<LateListProbe> createState() => _LateListProbeState();
+  State<LateCollectionProbe> createState() => _LateCollectionProbeState();
 }
 
-class _LateListProbeState extends State<LateListProbe> {
-  late final xs = Signal<List<int>>.lazy(name: 'xs');
+class _LateCollectionProbeState extends State<LateCollectionProbe> {
+  late final xs = ListSignal<int>(const <int>[], name: 'xs');
+  late final tags = SetSignal<String>(const <String>{}, name: 'tags');
+  late final hits = MapSignal<String, int>(const <String, int>{}, name: 'hits');
 
   @override
   void dispose() {
+    hits.dispose();
+    tags.dispose();
     xs.dispose();
     super.dispose();
   }
