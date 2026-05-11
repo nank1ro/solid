@@ -10,12 +10,10 @@ class TodosController {
   List<Todo> todos = const [];
 
   @SolidState()
-  List<Todo> get completedTodos =>
-      todos.where((t) => t.completed).toList();
+  List<Todo> get completedTodos => todos.where((t) => t.completed).toList();
 
   @SolidState()
-  List<Todo> get incompleteTodos =>
-      todos.where((t) => !t.completed).toList();
+  List<Todo> get incompleteTodos => todos.where((t) => !t.completed).toList();
 
   void add(Todo todo) => todos.add(todo);
 
