@@ -1,4 +1,4 @@
-# Solid Framework
+# Flutter Solid Framework
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-purple.svg)](https://github.com/nank1ro/solid/blob/main/LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/nank1ro/solid)](https://gitHub.com/nank1ro/solid/stargazers/)
