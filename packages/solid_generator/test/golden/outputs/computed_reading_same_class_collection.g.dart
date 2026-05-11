@@ -1,0 +1,29 @@
+import 'package:flutter_solidart/flutter_solidart.dart';
+import 'package:solid_annotations/solid_annotations.dart';
+
+class Inventory implements Disposable {
+  final items = ListSignal<int>(const [], name: 'items');
+
+  late final evens = Computed<List<int>>(
+    () => items.where((i) => i.isEven).toList(),
+    name: 'evens',
+  );
+
+  late final count = Computed<int>(() => items.length, name: 'count');
+
+  late final log = Effect(() {
+    print('count=${items.length}, first=${items[0]}');
+  }, name: 'log');
+
+  Inventory() {
+    log;
+  }
+
+  @override
+  void dispose() {
+    log.dispose();
+    count.dispose();
+    evens.dispose();
+    items.dispose();
+  }
+}

@@ -40,6 +40,7 @@ RewriteResult rewriteStateClass(
   List<QueryModel> solidQueries,
   List<EnvironmentModel> solidEnvironments,
   Map<String, Set<String>> classRegistry,
+  Map<String, Set<String>> classCollectionFields,
   String source,
 ) {
   final className = classDecl.name.lexeme;
@@ -87,12 +88,24 @@ RewriteResult rewriteStateClass(
   final environmentFields = solidEnvironments.isEmpty
       ? const <String, String>{}
       : {for (final e in solidEnvironments) e.fieldName: e.typeText};
+  // Subset of `reactiveNames` whose emitter produces a collection signal
+  // (`ListSignal<T>` / `SetSignal<T>` / `MapSignal<K, V>`). Drives the
+  // value-rewriter's no-`.value`-on-chain rule for these fields.
+  final collectionNames = <String>{
+    for (final f in solidFields)
+      if (isCollectionSignalField(f)) f.fieldName,
+  };
   // Built incrementally during the walk so Signal field names, Effect method
   // names, and Query method names interleave in source-declaration order —
   // the contract `emitDispose` relies on for reverse-disposal correctness.
   final disposeNames = <String>[];
   final effectNames = <String>[];
   final pieces = <String>[];
+  // Set during the `build` branch when the rewriter emitted at least one
+  // `SignalBuilder` wrap — drives the `flutter_solidart` import even when
+  // the class itself has no own `@SolidState` field (the env-only host
+  // reading through to a sibling class's reactive state).
+  var buildHasSignalBuilder = false;
   // `initState`/`dispose` emission is deferred until after the walk so the
   // merge sees the fully-populated `effectNames` / `disposeNames` lists.
   // The slot index reserves the member's source-order position in `pieces`
@@ -127,16 +140,20 @@ RewriteResult rewriteStateClass(
     if (member is MethodDeclaration) {
       final name = member.name.lexeme;
       if (name == 'build') {
-        pieces.add(
-          rewriteBuildMethod(
-            member,
-            reactiveNames,
-            source,
-            queryNames: queryNames,
-            classRegistry: classRegistry,
-            environmentFields: environmentFields,
-          ),
+        final buildText = rewriteBuildMethod(
+          member,
+          reactiveNames,
+          source,
+          queryNames: queryNames,
+          classRegistry: classRegistry,
+          environmentFields: environmentFields,
+          collectionFields: collectionNames,
+          classCollectionFields: classCollectionFields,
         );
+        pieces.add(buildText);
+        if (buildText.contains('SignalBuilder(')) {
+          buildHasSignalBuilder = true;
+        }
       } else if (name == 'initState') {
         initStateMethod = member;
         initStateSlot = pieces.length;
@@ -199,19 +216,40 @@ RewriteResult rewriteStateClass(
     classDecl.offset,
     classDecl.leftBracket.offset,
   );
+  final hasScalarSignalField = solidFields.any(
+    (f) => !isCollectionSignalField(f),
+  );
+  final hasListSignalField = solidFields.any(
+    (f) =>
+        isCollectionSignalField(f) &&
+        parseCollectionTypeText(f.typeText)?.ctorName == 'ListSignal',
+  );
+  final hasSetSignalField = solidFields.any(
+    (f) =>
+        isCollectionSignalField(f) &&
+        parseCollectionTypeText(f.typeText)?.ctorName == 'SetSignal',
+  );
+  final hasMapSignalField = solidFields.any(
+    (f) =>
+        isCollectionSignalField(f) &&
+        parseCollectionTypeText(f.typeText)?.ctorName == 'MapSignal',
+  );
   return (
     text: '$header{\n${pieces.join('\n\n')}\n}',
     solidartNames: <String>{
-      // `Signal` is only emitted when the class has at least one `@SolidState`
-      // field. An env-only host has no Signal reference in lowered output and
-      // so does NOT pull in `flutter_solidart`.
-      if (solidFields.isNotEmpty) 'Signal',
+      // `Signal` is only emitted when the class has at least one scalar
+      // `@SolidState` field. Collection-typed fields use ListSignal /
+      // SetSignal / MapSignal instead — see Section 4.4 of SPEC.md.
+      if (hasScalarSignalField) 'Signal',
+      if (hasListSignalField) 'ListSignal',
+      if (hasSetSignalField) 'SetSignal',
+      if (hasMapSignalField) 'MapSignal',
       if (effectNames.isNotEmpty) 'Effect',
       // Queries emit `Resource<T>(...)` fields; their `<query>().when(...)`
       // call sites in `build` are wrapped in `SignalBuilder` by
       // `rewriteBuildMethod` when at least one query is present.
       if (solidQueries.isNotEmpty) 'Resource',
-      if (solidQueries.isNotEmpty) 'SignalBuilder',
+      if (solidQueries.isNotEmpty || buildHasSignalBuilder) 'SignalBuilder',
       // A multi-dep query synthesizes a Record-Computed source field,
       // requiring `Computed` in the import set even when the class has no
       // `@SolidState` getter.

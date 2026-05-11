@@ -86,6 +86,20 @@ const List<String> goldenNames = <String>[
   'dispose_already_present_skipped',
   'provider_no_at_solid_annotations',
   'provider_value_skipped',
+  'list_signal_field',
+  'set_signal_field',
+  'map_signal_field',
+  'list_signal_lazy_fallback',
+  'list_signal_nullable_fallback',
+  'cross_class_list_signal_read',
+  'cross_file_environment_read',
+  'computed_on_plain_class',
+  'plain_class_user_ctor_basic',
+  'plain_class_user_ctor_with_effect',
+  'plain_class_named_ctor',
+  'computed_reading_same_class_collection',
+  'collection_mixin_breadth',
+  'collection_cascade',
 ];
 
 /// Memoized golden directory resolution. Resolved relative to the package
@@ -127,6 +141,74 @@ Future<String> runBuilderCapture(String name, String input) async {
   );
   if (captured == null) fail('builder produced no output for $name');
   return captured!;
+}
+
+/// True when [name] resolves to a multi-file fixture directory at
+/// `test/golden/inputs/<name>/`, vs the conventional single-file fixture at
+/// `test/golden/inputs/<name>.dart`. Used by the golden harness to dispatch
+/// between single-file and multi-file paths.
+Future<bool> isMultiFileFixture(String name) async {
+  final dirPath = '${await goldenDir()}/inputs/$name';
+  return Directory(dirPath).existsSync();
+}
+
+/// Loads every `*.dart` file under `test/golden/inputs/<name>/` and returns
+/// a map of `{relativePath → contents}`. Relative paths are anchored to the
+/// fixture directory (e.g. `widget.dart`, `controllers/foo.dart`).
+///
+/// Used by the multi-file branch of the golden harness for fixtures that
+/// span more than one source file — e.g. cross-file `@SolidEnvironment`
+/// scenarios where the consumer's `late T x;` resolves to a class defined
+/// in a sibling source file.
+Future<Map<String, String>> loadGoldenMultiInput(String name) async {
+  final dirPath = '${await goldenDir()}/inputs/$name';
+  final dir = Directory(dirPath);
+  if (!dir.existsSync()) fail('missing multi-file input dir: $dirPath');
+  final result = <String, String>{};
+  for (final entity in dir.listSync(recursive: true)) {
+    if (entity is! File) continue;
+    if (!entity.path.endsWith('.dart')) continue;
+    final relativePath = entity.path.substring(dirPath.length + 1);
+    result[relativePath] = entity.readAsStringSync();
+  }
+  return result;
+}
+
+/// Runs the builder once on the multi-file [inputs] map (relative paths
+/// keyed to source text) under the fixture `<name>/` and returns a
+/// `{relativePath → outputText}` map containing the lowered output for
+/// each input.
+///
+/// Each input file is registered under `a|source/<name>/<relativePath>` and
+/// each output is captured from `a|lib/<name>/<relativePath>`.
+Future<Map<String, String>> runMultiFileBuilderCapture(
+  String name,
+  Map<String, String> inputs,
+) async {
+  final captured = <String, String>{};
+  final inputAssets = <String, String>{
+    for (final entry in inputs.entries)
+      'a|source/$name/${entry.key}': entry.value,
+  };
+  final outputMatchers = <String, Object>{
+    for (final entry in inputs.entries)
+      'a|lib/$name/${entry.key}': predicate<List<int>>((bytes) {
+        captured[entry.key] = utf8.decode(bytes);
+        return true;
+      }),
+  };
+  await testBuilder(
+    solidBuilder(BuilderOptions.empty),
+    inputAssets,
+    outputs: outputMatchers,
+  );
+  if (captured.length != inputs.length) {
+    fail(
+      'builder produced ${captured.length} outputs for $name, '
+      'expected ${inputs.length}',
+    );
+  }
+  return captured;
 }
 
 /// Registers one rejection test per entry in [cases] inside a `group` named

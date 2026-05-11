@@ -20,6 +20,7 @@ import 'package:solid_generator/src/plain_class_rewriter.dart';
 import 'package:solid_generator/src/provider_dispose_rewriter.dart';
 import 'package:solid_generator/src/query_model.dart';
 import 'package:solid_generator/src/reserved_annotation_validator.dart';
+import 'package:solid_generator/src/signal_emitter.dart';
 import 'package:solid_generator/src/state_class_rewriter.dart';
 import 'package:solid_generator/src/stateless_rewriter.dart';
 import 'package:solid_generator/src/target_validator.dart';
@@ -142,7 +143,31 @@ class _SolidBuilder implements Builder {
     // above.
     validateSolidEnvironmentTargets(parsed.unit);
 
-    final annotatedClasses = _collectAnnotatedClasses(parsed.unit, source);
+    // Same-file class registry, built from a fast member-scan before any
+    // body rewrites run. The body-rewriter relies on it to recognise
+    // cross-class `.value` chains (`controller.todos`) even when the body
+    // being rewritten is a `@SolidState` getter / `@SolidEffect` /
+    // `@SolidQuery` on a sibling class in the same file.
+    final sameFileRegistry = _prescanClassRegistry(parsed.unit);
+    final sameFileCollections = _prescanClassCollectionFields(parsed.unit);
+    // Cross-file resolver: walks every `package:`/relative import of the
+    // current source file, redirecting same-package imports from `lib/` to
+    // `source/`, and pulls in `@SolidState` member names for every class
+    // referenced by a `@SolidEnvironment` field type — same contract as the
+    // same-file pass, but for types declared in other source files.
+    await _populateCrossFileTypes(
+      parsed.unit,
+      buildStep,
+      sameFileRegistry,
+      sameFileCollections,
+    );
+
+    final annotatedClasses = _collectAnnotatedClasses(
+      parsed.unit,
+      source,
+      sameFileRegistry,
+      sameFileCollections,
+    );
     if (annotatedClasses.every((c) => c.hasNoAnnotations)) {
       // No reactive annotations resolved. The file may still contain a
       // `Provider(...)` or `.environment<T>()` call site that the auto-dispose
@@ -163,38 +188,81 @@ class _SolidBuilder implements Builder {
       return;
     }
 
-    final classRegistry = _buildClassRegistry(annotatedClasses);
+    // Reuse the same-file + cross-file registry from the prescan above
+    // (rather than rebuilding from `annotatedClasses`) — they encode the
+    // same data but the prescan version is the authority because the
+    // reader pipeline already consumed it.
     final transformed = _renderOutput(
       parsed.unit,
       annotatedClasses,
-      classRegistry,
+      sameFileRegistry,
+      sameFileCollections,
       source,
     );
     await buildStep.writeAsString(outputId, transformed);
   }
 }
 
-/// Builds the cross-class reactivity map: class name → set of `@SolidState`
-/// field/getter names declared on that class. Consumed by `value_rewriter`
-/// to detect `<receiver>.<field>` reads where the receiver's declared type
-/// names a class with reactive declarations (cross-class chain rewrite —
-/// currently a single-level subset; full chains will land alongside the
-/// resolved-AST migration).
+/// Pre-scans every `ClassDeclaration` in [unit] and returns the cross-class
+/// reactivity map (class name → set of `@SolidState` field / getter names).
+/// Runs BEFORE `_collectAnnotatedClasses` so the produced registry can be
+/// threaded into the reader pipeline, letting cross-class `.value` rewrites
+/// fire even when the body being rewritten is a `@SolidState` getter /
+/// `@SolidEffect` / `@SolidQuery` on a sibling class.
 ///
-/// `@SolidEffect` and `@SolidQuery` names are intentionally excluded — an
-/// Effect lowers to a `void`-returning `Effect` field with no observable
-/// `.value`, and a Query lowers to a `Resource<T>` whose call sites resolve
-/// through `Resource.call()` → `state` (no `.value` rewrite).
-Map<String, Set<String>> _buildClassRegistry(
-  List<_AnnotatedClass> annotatedClasses,
-) {
+/// The scan is annotation-name-only (no body parsing) and intentionally
+/// excludes `@SolidEffect` / `@SolidQuery` names for the same reason
+/// `_buildClassRegistry` did: Effects have no observable `.value`, and
+/// Queries lower to `Resource<T>` whose call sites resolve through
+/// `Resource.call() → state`.
+Map<String, Set<String>> _prescanClassRegistry(CompilationUnit unit) {
   final registry = <String, Set<String>>{};
-  for (final c in annotatedClasses) {
-    final names = <String>{
-      for (final f in c.fields) f.fieldName,
-      for (final g in c.getters) g.getterName,
-    };
-    if (names.isNotEmpty) registry[c.decl.name.lexeme] = names;
+  for (final decl in unit.declarations) {
+    if (decl is! ClassDeclaration) continue;
+    final names = <String>{};
+    for (final member in decl.members) {
+      if (member is FieldDeclaration) {
+        if (member.metadata.any((a) => a.name.name == solidStateName)) {
+          names.add(member.fields.variables.first.name.lexeme);
+        }
+      } else if (member is MethodDeclaration && member.isGetter) {
+        if (member.metadata.any((a) => a.name.name == solidStateName)) {
+          names.add(member.name.lexeme);
+        }
+      }
+    }
+    if (names.isNotEmpty) registry[decl.name.lexeme] = names;
+  }
+  return registry;
+}
+
+/// Pre-scans every `ClassDeclaration` in [unit] and returns the cross-class
+/// collection-fields map (class name → set of `@SolidState` field names
+/// whose emitter would produce a collection signal). Strict subset of
+/// [_prescanClassRegistry] — getters are excluded because a `@SolidState`
+/// getter always lowers to `Computed<T>` (no collection-mixin contract).
+///
+/// Mirrors the collection-detection rule in `signal_emitter.dart` so the
+/// cross-file scan agrees with same-file emission: a field qualifies iff
+/// the declared type matches `parseCollectionTypeText` AND it is
+/// non-nullable. `late` is irrelevant — collection signals are emitted
+/// even for `late` fields (with an empty default literal).
+Map<String, Set<String>> _prescanClassCollectionFields(CompilationUnit unit) {
+  final registry = <String, Set<String>>{};
+  for (final decl in unit.declarations) {
+    if (decl is! ClassDeclaration) continue;
+    final names = <String>{};
+    for (final member in decl.members) {
+      if (member is! FieldDeclaration) continue;
+      if (!member.metadata.any((a) => a.name.name == solidStateName)) continue;
+      final variable = member.fields.variables.first;
+      final type = member.fields.type;
+      if (type == null) continue;
+      if (type.question != null) continue;
+      if (parseCollectionTypeText(type.toSource()) == null) continue;
+      names.add(variable.name.lexeme);
+    }
+    if (names.isNotEmpty) registry[decl.name.lexeme] = names;
   }
   return registry;
 }
@@ -241,6 +309,8 @@ class _AnnotatedClass {
 List<_AnnotatedClass> _collectAnnotatedClasses(
   CompilationUnit unit,
   String source,
+  Map<String, Set<String>> classRegistry,
+  Map<String, Set<String>> classCollectionFields,
 ) {
   final result = <_AnnotatedClass>[];
   for (final decl in unit.declarations) {
@@ -251,6 +321,35 @@ List<_AnnotatedClass> _collectAnnotatedClasses(
     final queries = <QueryModel>[];
     final environments = <EnvironmentModel>[];
     final reactiveNames = <String>{};
+    // Subset of [reactiveNames] whose emitter produces a collection signal
+    // (`ListSignal<T>` / `SetSignal<T>` / `MapSignal<K, V>`). Built
+    // incrementally so a `@SolidState` getter / `@SolidEffect` /
+    // `@SolidQuery` body declared LATER in the class can skip the
+    // `.value` insertion on chain reads of an EARLIER collection field —
+    // the collection signal's mixin already tracks reads natively, so
+    // `xs.where(...)` / `xs.length` / `xs[i]` resolve through the
+    // ListMixin / SetMixin / MapMixin without `.value`. Getters never go
+    // into this set (they lower to `Computed<T>`, no mixin contract).
+    final collectionFieldsSeen = <String>{};
+    // Local view of the cross-class registries that excludes the enclosing
+    // class itself — the reader pipeline already provides same-class
+    // `@SolidState` field/getter names through [reactiveNames], so threading
+    // them through the cross-class branch a second time would double-count
+    // (the chain rewrite would fire on `this.field.value` too). For env
+    // injection lookups we still need the receiver-class info, hence the
+    // map-of-other-classes shape.
+    final selfClass = decl.name.lexeme;
+    final crossClassRegistry = Map<String, Set<String>>.from(classRegistry)
+      ..remove(selfClass);
+    final crossClassCollections = Map<String, Set<String>>.from(
+      classCollectionFields,
+    )..remove(selfClass);
+    // Pre-scan members once for `@SolidEnvironment` so each reader sees the
+    // host class's env-field map (fieldName → typeText) up-front. The
+    // env-field receiver shape (`<envField>.<reactiveField>`) needs this
+    // mapping to look up the receiver's declared type in the cross-class
+    // registry.
+    final environmentFieldsForBody = _collectEnvironmentFields(decl);
     // A query / effect / state-getter body MAY invoke same-class `@SolidQuery`
     // methods to compose its result; the body-rewrite visitor needs the
     // per-class name set up-front to detect these cross-query reads. Pre-scan
@@ -264,6 +363,9 @@ List<_AnnotatedClass> _collectAnnotatedClasses(
         if (model != null) {
           fields.add(model);
           reactiveNames.add(model.fieldName);
+          if (isCollectionSignalField(model)) {
+            collectionFieldsSeen.add(model.fieldName);
+          }
           continue;
         }
         // `@SolidState` wins over `@SolidEnvironment` on a both-annotated
@@ -281,6 +383,10 @@ List<_AnnotatedClass> _collectAnnotatedClasses(
           reactiveNames,
           source,
           queryNames: queryNames,
+          classRegistry: crossClassRegistry,
+          classCollectionFields: crossClassCollections,
+          environmentFields: environmentFieldsForBody,
+          collectionFields: collectionFieldsSeen,
         );
         if (getter != null) {
           getters.add(getter);
@@ -298,6 +404,10 @@ List<_AnnotatedClass> _collectAnnotatedClasses(
           reactiveNames,
           source,
           queryNames: queryNames,
+          classRegistry: crossClassRegistry,
+          classCollectionFields: crossClassCollections,
+          environmentFields: environmentFieldsForBody,
+          collectionFields: collectionFieldsSeen,
         );
         if (effect != null) {
           effects.add(effect);
@@ -308,6 +418,10 @@ List<_AnnotatedClass> _collectAnnotatedClasses(
           reactiveNames,
           source,
           queryNames: queryNames,
+          classRegistry: crossClassRegistry,
+          classCollectionFields: crossClassCollections,
+          environmentFields: environmentFieldsForBody,
+          collectionFields: collectionFieldsSeen,
         );
         if (query != null) {
           queries.add(query);
@@ -326,6 +440,26 @@ List<_AnnotatedClass> _collectAnnotatedClasses(
     );
   }
   return result;
+}
+
+/// Pre-scans [decl]'s members for `@SolidEnvironment` fields and returns
+/// the `fieldName → typeText` map used by the cross-class chain rewrite
+/// when the receiver is a host-class env field. Returns the shared empty
+/// map when no env fields are present so the env-only path is allocation-
+/// free.
+Map<String, String> _collectEnvironmentFields(ClassDeclaration decl) {
+  Map<String, String>? fields;
+  for (final member in decl.members) {
+    if (member is! FieldDeclaration) continue;
+    if (!member.metadata.any((a) => a.name.name == solidEnvironmentName)) {
+      continue;
+    }
+    final type = member.fields.type;
+    if (type == null) continue;
+    final fieldName = member.fields.variables.first.name.lexeme;
+    (fields ??= <String, String>{})[fieldName] = type.toSource();
+  }
+  return fields ?? const <String, String>{};
 }
 
 /// Pre-scans [decl]'s members for `@SolidQuery`-annotated methods and
@@ -361,6 +495,7 @@ String _renderOutput(
   CompilationUnit unit,
   List<_AnnotatedClass> annotatedClasses,
   Map<String, Set<String>> classRegistry,
+  Map<String, Set<String>> classCollectionFields,
   String source,
 ) {
   // Walk `unit.declarations` in source order. Class declarations are paired
@@ -373,7 +508,12 @@ String _renderOutput(
   final results = <RewriteResult>[
     for (final decl in unit.declarations)
       if (decl is ClassDeclaration)
-        _resultForClass(annotatedClasses[classIdx++], classRegistry, source)
+        _resultForClass(
+          annotatedClasses[classIdx++],
+          classRegistry,
+          classCollectionFields,
+          source,
+        )
       else
         _passthroughResult(decl, source),
   ];
@@ -424,6 +564,7 @@ String _renderOutput(
 RewriteResult _resultForClass(
   _AnnotatedClass c,
   Map<String, Set<String>> classRegistry,
+  Map<String, Set<String>> classCollectionFields,
   String source,
 ) {
   if (c.hasNoAnnotations) return _passthroughResult(c.decl, source);
@@ -435,6 +576,7 @@ RewriteResult _resultForClass(
     c.queries,
     c.environments,
     classRegistry,
+    classCollectionFields,
     source,
   );
 }
@@ -464,6 +606,7 @@ RewriteResult _rewriteClass(
   List<QueryModel> queries,
   List<EnvironmentModel> environments,
   Map<String, Set<String>> classRegistry,
+  Map<String, Set<String>> classCollectionFields,
   String source,
 ) {
   final kind = classKindOf(decl);
@@ -478,6 +621,7 @@ RewriteResult _rewriteClass(
         queries,
         environments,
         classRegistry,
+        classCollectionFields,
         source,
       );
     case ClassKind.plainClass:
@@ -489,6 +633,7 @@ RewriteResult _rewriteClass(
         queries,
         environments,
         classRegistry,
+        classCollectionFields,
         source,
       );
     case ClassKind.stateClass:
@@ -500,6 +645,7 @@ RewriteResult _rewriteClass(
         queries,
         environments,
         classRegistry,
+        classCollectionFields,
         source,
       );
     case ClassKind.statefulWidget:
@@ -514,3 +660,149 @@ RewriteResult _rewriteClass(
 /// Returns the URI string of an `import '…';` directive, or the empty string
 /// if the directive has no URI (should not happen for well-formed source).
 String _importUri(ImportDirective d) => d.uri.stringValue ?? '';
+
+/// Resolver pass for the cross-file slice of the chain-aware rule. For each
+/// `@SolidEnvironment` field whose declared type is NOT defined in the
+/// current source file, walk the imported `source/<path>.dart` file(s) via
+/// `BuildStep.resolver.compilationUnitFor` and merge any `@SolidState`
+/// members of the matching class declaration into [classRegistry] (and the
+/// collection-subset into [classCollectionFields]).
+///
+/// The two registries are mutated in place. Same-file types take precedence:
+/// when a type name is already present, the cross-file pass does NOT
+/// overwrite it (in-file source is always the source of truth for the
+/// current build).
+///
+/// `package:` imports of the **current package** are redirected from `lib/`
+/// to `source/` because the user's `@SolidState` annotations live on the
+/// pre-transformation source — the `lib/` output has already been lowered
+/// (e.g. `final value = Signal<int>(0, name: 'value');`, no annotation).
+/// Other-package imports (Flutter, flutter_solidart, third-party) are read
+/// as-is; they have no Solid annotations and contribute nothing.
+///
+/// `dart:` imports are skipped — the Dart SDK contains no Solid annotations.
+Future<void> _populateCrossFileTypes(
+  CompilationUnit unit,
+  BuildStep step,
+  Map<String, Set<String>> classRegistry,
+  Map<String, Set<String>> classCollectionFields,
+) async {
+  // Walk every `@SolidEnvironment` field declaration in the unit. The
+  // builder pre-scan does NOT pre-build env-field models — the readers do
+  // that downstream — so this loop reads metadata directly off the AST.
+  // Resolution is keyed on the declared `typeText`; same-file types already
+  // present in [classRegistry] are skipped (the same-file pass is the
+  // source of truth there).
+  final wantedTypes = <String>{};
+  for (final decl in unit.declarations) {
+    if (decl is! ClassDeclaration) continue;
+    for (final member in decl.members) {
+      if (member is! FieldDeclaration) continue;
+      if (!member.metadata.any((a) => a.name.name == solidEnvironmentName)) {
+        continue;
+      }
+      final type = member.fields.type;
+      if (type == null) continue;
+      final typeText = type.toSource();
+      if (typeText.isEmpty) continue;
+      if (classRegistry.containsKey(typeText)) continue;
+      wantedTypes.add(typeText);
+    }
+  }
+  if (wantedTypes.isEmpty) return;
+
+  for (final directive in unit.directives.whereType<ImportDirective>()) {
+    if (wantedTypes.isEmpty) break;
+    final uri = directive.uri.stringValue;
+    if (uri == null || uri.startsWith('dart:')) continue;
+    final assetId = _resolveImportToSourceAsset(uri, step.inputId);
+    if (assetId == null) continue;
+    if (!assetId.path.endsWith('.dart')) continue;
+    // Skip if the asset doesn't exist (e.g. an import that resolves to a
+    // path the build context cannot access — pub packages without source/,
+    // etc.). `canRead` is a cheap existence probe; `compilationUnitFor`
+    // raises on missing assets, so this guards us before the parse.
+    bool exists;
+    try {
+      exists = await step.canRead(assetId);
+    } on Object {
+      continue;
+    }
+    if (!exists) continue;
+    final CompilationUnit imported;
+    try {
+      imported = await step.resolver.compilationUnitFor(assetId);
+    } on Object {
+      continue;
+    }
+    for (final decl in imported.declarations) {
+      if (decl is! ClassDeclaration) continue;
+      final className = decl.name.lexeme;
+      if (!wantedTypes.contains(className)) continue;
+      final scalarNames = <String>{};
+      final collectionNames = <String>{};
+      for (final member in decl.members) {
+        if (member is FieldDeclaration) {
+          final isSolidState = member.metadata.any(
+            (a) => a.name.name == solidStateName,
+          );
+          if (!isSolidState) continue;
+          final variable = member.fields.variables.first;
+          final fieldName = variable.name.lexeme;
+          scalarNames.add(fieldName);
+          // Mirror the collection-detection rule in signal_emitter.dart so
+          // the cross-file collection set agrees with the same-file one:
+          // collection signals are emitted for any non-nullable `List<T>`
+          // / `Set<T>` / `Map<K, V>` field — `late` does not exclude.
+          final type = member.fields.type;
+          if (type == null) continue;
+          if (type.question != null) continue;
+          if (parseCollectionTypeText(type.toSource()) != null) {
+            collectionNames.add(fieldName);
+          }
+        } else if (member is MethodDeclaration && member.isGetter) {
+          final isSolidState = member.metadata.any(
+            (a) => a.name.name == solidStateName,
+          );
+          if (isSolidState) scalarNames.add(member.name.lexeme);
+        }
+      }
+      if (scalarNames.isNotEmpty) {
+        classRegistry[className] = scalarNames;
+        if (collectionNames.isNotEmpty) {
+          classCollectionFields[className] = collectionNames;
+        }
+      }
+      wantedTypes.remove(className);
+    }
+  }
+}
+
+/// Maps an `import '<uri>';` URI to the `AssetId` of its source-side input,
+/// or `null` when the import cannot be resolved.
+///
+/// Within the **current package**, `package:foo/path.dart` and `lib/path.dart`
+/// relative imports are redirected to `source/path.dart` — the user's
+/// `@SolidState` annotations live in `source/`, not the post-transformation
+/// `lib/`. Other-package imports stay as-is.
+AssetId? _resolveImportToSourceAsset(String uri, AssetId from) {
+  final Uri parsed;
+  try {
+    parsed = Uri.parse(uri);
+  } on Object {
+    return null;
+  }
+  final AssetId resolved;
+  try {
+    resolved = AssetId.resolve(parsed, from: from);
+  } on Object {
+    return null;
+  }
+  if (resolved.package == from.package && resolved.path.startsWith('lib/')) {
+    return AssetId(
+      resolved.package,
+      'source/${resolved.path.substring('lib/'.length)}',
+    );
+  }
+  return resolved;
+}
