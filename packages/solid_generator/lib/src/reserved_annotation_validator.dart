@@ -3,14 +3,14 @@ import 'package:analyzer/dart/ast/visitor.dart';
 import 'package:solid_generator/src/transformation_error.dart';
 
 /// Reserved annotation names from `package:solid_annotations` whose full
-/// contract is deferred to a later SPEC revision. No annotations are
-/// currently reserved. This map is kept as a regression fence: any future
-/// reserved annotation MUST be added here (SPEC §3.2 + §13).
+/// contract is deferred to a later revision. No annotations are currently
+/// reserved. This map is kept as a regression fence: any future reserved
+/// annotation MUST be added here.
 const Map<String, String> _reservedAnnotations = {};
 
-/// SPEC §3.2 + §13 build-time guard: rejects any annotation listed in
-/// [_reservedAnnotations] with a clear "not yet implemented" error. Currently
-/// a no-op since the map is empty.
+/// Build-time guard: rejects any annotation listed in [_reservedAnnotations]
+/// with a clear "not yet implemented" error. Currently a no-op since the map
+/// is empty.
 ///
 /// Runs before transformation so users learn at build time that they're
 /// using a not-yet-implemented annotation, instead of debugging missing

@@ -20,14 +20,11 @@ import 'package:solid_generator/src/transformation_error.dart';
 /// (`<effectName>;`) are also merged into any existing `initState()` body,
 /// or a fresh `initState()` is synthesized if none was declared. Queries
 /// are intentionally never spliced into `initState` — Resources are lazy
-/// and the late-final initializer fires on first call-site read (SPEC §4.8
-/// rule 10 / §14 item 4).
+/// and the late-final initializer fires on first call-site read.
 ///
-/// See SPEC §8.2 (in-place State lowering), §10 (dispose merging), §4.7
-/// (Effect materialization), and §4.8 (Resource lowering). The Signal-only
-/// path is the fix for issue #3 — a `StatefulWidget` whose `State<X>`
-/// subclass declared `@SolidState` fields was silently passed through
-/// unchanged in v1.
+/// The Signal-only path is the fix for issue #3 — a `StatefulWidget` whose
+/// `State<X>` subclass declared `@SolidState` fields was silently passed
+/// through unchanged in v1.
 ///
 /// Member ordering and non-annotated members (other fields,
 /// `didUpdateWidget`, user methods, constructors, …) are emitted verbatim
@@ -79,14 +76,20 @@ RewriteResult rewriteStateClass(
   final queryNames = solidQueries.isEmpty
       ? const <String>{}
       : {for (final q in solidQueries) q.methodName};
-  // SPEC §5.1 cross-class env-field receiver type map.
+  // Cross-query deps need each upstream's inner `T` to emit `ResourceState<T>`
+  // elements in the synthesized source-Computed Record. Built alongside
+  // [reactiveTypeTexts] so the per-query block emit can splice both maps
+  // without re-walking [solidQueries].
+  final queryInnerTypeTexts = solidQueries.isEmpty
+      ? const <String, String>{}
+      : {for (final q in solidQueries) q.methodName: q.innerTypeText};
+  // Cross-class env-field receiver type map.
   final environmentFields = solidEnvironments.isEmpty
       ? const <String, String>{}
       : {for (final e in solidEnvironments) e.fieldName: e.typeText};
   // Built incrementally during the walk so Signal field names, Effect method
   // names, and Query method names interleave in source-declaration order —
-  // the contract `emitDispose` relies on for reverse-disposal correctness
-  // (SPEC §10).
+  // the contract `emitDispose` relies on for reverse-disposal correctness.
   final disposeNames = <String>[];
   final effectNames = <String>[];
   final pieces = <String>[];
@@ -111,10 +114,10 @@ RewriteResult rewriteStateClass(
       final env = envByName[varName];
       if (env != null) {
         // Env fields lower to `late final … = context.read<T>();` in source-
-        // declaration order. They are NOT added to `disposeNames` (SPEC §10
-        // — host never owns disposal of injected instances) and NOT added to
-        // `effectNames` (SPEC §4.9 rule 2 — env fields are lazy and need no
-        // initState materialization).
+        // declaration order. They are NOT added to `disposeNames` (the host
+        // never owns disposal of injected instances) and NOT added to
+        // `effectNames` (env fields are lazy and need no initState
+        // materialization).
         pieces.add(emitEnvironmentField(env));
         continue;
       }
@@ -149,11 +152,16 @@ RewriteResult rewriteStateClass(
         effectNames.add(effect.methodName);
       } else if (queryByName.containsKey(name)) {
         // Queries are lazy — joining `disposeNames` only, never
-        // `effectNames` / `initState` materialization (SPEC §4.8 rule 10 /
-        // §14 item 4). The first reactive call site triggers the late-final
-        // initializer.
+        // `effectNames` / `initState` materialization. The first reactive
+        // call site triggers the late-final initializer.
         final query = queryByName[name]!;
-        emitQueryFields(query, reactiveTypeTexts, pieces, disposeNames);
+        emitQueryFields(
+          query,
+          reactiveTypeTexts,
+          queryInnerTypeTexts,
+          pieces,
+          disposeNames,
+        );
       } else {
         pieces.add(source.substring(member.offset, member.end));
       }
@@ -162,11 +170,10 @@ RewriteResult rewriteStateClass(
     pieces.add(source.substring(member.offset, member.end));
   }
 
-  // Custom `initState` is preserved untouched when no Effects exist (SPEC
-  // §14 item 4); when Effects are present, materialization reads are
-  // spliced after the existing `super.initState();` call (§14 item 4
-  // carve-out + §4.7). When no `initState` was declared, synthesize one
-  // iff at least one Effect needs materialization — otherwise skip, so
+  // Custom `initState` is preserved untouched when no Effects exist; when
+  // Effects are present, materialization reads are spliced after the existing
+  // `super.initState();` call. When no `initState` was declared, synthesize
+  // one iff at least one Effect needs materialization — otherwise skip, so
   // Signal-only goldens round-trip byte-identical.
   if (initStateMethod != null) {
     pieces[initStateSlot] = effectNames.isEmpty
@@ -195,10 +202,9 @@ RewriteResult rewriteStateClass(
   return (
     text: '$header{\n${pieces.join('\n\n')}\n}',
     solidartNames: <String>{
-      // SPEC §9 import-add gate: `Signal` is only emitted when the class
-      // has at least one `@SolidState` field. An env-only host has no
-      // Signal reference in lowered output and so does NOT pull in
-      // `flutter_solidart`.
+      // `Signal` is only emitted when the class has at least one `@SolidState`
+      // field. An env-only host has no Signal reference in lowered output and
+      // so does NOT pull in `flutter_solidart`.
       if (solidFields.isNotEmpty) 'Signal',
       if (effectNames.isNotEmpty) 'Effect',
       // Queries emit `Resource<T>(...)` fields; their `<query>().when(...)`
@@ -219,11 +225,11 @@ RewriteResult rewriteStateClass(
 /// Splices Effect-materialization reads (`<effectName>;`, in declaration
 /// order) into an existing `initState()` body immediately after the
 /// `super.initState();` call, so Effects subscribe to signals before any
-/// user code in `initState` runs (SPEC §4.7 + §14 item 4 carve-out).
+/// user code in `initState` runs.
 ///
 /// Splice point: the end of the first statement when it is recognised as
-/// `super.initState();`; otherwise immediately after the opening brace. The
-/// SPEC mandates `super.initState()` first, so the fallback only fires for
+/// `super.initState();`; otherwise immediately after the opening brace.
+/// `super.initState()` must come first, so the fallback only fires for
 /// non-conforming user code — keeping the merge adjacent to where the super
 /// call would have been.
 ///
@@ -260,8 +266,8 @@ String _mergeInitState(
 
 /// Returns `true` when [stmt] is exactly the expression statement
 /// `super.initState();`. Used by [_mergeInitState] to decide whether to
-/// splice Effect reads after the user's super call (the SPEC-conforming
-/// case) or at the top of the body (fallback).
+/// splice Effect reads after the user's super call (the expected case) or
+/// at the top of the body (fallback).
 bool _isSuperInitStateCall(Statement stmt) {
   if (stmt is! ExpressionStatement) return false;
   final expr = stmt.expression;

@@ -1,6 +1,6 @@
-// SPEC §4.8 rule 10 / §14 item 4: Resources on an existing State<X> subclass
-// are lazy — never spliced into initState. SPEC §10: disposal is prepended
-// to the existing dispose() body in reverse-declaration order.
+// Resources on an existing State<X> subclass are lazy — never spliced into
+// initState. Disposal is prepended to the existing dispose() body in
+// reverse-declaration order.
 // `Future.delayed` returns `Future<void>` here — explicit type-arg silences
 // `inference_failure_on_instance_creation` from the strict golden lints. The
 // `loading:` lambda preserves a const-constructed widget (Dart has no const

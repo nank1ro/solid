@@ -1,5 +1,5 @@
-// SPEC §4.9 rule 7. The `.environment<T>(...)` extension form should also
-// receive the auto-injected `dispose:` argument. `Counter` is Solid-lowered.
+// The `.environment<T>(...)` extension form should also receive the
+// auto-injected `dispose:` argument. `Counter` is Solid-lowered.
 // ignore_for_file: prefer_const_constructors_in_immutables
 
 import 'package:solid_annotations/solid_annotations.dart';

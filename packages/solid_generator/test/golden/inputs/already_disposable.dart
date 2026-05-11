@@ -1,4 +1,4 @@
-// SPEC §10: a source class that names `implements Disposable` without
+// A source class that names `implements Disposable` without
 // declaring `dispose()` is intentionally unresolved at the source layer —
 // the generator synthesizes `dispose()` in the lowered output. The
 // analyzer cannot see the synthesized member, so suppress the warning on

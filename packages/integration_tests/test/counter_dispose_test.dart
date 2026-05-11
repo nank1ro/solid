@@ -1,4 +1,4 @@
-// Fences SPEC §10 (dispose contract) at runtime: when the route
+// Fences the dispose contract at runtime: when the route
 // containing a `@SolidState` signal is popped from `Navigator`, the emitted
 // `signal.dispose()` actually fires. Static byte-equality of the emitted
 // `dispose()` body is covered by the import-rewrite golden + idempotency

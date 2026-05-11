@@ -1,5 +1,5 @@
 // Marker test: every shipped `@Solid*` annotation passes
-// `validateReservedAnnotations` without raising. If a future SPEC revision
+// `validateReservedAnnotations` without raising. If a future revision
 // re-reserves an annotation, the corresponding case here must be moved.
 
 import 'package:analyzer/dart/analysis/utilities.dart';

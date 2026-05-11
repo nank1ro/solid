@@ -206,6 +206,32 @@ Future<String?> fetchData() async {
 
 Whenever `userId` changes, `fetchData()` auto-refreshes. The 1-second `debounce:` coalesces rapid changes (e.g., typeahead) into one fetch.
 
+#### Auto-tracking of upstream queries
+
+A `@SolidQuery` body MAY invoke another same-class `@SolidQuery` to compose its result. The invocation is a tracked read: the upstream query is wired into the downstream Resource's `source:` argument so the downstream auto-refreshes whenever the upstream emits a new state. Both query forms participate symmetrically — a Future-form query can depend on a Stream-form query (and vice versa), and a Stream-form query can depend on another Stream-form query (or a Future-form query). The lowering uniformly wires `source:` on `Resource<T>(...)` (Future form) or `Resource<T>.stream(...)` (Stream form).
+
+Detection is name-based, identical to Section 4.8 rule 3 (SignalBuilder placement): a zero-argument `MethodInvocation` whose target is a bare `SimpleIdentifier` matching the per-class set of `@SolidQuery` method names — and not shadowed by a local — is a tracked query read. The tear-off shape (`<queryName>.refresh()`, no parens after the query name) is NOT a tracked read.
+
+This is type-correct because `Resource<T>` extends `Signal<ResourceState<T>>`, which extends `SignalBase<ResourceState<T>>`. The upstream `Resource(...)` constructor accepts any `SignalBase<dynamic>` as `source:`, so a Resource may drive another Resource directly (single-dep case). When the downstream depends on multiple upstream reactives — any mix of state reads and query-call reads — the synthesized Record-Computed source (Section 4.8 rule 5) bundles them: a state dep contributes element type `T` via `<stateName>.value`; a query dep contributes element type `ResourceState<T>` via `<queryName>.state`. Reading either inside the Record-Computed closure subscribes the Computed to the corresponding emission, so the downstream re-runs on either kind of upstream change.
+
+Query-call tracking extends beyond `@SolidQuery` bodies: `@SolidEffect` bodies and `@SolidState` getter (Computed) bodies that invoke a same-class `@SolidQuery` also subscribe to its emissions. The call expression itself is left byte-identical (no `.value` rewrite — see Section 5.1); subscription happens at runtime through `Resource.call() → state` registering with the surrounding tracking context.
+
+```dart
+@SolidQuery()
+Stream<int> watchTicks() {
+  return Stream.periodic(const Duration(seconds: 1), (i) => i);
+}
+
+@SolidQuery()
+Future<double> halveLatestTick() async {
+  return (watchTicks().asReady?.value ?? 0).toDouble() / 2.0;
+}
+```
+
+Whenever `watchTicks` emits a new tick, `halveLatestTick` re-runs and re-emits. The downstream uses `.asReady?.value` (not `.value`) so an upstream error is substituted with the fallback `0` instead of being rethrown into the downstream's fetcher.
+
+A self-cycle — a `@SolidQuery` whose body invokes itself — is rejected at codegen time with a clear error. Inter-query cycles (A reads B, B reads A) are not validated at codegen time; they surface as a runtime error from `flutter_solidart`.
+
 #### Read pattern
 
 The user invokes the query in two distinct shapes depending on the operation. **State reads** (`.when`, `.maybeWhen`, `.isRefreshing`) call the method first, then chain on the resulting `Future<T>` / `Stream<T>`. **Refresh** uses the method tear-off (no parens) and chains `.refresh()` on the resulting function reference:
@@ -247,16 +273,36 @@ if (fetchData().isRefreshing) const LinearProgressIndicator(),
 
 #### Source-time typechecking
 
-The user's source layer never references `Resource<T>` or `ResourceState<T>` directly — those are codegen-internal types that appear only in `lib/`. To preserve that abstraction while keeping source-time typechecking honest, `package:solid_annotations` exports six runtime-throwing stub extension families that mirror the upstream `flutter_solidart` surface but on `Future<T>` / `Stream<T>` (and their tear-off types):
+The user's source layer never references `Resource<T>` or `ResourceState<T>` directly — those are codegen-internal types that appear only in `lib/`. To preserve that abstraction while keeping source-time typechecking honest, `package:solid_annotations` exports runtime-throwing stub extensions on `Future<T>` / `Stream<T>` (and their tear-off types) that mirror the upstream `flutter_solidart` `ResourceExtensions` surface — including the upstream getter names verbatim (`value`, `error`, `isReady`, `asReady`, `asError`, …). The extensions are defined upstream on `ResourceState<T>`; they are exposed here on `Future<T>` / `Stream<T>` because the source-side `<queryName>()` call returns the original method's `Future<T>` / `Stream<T>` return type, while the lowered `<queryName>()` call resolves through `Resource<T>.call() => state` to `ResourceState<T>`. `solid_annotations` does NOT depend on `package:solidart` (see Section 14 item 5); for the two stubs whose upstream return type is a `solidart`-internal class (`asReady` returns `ResourceReady<T>?`, `asError` returns `ResourceError<T>?`), `solid_annotations` declares **library-private placeholder classes** with the same chain shape so the source-side chain typechecks. The lowered `lib/` code resolves the same chain identifiers against `solidart`'s real `ResourceReady<T>` / `ResourceError<T>`; the source code is byte-identical between source and lib (no rewriter rule needed) and the leaf types match (`T?`, `Object?`, `StackTrace?`).
 
-- `extension FutureWhen<T> on Future<T>` — surfaces `.when({ready, loading, error})` and `.maybeWhen({orElse, ready, loading, error})`, both returning `Widget`. Used in source by `fetchData().when(...)` / `fetchData().maybeWhen(...)`.
-- `extension StreamWhen<T> on Stream<T>` — same surface as `FutureWhen` but on `Stream<T>` for the Stream-form queries.
-- `extension RefreshFuture<T> on Future<T> Function()` — surfaces `.refresh()` returning `Future<void>`. Note the receiver type is the function tear-off (`Future<T> Function()`), not the Future itself; this is why the source idiom is `fetchData.refresh()` (no parens) — the user is chaining on the method reference, not on the called Future.
-- `extension RefreshStream<T> on Stream<T> Function()` — same surface as `RefreshFuture` but on Stream tear-offs.
-- `extension IsRefreshingFuture<T> on Future<T>` — surfaces `.isRefreshing` returning `bool`. Used by `fetchData().isRefreshing`.
-- `extension IsRefreshingStream<T> on Stream<T>` — same on `Stream<T>`.
+State predicates (mirror upstream `ResourceExtensions` getters of the same name; defined on both `Future<T>` and `Stream<T>`):
 
-Every extension method body throws `Exception('This is just a stub for code generation.')`. The bodies are never executed at runtime because the runtime artifact lives in `lib/`, where `fetchData` is a `Resource<T>` field. The source syntax `fetchData()` survives byte-identical (no body rewrite) — at runtime it invokes the upstream `Resource<T>.call()` operator, which returns `ResourceState<T>`. The trailing `.when(...)` / `.maybeWhen(...)` / `.isRefreshing` chain then resolves to upstream `flutter_solidart` extensions on `ResourceState<T>` directly. The tear-off `fetchData.refresh()` resolves to the upstream `Resource<T>.refresh()` direct instance method. `solid_annotations` exports no extensions on `Resource<T>` or `ResourceState<T>` — the upstream `flutter_solidart` callable + extensions handle the chain.
+- `bool get isReady`, `bool get isLoading`, `bool get hasError`, `bool get isRefreshing`.
+
+Synchronous value access (defined on both `Future<T>` and `Stream<T>`):
+
+- `T? get value` — mirrors upstream `ResourceExtensions.value`: returns the inner value when ready, `null` when loading, **rethrows the error** when in the error state. The throwing branch is unsafe for cross-query composition — a downstream query that does `upstream().value ?? fallback` propagates the upstream error instead of substituting the fallback. Pick this getter only when the user explicitly wants error propagation.
+- `_AsReadyResult<T>? get asReady` — mirrors upstream `ResourceExtensions.asReady`: returns the ready-state wrapper when ready, `null` otherwise. The receiver type at source-time is the library-private `_AsReadyResult<T>` (a placeholder class declared in `solid_annotations` exposing exactly one member: `T get value`); at lib-time the same `.asReady` identifier resolves against `ResourceState<T>` and returns `solidart.ResourceReady<T>?`, whose own `T value` field shadows the placeholder's. The recommended safe-read shape is `<queryName>().asReady?.value` (returns `T?`, never throws). The placeholder is library-private so user code cannot name the intermediate type and accidentally pin source-side `_AsReadyResult<T>` against lib-side `ResourceReady<T>`; only the `final r = <q>().asReady;` (inferred) and full-chain (`.asReady?.value`) shapes are exposed.
+
+Synchronous error access (defined on both `Future<T>` and `Stream<T>`):
+
+- `Object? get error` — mirrors upstream `ResourceExtensions.error`: returns the error when in the error state, `null` otherwise. Never throws (the upstream getter is itself safe — there is no foot-gun symmetric to `value`'s rethrow).
+- `_AsErrorResult<T>? get asError` — mirrors upstream `ResourceExtensions.asError`: returns the error-state wrapper when in the error state, `null` otherwise. The placeholder `_AsErrorResult<T>` exposes `Object get error` and `StackTrace? get stackTrace`, mirroring `solidart.ResourceError<T>`'s public surface; lib-time chains resolve against the real `ResourceError<T>`. The use case is access to `stackTrace`, which the bare `.error` getter does not surface: `<queryName>().asError?.stackTrace` (returns `StackTrace?`).
+
+Pattern-matching methods (generic over the return type so they work in any context — Widget tree, `@SolidEffect` / `@SolidState` getter / `@SolidQuery` bodies; defined on both `Future<T>` and `Stream<T>`):
+
+- `R when<R>({required R Function(T) ready, required R Function() loading, required R Function(Object, StackTrace) error})` — total match.
+- `R maybeWhen<R>({required R Function() orElse, R Function(T)? ready, R Function()? loading, R Function(Object, StackTrace)? error})` — partial match with fallback.
+
+The generic `R` allows non-Widget contexts: `final scaled = fetchData().when(ready: (v) => v / 2, loading: () => 0, error: (_, __) => 0);`. Existing Widget call sites continue to typecheck — Dart infers `R = Widget` from the surrounding subtree.
+
+Imperative refresh (chained on the method tear-off, not the called `Future<T>` / `Stream<T>`):
+
+- `Future<void> refresh()` on `Future<T> Function()` and `Stream<T> Function()` — re-runs the fetcher.
+
+Every extension method body throws `Exception('This is just a stub for code generation.')`. The bodies are never executed at runtime because the runtime artifact lives in `lib/`, where `<queryName>` is a `Resource<T>` field. The source syntax `<queryName>()` survives byte-identical (no body rewrite) — at runtime it invokes the upstream `Resource<T>.call()` operator, which returns `ResourceState<T>`. The trailing chain (`.when` / `.maybeWhen` / `.isRefreshing` / `.value` / `.isReady` / `.isLoading` / `.hasError` / `.error` / `.asReady?.value` / `.asError?.error` / `.asError?.stackTrace`) then resolves to upstream `flutter_solidart` extensions on `ResourceState<T>` and the real `ResourceReady<T>` / `ResourceError<T>` field accessors directly. The tear-off `<queryName>.refresh()` resolves to the upstream direct instance method on `Resource<T>`. `solid_annotations` exports no extensions on `Resource<T>` or `ResourceState<T>` — the upstream `flutter_solidart` callable + extensions handle the chain.
+
+Upstream `ResourceExtensions` members not currently mirrored: `maybeMap<R>(...)`, `on<R>(...)` (deprecated upstream — alias for `when`), `maybeOn<R>(...)`. Each accepts callbacks parameterized by `solidart`'s state-discriminator types (`ResourceReady<T>`, `ResourceError<T>`, `ResourceLoading<T>`) as positional arguments — a placeholder shadow would have to expose every member used by the callback bodies, which spreads the surface beyond what the issue #5 use case requires. Defer until a concrete use case demands them. The mirrored `value` / `error` / `isReady` / `isLoading` / `hasError` / `isRefreshing` / `asReady?.value` / `asError?.error` / `asError?.stackTrace` / `when<R>` / `maybeWhen<R>` / `refresh` surface is sufficient for the cross-query composition use case (Section 3.5 "Auto-tracking of upstream queries", issue #5).
 
 ### 3.6 M6 scope: `@SolidEnvironment`
 
@@ -689,6 +735,77 @@ late final fetchUser = Resource<User?>(
 );
 ```
 
+Input (Future form, body reads ONE upstream `@SolidQuery` — auto-tracking, direct source; uses the safe `.asReady?.value` chain so an upstream error becomes the fallback instead of rethrowing):
+
+```dart
+@SolidQuery()
+Stream<int> watchTicks() {
+  return Stream.periodic(const Duration(seconds: 1), (i) => i);
+}
+
+@SolidQuery()
+Future<double> halveLatestTick() async {
+  return (watchTicks().asReady?.value ?? 0).toDouble() / 2.0;
+}
+```
+
+Output (the `.asReady?.value` chain is byte-identical to source — at lib-time it resolves through upstream's `ResourceExtensions.asReady` and `ResourceReady<T>.value` field; see Section 3.5 "Source-time typechecking"):
+
+```dart
+late final watchTicks = Resource<int>.stream(
+  () => Stream.periodic(const Duration(seconds: 1), (i) => i),
+  name: 'watchTicks',
+);
+
+late final halveLatestTick = Resource<double>(
+  () async {
+    return (watchTicks().asReady?.value ?? 0).toDouble() / 2.0;
+  },
+  source: watchTicks,
+  name: 'halveLatestTick',
+);
+```
+
+Input (Future form, body reads ONE `@SolidState` AND ONE `@SolidQuery` — synthesized Record-Computed source mixing both kinds):
+
+```dart
+@SolidState() int divisor = 2;
+
+@SolidQuery()
+Stream<int> watchTicks() {
+  return Stream.periodic(const Duration(seconds: 1), (i) => i);
+}
+
+@SolidQuery()
+Future<double> scaledTick() async {
+  return (watchTicks().asReady?.value ?? 0) / divisor.toDouble();
+}
+```
+
+Output:
+
+```dart
+final divisor = Signal<int>(2, name: 'divisor');
+
+late final watchTicks = Resource<int>.stream(
+  () => Stream.periodic(const Duration(seconds: 1), (i) => i),
+  name: 'watchTicks',
+);
+
+late final _scaledTickSource = Computed<(int, ResourceState<int>)>(
+  () => (divisor.value, watchTicks.state),
+  name: 'scaledTick_source',
+);
+
+late final scaledTick = Resource<double>(
+  () async {
+    return (watchTicks().asReady?.value ?? 0) / divisor.value.toDouble();
+  },
+  source: _scaledTickSource,
+  name: 'scaledTick',
+);
+```
+
 Stream form:
 
 ```dart
@@ -707,6 +824,39 @@ late final watchTicks = Resource<int>.stream(
 );
 ```
 
+Input (Stream-form downstream depending on another `@SolidQuery` — wiring is identical to the Future-form downstream case, but the Resource constructor is `.stream`):
+
+```dart
+@SolidQuery()
+Stream<int> upstream() {
+  return Stream.periodic(const Duration(seconds: 1), (i) => i);
+}
+
+@SolidQuery()
+Stream<int> doubled() async* {
+  final v = upstream().asReady?.value ?? 0;
+  yield v * 2;
+}
+```
+
+Output:
+
+```dart
+late final upstream = Resource<int>.stream(
+  () => Stream.periodic(const Duration(seconds: 1), (i) => i),
+  name: 'upstream',
+);
+
+late final doubled = Resource<int>.stream(
+  () async* {
+    final v = upstream().asReady?.value ?? 0;
+    yield v * 2;
+  },
+  source: upstream,
+  name: 'doubled',
+);
+```
+
 Rules:
 
 1. **One emitted declaration per query.** The annotated method is replaced by a single `late final <name>` field holding the upstream `Resource<T>` (or `Resource<T>.stream(...)`). No private wrapper, no thin-accessor, no underscore prefix. The field bears the same identifier the user wrote on the source-side method, so consumers continue to reference it by that name. The original method's body becomes the Resource's fetcher closure.
@@ -717,10 +867,22 @@ Rules:
 
 4. **Body rewrite.** The original method's body is wrapped in a parameterless function expression preserving the `async` / `async*` keyword (or returning a `Stream<T>` directly for the synchronous Stream form). Section 5.1 type-driven `.value` rewrite applies inside the body so any `@SolidState` field / getter reads are correctly unboxed.
 
-5. **Auto-tracking — direct source for one dep, synthesized Record-Computed for multiple.** The body's reactive reads (identifiers whose resolved static type is `SignalBase<T>`) determine the Resource's `source:` argument:
-   - **Zero reactive reads**: no `source:` argument emitted; the Resource only refreshes via explicit `.refresh()` calls.
-   - **One reactive read**: the read identifier (a `Signal` or `Computed`) is passed directly as `source: <name>`. No synthesized field is emitted — wrapping a single Signal in a Computed that just returns its `.value` would be a no-op, so the generator skips it. The upstream `Resource<T>` constructor accepts any `SignalBase<dynamic>` as `source:`, and `Signal<T>` / `Computed<T>` already qualify.
-   - **Two or more reactive reads**: the generator synthesizes a `late final _<name>Source = Computed<(T1, T2, …)>(() => (s1.value, s2.value, …), name: '<name>_source')` field whose value is a `Record` combining all tracked values. The Computed is passed as `source: _<name>Source`. Records compare by value-equality, so changing ANY tracked signal flips the Record's identity, the Resource sees its source change, and the fetcher re-runs (subject to any `debounce:` delay). The synthesized field is the only reason an underscore-prefixed Resource-related declaration ever appears in lowered output.
+5. **Auto-tracking — direct source for one dep, synthesized Record-Computed for multiple.** The body's tracked reads determine the Resource's `source:` argument. Two read kinds participate, accumulated in source-first-appearance order:
+
+   - **Reactive identifier reads** — bare identifiers (or chains) whose resolved static type is `SignalBase<T>`: same-class `@SolidState` fields and getters (M1 / Section 4.5).
+   - **Query-call reads** — zero-argument `MethodInvocation`s whose target is a bare `SimpleIdentifier` matching another `@SolidQuery` method on the same class, not shadowed by a local. Tear-offs (`<queryName>.refresh()`) and untracked reads (`<queryName>().untracked` — Section 6.4) are excluded.
+
+   Wiring depends on the count of accumulated tracked reads:
+
+   - **Zero tracked reads**: no `source:` argument emitted; the Resource only refreshes via explicit `.refresh()` calls.
+   - **One tracked read**: the read identifier is passed directly as `source: <name>`. No synthesized field is emitted — wrapping a single observable in a Computed that just returns its `.value` would be a no-op, so the generator skips it. The upstream `Resource<T>` constructor accepts any `SignalBase<dynamic>` as `source:`; `Signal<T>` / `Computed<T>` qualify, and `Resource<T>` qualifies because `Resource<T>` extends `Signal<ResourceState<T>>`.
+   - **Two or more tracked reads**: the generator synthesizes a `late final _<name>Source = Computed<(E1, E2, …)>(() => (e1, e2, …), name: '<name>_source')` field whose value is a `Record` combining all tracked values. The Computed is passed as `source: _<name>Source`. For each tracked read:
+     - A reactive identifier read of type `Signal<X>` / `Computed<X>` contributes element type `X` and read expression `<name>.value`.
+     - A query-call read of inner type `X` contributes element type `ResourceState<X>` and read expression `<queryName>.state`. (`Resource<X>.state` is the canonical accessor; reading it inside a `Computed` closure subscribes to the upstream Resource's emissions because `Resource<X>` extends `Signal<ResourceState<X>>`.)
+
+     Records compare by value-equality, so changing ANY tracked observable flips the Record's identity, the Resource sees its source change, and the fetcher re-runs (subject to any `debounce:` delay). The synthesized field is the only reason an underscore-prefixed Resource-related declaration ever appears in lowered output.
+
+   A self-cycle — a query whose body invokes itself — is rejected at codegen time with a clear error. Inter-query cycles (A reads B, B reads A) are not validated at codegen time; they surface as a runtime error from `flutter_solidart`.
 
 6. **`Resource<T>(...)` for Future, `Resource<T>.stream(...)` for Stream.** Type argument `T` is the inner type of the original `Future<T>` / `Stream<T>` return signature.
 
@@ -815,7 +977,9 @@ The rewrite is **type-driven and chain-aware**: any expression position whose re
 
 For a chain `a.b.c.d` where any prefix resolves to a `SignalBase<T>`, the rewriter inserts `.value` at every such position. Example: if `a.b.c` resolves to `Signal<int>`, the chain becomes `a.b.c.value.d` (assuming `.d` is a member on `int`); if `a.b` resolves to `Signal<Foo>` and `Foo.c.d` is a plain non-reactive access, the chain becomes `a.b.value.c.d`.
 
-`@SolidQuery` (Section 3.5) does NOT introduce a `SignalBase<T>` identifier at the call site: a query is invoked as a method call (`fetchData()`), and the lowered method returns `Resource<T>` (Section 4.8), which the call-site reads via the `.when` / `.maybeWhen` / `.refresh` / `.isRefreshing` extensions on `Resource<T>` from `solid_annotations`. The Section 5.1 `.value` rewrite does not apply to query call expressions.
+`@SolidQuery` (Section 3.5) does NOT introduce a `SignalBase<T>` identifier at the call site: a query is invoked as a method call (`fetchData()`), and the lowered method returns `Resource<T>` (Section 4.8) whose `call()` operator returns `ResourceState<T>`. The Section 5.1 `.value` rewrite does not apply to query call expressions — `ResourceState<T>` is not a `SignalBase<T>` subtype. The trailing chain (`.when` / `.maybeWhen` / `.refresh` / `.isRefreshing` / `.value` / `.isReady` / `.isLoading` / `.hasError` / `.error` / `.asReady?.value` / `.asError?.error` / `.asError?.stackTrace`) resolves at runtime to upstream `ResourceExtensions` on `ResourceState<T>` (and `ResourceReady<T>` / `ResourceError<T>` field accessors) directly; Section 3.5 lists the source-time stubs that mirror this surface.
+
+Query-call invocations are nevertheless tracked reads. Inside `build()` they drive SignalBuilder placement (Section 4.8 rule 3); inside `@SolidQuery` bodies, `@SolidEffect` bodies, and `@SolidState` getter (Computed) bodies they drive `Resource.source:` / Effect / Computed dependency wiring (Section 4.8 rule 5; Section 3.5 "Auto-tracking of upstream queries"). Detection is name-based — a zero-argument `MethodInvocation` whose target is a bare `SimpleIdentifier` matches the per-class set of `@SolidQuery` method names, modulo the Section 5.5 shadowing rule. The opt-out is `<queryName>().untracked` (Section 6.4), which the rewriter replaces with a non-subscribing read.
 
 Source (same-class, M1 case):
 
@@ -982,11 +1146,14 @@ FloatingActionButton(
 
 ### 6.4 Explicit opt-out via the `.untracked` extension getter
 
-To read a reactive field's current value without subscribing the enclosing widget subtree, append `.untracked` to the field reference at the call site.
+To read a reactive value without subscribing the enclosing reactive context, append `.untracked` to the read site. The opt-out applies to two read kinds:
 
-`solid_annotations` exports `extension UntrackedExtension<T> on T { T get untracked => this; }`, so the source typechecks before generation: `counter.untracked` has the same type as `counter` (an identity at runtime).
+1. **`@SolidState` field / getter reads**, where `.untracked` is appended to the field reference: `counter.untracked`.
+2. **`@SolidQuery` call reads**, where `.untracked` is appended after the zero-argument call: `fetchData().untracked`.
 
-Source:
+`solid_annotations` exports `extension UntrackedExtension<T> on T { T get untracked => this; }`, so the source typechecks before generation: `counter.untracked` has the same type as `counter` (an identity at runtime), and `fetchData().untracked` has the same type as `fetchData()` (`Future<T>` or `Stream<T>` at the source level).
+
+Source (state read):
 
 ```dart
 Container(key: ValueKey(counter.untracked), child: const Text('hi'))
@@ -999,13 +1166,33 @@ Container(key: ValueKey(counter.untrackedValue), child: const Text('hi'))
 // NOT wrapped in SignalBuilder
 ```
 
+Source (query-call read):
+
+```dart
+@SolidEffect()
+void logOnce() {
+  final snapshot = fetchData().untracked.value;
+  debugPrint('initial: $snapshot');
+}
+```
+
+Output:
+
+```dart
+late final logOnce = Effect(() {
+  final snapshot = fetchData.untrackedState.value;
+  debugPrint('initial: $snapshot');
+}, name: 'logOnce');
+```
+
 Rules:
 
-- The generator detects `<reactiveField>.untracked` as a `PrefixedIdentifier`, replaces the whole expression with `<reactiveField>.untrackedValue` (the runtime primitive on `ReadableSignal<T>`), and excludes the offset from the tracked-read set. No `SignalBuilder` wrap occurs at this position, regardless of structural context — even if the read sits inside an existing `SignalBuilder` from a sibling tracked read, `untrackedValue` bypasses `reactiveSystem.setCurrentSub` and never subscribes.
-- Inside string interpolations, only the long form `'${counter.untracked}'` expresses the untracked intent. The short form `'$counter.untracked'` parses as `${counter}` followed by a literal `.untracked` string suffix and rewrites as a normal tracked read of `counter`.
-- Detection is name-based on the prefix (the M3-05 type-resolution deferral); the existing shadowing guard (Section 5.5) suppresses the rewrite when a local variable shadows the field.
+- **State-read rewrite.** The generator detects `<reactiveField>.untracked` as a `PrefixedIdentifier`, replaces the whole expression with `<reactiveField>.untrackedValue` (the runtime primitive on `ReadableSignal<T>`), and excludes the offset from the tracked-read set. No `SignalBuilder` wrap occurs at this position, regardless of structural context — even if the read sits inside an existing `SignalBuilder` from a sibling tracked read, `untrackedValue` bypasses `reactiveSystem.setCurrentSub` and never subscribes.
+- **Query-call rewrite.** The generator detects `<queryName>().untracked` as a `PropertyAccess` whose `target` is a zero-argument `MethodInvocation` matching the per-class set of `@SolidQuery` method names (and not shadowed by a local) and whose `propertyName` is `untracked`. The whole `<queryName>().untracked` sub-expression is replaced with `<queryName>.untrackedState` (the upstream non-subscribing `Resource<T>` accessor that returns `ResourceState<T>`). The query-call invocation is bypassed entirely — it does NOT count as a tracked read for SignalBuilder placement (Section 4.8 rule 3) or for `Resource.source:` / Effect / Computed wiring (Section 4.8 rule 5). Subsequent chained members (`.value`, `.when`, `.isReady`, etc.) resolve normally on `ResourceState<T>` via the upstream `ResourceExtensions`.
+- **String interpolations.** Only the long form `'${counter.untracked}'` / `'${fetchData().untracked.value}'` expresses the untracked intent. The short form `'$counter.untracked'` parses as `${counter}` followed by a literal `.untracked` string suffix and rewrites as a normal tracked read of `counter`.
+- **Detection is name-based** for both read kinds (the M3-05 type-resolution deferral); the existing shadowing guard (Section 5.5) suppresses the rewrite when a local variable shadows the underlying field or query name.
 
-**Migration from the v1 function-call form:** `untracked(() => ...)` is no longer supported. Writing it in source produces a build-time `CodeGenerationError` directing the user to the extension form. Replace each occurrence: `untracked(() => counter)` → `counter.untracked`.
+The function-call form `untracked(() => …)` is rejected at build time with a `CodeGenerationError` directing the user to the extension form (`counter.untracked` for state reads, `fetchData().untracked` for query reads).
 
 ### 6.5 Everything else is tracked
 
@@ -1409,6 +1596,7 @@ This SPEC addresses the following real user-reported issues from the v1 repo:
 
 - **#3** — `@SolidEnvironment` inside an existing `State<X>` was not transformed; the class-kind handling in Section 8.2 makes this impossible to regress.
 - **#4** — untracked reads (`onPressed`) were wrapped in `SignalBuilder`, breaking compilation; Section 6 defines the untracked-context rules. *(resolved in M3)*
+- **#5** — `@SolidQuery` could not reactively depend on another `@SolidQuery`'s value. Section 3.5 ("Auto-tracking of upstream queries") and Section 4.8 rule 5 wire same-class query-call reads as `Resource.source:` deps so the downstream auto-refreshes when the upstream emits. Section 3.5 ("Source-time typechecking") expands the stub surface to mirror the upstream `ResourceExtensions` (`value`, `error`, `isReady`, `isLoading`, `hasError`, `asReady?.value`, `asError?.error` / `.stackTrace`, generic `when<R>` / `maybeWhen<R>`) so downstream bodies can read the upstream's current value synchronously — including the safe `asReady?.value` chain that avoids the foot-gun where bare `.value` rethrows on an upstream error. Section 6.4 adds `<queryName>().untracked` as the symmetric opt-out.
 - **#6** — `Text(text)` did not receive `.value` because the rewriter missed bare identifier reads; Section 5.1 defines the rewrite rule exhaustively. *(resolved in M3)*
 - **#8** — generated `main.dart` used `SolidartConfig` without importing `flutter_solidart`; Section 9 defines the import-addition rule.
 - **#9** — hot reload required a double-save; Section 12 defines the two supported workflows: manual `r` after build_runner emits, or `dashmon` to bridge filesystem changes to Flutter's stdin automatically.

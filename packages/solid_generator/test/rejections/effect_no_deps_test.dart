@@ -1,6 +1,6 @@
-// Rejection suite for zero-deps Effect (SPEC §3.4).
+// Rejection suite for zero-deps Effect.
 // An `@SolidEffect` method whose body references no reactive declaration
-// must be rejected at build time with the SPEC §3.4 error message.
+// must be rejected at build time with the appropriate error message.
 
 import '../integration/golden_helpers.dart';
 

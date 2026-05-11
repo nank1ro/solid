@@ -1,7 +1,7 @@
-// SPEC §4.9 rule 7. Bare `Provider(create: ..., child: ...)` at top level.
+// Bare `Provider(create: ..., child: ...)` at top level.
 // The generator must inject `dispose: (context, provider) => provider.dispose()`
 // before the closing `)`. `Counter` is a Solid-lowered class that gets
-// `implements Disposable` + a synthesized `dispose()` in lib/ (Section 10);
+// `implements Disposable` + a synthesized `dispose()` in lib/;
 // the source-side `void dispose() {}` stub is required so the source layer
 // typechecks `provider.dispose()`.
 // ignore_for_file: prefer_const_constructors_in_immutables, unreachable_from_main

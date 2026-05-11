@@ -1,4 +1,4 @@
-// Proves SPEC §7 (SignalBuilder placement) at runtime: a FAB tap
+// Proves at runtime that a FAB tap
 // rebuilds only the `Text` subtree wrapped by `SignalBuilder`; the sibling
 // `Icon` does not. `_TrackedCounterPage` mirrors the generated
 // `_CounterPageState` (see `example/lib/counter.dart`) but wraps the `Text`

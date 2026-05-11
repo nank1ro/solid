@@ -23,48 +23,46 @@ class SourceEdit {
   final String replacement;
 }
 
-/// Rewrites the `build()` method source text by applying SPEC §5 rules.
+/// Rewrites the `build()` method source text by applying reactive-read rules.
 ///
 /// The rewrite comprises four passes composed in the order they are visible
 /// in the returned string:
 ///
-///   1. SPEC Section 5.1 — bare `SimpleIdentifier` reads of a reactive field
-///      receive `.value`.
-///   2. SPEC Section 5.2 — `$name` interpolation shorthand for a reactive
-///      field expands to `${name.value}`.
-///   3. SPEC Section 5.3 — assignment / compound / `++` / `--` writes
-///      receive `.value` (single textual occurrence per SPEC rule).
-///   4. SPEC Section 7.2 — tracked reads cause their smallest enclosing
-///      widget expression to be wrapped in `SignalBuilder`. Untracked-
-///      context rules from Section 6.2 / 6.4 suppress tracking.
+///   1. Bare `SimpleIdentifier` reads of a reactive field receive `.value`.
+///   2. `$name` interpolation shorthand for a reactive field expands to
+///      `${name.value}`.
+///   3. Assignment / compound / `++` / `--` writes receive `.value` (single
+///      textual occurrence per rule).
+///   4. Tracked reads cause their smallest enclosing widget expression to be
+///      wrapped in `SignalBuilder`. Untracked-context rules suppress tracking.
 ///
 /// [reactiveFields] is the set of field names declared `@SolidState` on the
-/// enclosing class. The match is name-based; SPEC 5.4's type-driven rule
-/// will eventually upgrade to resolved-element analysis, at which point the
-/// call site swaps to a resolved predicate without restructuring this file.
+/// enclosing class. The match is name-based; a future type-driven rule will
+/// eventually upgrade to resolved-element analysis, at which point the call
+/// site swaps to a resolved predicate without restructuring this file.
 ///
 /// [queryNames] is the set of `@SolidQuery` method names declared on the
-/// enclosing class. Their zero-arg call sites in the build body are
-/// recorded as tracked reads for SignalBuilder placement (SPEC §4.8 rule 3)
-/// without mutating the call expression itself.
+/// enclosing class. Their zero-arg call sites in the build body are recorded
+/// as tracked reads for SignalBuilder placement without mutating the call
+/// expression itself.
 ///
 /// [classRegistry] is the cross-class reactivity map (class name → reactive
-/// field/getter names). Threaded through to the value-rewrite visitor so
-/// SPEC §5.1's single-level `<param>.<reactiveField>` cross-class rewrite
-/// fires. Empty map → no-op for the cross-class branch.
+/// field/getter names). Threaded through to the value-rewrite visitor so the
+/// single-level `<param>.<reactiveField>` cross-class rewrite fires. Empty
+/// map → no-op for the cross-class branch.
 ///
 /// [environmentFields] is the host class's `@SolidEnvironment` field map
 /// (`fieldName -> typeText`). Threaded through to the value-rewrite visitor
-/// so SPEC §5.1's sibling slice fires for `<envField>.<reactiveField>`
-/// shapes when the env field's declared type names a class in
-/// [classRegistry]. Empty map → no-op for the env-field branch.
+/// so the sibling slice fires for `<envField>.<reactiveField>` shapes when
+/// the env field's declared type names a class in [classRegistry]. Empty map
+/// → no-op for the env-field branch.
 ///
 /// [widgetBoundFields] is the set of widget-bound non-`@SolidState` field
 /// names on the enclosing class (only populated by the StatelessWidget→
-/// StatefulWidget rewriter — SPEC §8.1). Bare references in `build` are
-/// prefixed with `widget.` so the lowered State class resolves them
-/// through the widget config object. Empty set → no-op for callers whose
-/// `build` body does not change scope (state-class / plain-class).
+/// StatefulWidget rewriter). Bare references in `build` are prefixed with
+/// `widget.` so the lowered State class resolves them through the widget
+/// config object. Empty set → no-op for callers whose `build` body does not
+/// change scope (state-class / plain-class).
 ///
 /// [source] is the full source text of the input file. The returned string
 /// is the rewritten build method (from `@override` through the closing `}`),
@@ -146,10 +144,9 @@ String rewriteBuildMethod(
   return result;
 }
 
-/// Emits the SPEC Section 7 `SignalBuilder` wrapper around [inner] using a
-/// block-body `builder:` callback. The `child` parameter of the callback is
-/// accepted but not consumed — the rewriter does not pass through a static
-/// child.
+/// Emits the `SignalBuilder` wrapper around [inner] using a block-body
+/// `builder:` callback. The `child` parameter of the callback is accepted
+/// but not consumed — the rewriter does not pass through a static child.
 String _signalBuilderWrap(String inner) {
   return 'SignalBuilder(\n'
       '  builder: (context, child) {\n'

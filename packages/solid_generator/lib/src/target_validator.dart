@@ -2,10 +2,10 @@ import 'package:analyzer/dart/ast/ast.dart';
 import 'package:solid_generator/src/annotation_reader.dart';
 import 'package:solid_generator/src/transformation_error.dart';
 
-/// Validates every `@SolidState` annotation in [unit] against the SPEC
-/// Section 3.1 valid-target list. Throws [ValidationError] on the first
-/// invalid placement; returns silently when every annotation targets a
-/// valid declaration (instance field or instance getter).
+/// Validates every `@SolidState` annotation in [unit] against the valid-target
+/// list. Throws [ValidationError] on the first invalid placement; returns
+/// silently when every annotation targets a valid declaration (instance field
+/// or instance getter).
 ///
 /// Runs before transformation so the pre-existing builder pipeline (which
 /// only walks `FieldDeclaration`s in `_collectAnnotatedClasses`) cannot
@@ -18,10 +18,10 @@ void validateSolidStateTargets(CompilationUnit unit) => _walkUnit(
   onTopLevel: _validateTopLevel,
 );
 
-/// Validates every `@SolidEffect` annotation in [unit] against the SPEC
-/// Section 3.4 valid-target list. Throws [ValidationError] on the first
-/// invalid placement; returns silently when every annotation targets a
-/// valid declaration (instance method with no parameters and `void` return).
+/// Validates every `@SolidEffect` annotation in [unit] against the valid-target
+/// list. Throws [ValidationError] on the first invalid placement; returns
+/// silently when every annotation targets a valid declaration (instance method
+/// with no parameters and `void` return).
 ///
 /// Runs after [validateSolidStateTargets] and before transformation so that
 /// misplaced `@SolidEffect` annotations (on getters, setters, static methods,
@@ -64,7 +64,7 @@ void _walkUnit(
 String _kindCode(String kind) =>
     kind.toUpperCase().replaceAll(' ', '_').replaceAll('-', '_');
 
-// --- @SolidState target validator (SPEC §3.1) ---
+// --- @SolidState target validator ---
 
 /// Throws a [ValidationError] for `@SolidState` on a [kind] of declaration.
 /// The violation code is derived from [kind] so message and code never drift.
@@ -78,29 +78,29 @@ Never _reject(String kind, String location) {
 
 /// Rejects `@SolidState` on a class field that is `const`, `final`, or
 /// `static`. Instance non-final non-const non-static fields fall through
-/// silently — they are the canonical SPEC 3.1 valid target.
+/// silently — they are the canonical valid target.
 void _validateField(FieldDeclaration field, String className) {
   if (findAnnotationByName(solidStateName, field.metadata) == null) return;
   final varList = field.fields;
   final fieldName = varList.variables.first.name.lexeme;
   final location = '$className.$fieldName';
   // Order matters: `static const` reports as "const field" — the const-ness
-  // is the dominant violation per SPEC §3.1.
+  // is the dominant violation.
   if (varList.isConst) _reject('const field', location);
   if (varList.isFinal) _reject('final field', location);
   if (field.isStatic) _reject('static field', location);
 }
 
 /// Rejects `@SolidState` on a setter, static getter, or non-accessor method.
-/// Instance getters fall through — they are valid SPEC 3.1 targets and lower
-/// to `Computed`.
+/// Instance getters fall through — they are valid targets and lower to
+/// `Computed`.
 void _validateMethod(MethodDeclaration method, String className) {
   if (findAnnotationByName(solidStateName, method.metadata) == null) return;
   final location = '$className.${method.name.lexeme}';
   if (method.isSetter) _reject('setter', location);
   if (method.isGetter && method.isStatic) _reject('static getter', location);
   if (!method.isGetter && !method.isSetter) _reject('method', location);
-  // Instance getter — valid SPEC 3.1 target; lowers to Computed.
+  // Instance getter — valid target; lowers to Computed.
 }
 
 /// Rejects `@SolidState` on top-level variables, getters, and any other
@@ -127,8 +127,8 @@ void _validateTopLevel(CompilationUnitMember decl) {
 /// the message reads naturally ("a getter" vs "an abstract method").
 ///
 /// Shared by the `@SolidEffect`, `@SolidQuery`, and `@SolidEnvironment`
-/// validators; `@SolidState` uses its own [_reject] helper because its SPEC
-/// §3.1 message form omits the article.
+/// validators; `@SolidState` uses its own [_reject] helper because its
+/// message form omits the article.
 Never _rejectArticleAnnotation(
   String annotationName,
   String codePrefix,
@@ -144,10 +144,9 @@ Never _rejectArticleAnnotation(
 }
 
 /// Shared top-level rejection walk for the article-form validators. Each
-/// one (`@SolidEffect` §3.4, `@SolidQuery` §3.5, `@SolidEnvironment` §3.6)
-/// classifies top-level declarations into variable/getter/setter/function
-/// with identical labels — only the annotation name and reject closure
-/// differ.
+/// one (`@SolidEffect`, `@SolidQuery`, `@SolidEnvironment`) classifies
+/// top-level declarations into variable/getter/setter/function with identical
+/// labels — only the annotation name and reject closure differ.
 void _validateTopLevelArticleAnnotation(
   CompilationUnitMember decl,
   String annotationName,
@@ -166,15 +165,14 @@ void _validateTopLevelArticleAnnotation(
   }
 }
 
-// --- @SolidEffect target validator (SPEC §3.4) ---
+// --- @SolidEffect target validator ---
 
 /// Throws a [ValidationError] for `@SolidEffect` on a [kind] of declaration.
 Never _rejectEffect(String kind, String location) =>
     _rejectArticleAnnotation(solidEffectName, 'INVALID_EFFECT', kind, location);
 
-/// Rejects `@SolidEffect` on any field. The SPEC §3.4 bullet does not
-/// subdivide field kinds, so static and instance fields share the single
-/// `'field'` label.
+/// Rejects `@SolidEffect` on any field. Static and instance fields share the
+/// single `'field'` label.
 void _validateEffectField(FieldDeclaration field, String className) {
   if (findAnnotationByName(solidEffectName, field.metadata) == null) return;
   final fieldName = field.fields.variables.first.name.lexeme;
@@ -184,7 +182,7 @@ void _validateEffectField(FieldDeclaration field, String className) {
 /// Rejects `@SolidEffect` on a getter, setter, static method, abstract or
 /// external method, parameterized method, or non-void method. Instance methods
 /// declared with `void` return and zero parameters fall through silently —
-/// they are the canonical SPEC §3.4 valid target.
+/// they are the canonical valid target.
 void _validateEffectMethod(MethodDeclaration method, String className) {
   if (findAnnotationByName(solidEffectName, method.metadata) == null) return;
   final location = '$className.${method.name.lexeme}';
@@ -208,18 +206,18 @@ void _validateEffectMethod(MethodDeclaration method, String className) {
   }
 }
 
-/// Rejects `@SolidEffect` on top-level declarations (SPEC §3.4).
+/// Rejects `@SolidEffect` on top-level declarations.
 void _validateEffectTopLevel(CompilationUnitMember decl) =>
     _validateTopLevelArticleAnnotation(decl, solidEffectName, _rejectEffect);
 
-// --- @SolidQuery target validator (SPEC §3.5) ---
+// --- @SolidQuery target validator ---
 
-/// Validates every `@SolidQuery` annotation in [unit] against the SPEC
-/// Section 3.5 valid-target list. Throws [ValidationError] on the first
-/// invalid placement; returns silently when every annotation targets a
-/// valid declaration (instance method with no parameters and a `Future<T>`
-/// return type with `async` body, or a `Stream<T>` return type with either
-/// a synchronous body or an `async*` block body).
+/// Validates every `@SolidQuery` annotation in [unit] against the valid-target
+/// list. Throws [ValidationError] on the first invalid placement; returns
+/// silently when every annotation targets a valid declaration (instance method
+/// with no parameters and a `Future<T>` return type with `async` body, or a
+/// `Stream<T>` return type with either a synchronous body or an `async*` block
+/// body).
 ///
 /// Runs after [validateSolidEffectTargets] and before transformation so that
 /// misplaced `@SolidQuery` annotations (non-Future/Stream returns,
@@ -249,7 +247,7 @@ void _validateQueryField(FieldDeclaration field, String className) {}
 /// or a `Future<T>`-returning method whose body is not `async`. Instance
 /// methods declared with the `Future<T> … async` or `Stream<T> …` /
 /// `Stream<T> … async*` shapes and zero parameters fall through silently —
-/// they are the canonical SPEC §3.5 valid targets.
+/// they are the canonical valid targets.
 ///
 /// Ordering rationale: structural shape (getter/setter/static/abstract/
 /// parameterized) is checked before the return-type discriminator, mirroring
@@ -270,19 +268,19 @@ void _validateQueryMethod(MethodDeclaration method, String className) {
   if (params != null && params.parameters.isNotEmpty) {
     _rejectQuery('parameterized method', location);
   }
-  // SPEC §3.5: return type must be Future<T> or Stream<T>.
+  // Return type must be Future<T> or Stream<T>.
   final returnType = method.returnType;
   final returnName = returnType is NamedType ? returnType.name.lexeme : null;
   if (returnName != futureLexeme && returnName != streamLexeme) {
     _rejectQuery('non-Future/Stream method', location);
   }
-  // SPEC §3.5: Future<T> requires `async`. A null body keyword (expression
-  // body without `async`, e.g. `=> Future.value(0)`) is intentionally
-  // caught here — `?.lexeme` returns `null`, and `null != 'async'` is
-  // `true`. Mirrors `annotation_reader.dart`'s `?.lexeme ?? ''` pattern.
-  // Stream-form mismatches are out of scope (Stream has two valid shapes:
-  // sync-return or async*); they are exercised positively by the
-  // simple_query_with_stream golden.
+  // Future<T> requires `async`. A null body keyword (expression body without
+  // `async`, e.g. `=> Future.value(0)`) is intentionally caught here —
+  // `?.lexeme` returns `null`, and `null != 'async'` is `true`. Mirrors
+  // `annotation_reader.dart`'s `?.lexeme ?? ''` pattern. Stream-form
+  // mismatches are out of scope (Stream has two valid shapes: sync-return or
+  // async*); they are exercised positively by the simple_query_with_stream
+  // golden.
   final bodyKeyword = method.body.keyword?.lexeme;
   if (returnName == futureLexeme && bodyKeyword != 'async') {
     _rejectQuery(
@@ -292,18 +290,17 @@ void _validateQueryMethod(MethodDeclaration method, String className) {
   }
 }
 
-/// Rejects `@SolidQuery` on top-level declarations (SPEC §3.5).
+/// Rejects `@SolidQuery` on top-level declarations.
 void _validateQueryTopLevel(CompilationUnitMember decl) =>
     _validateTopLevelArticleAnnotation(decl, solidQueryName, _rejectQuery);
 
-// --- @SolidEnvironment target validator (SPEC §3.6) ---
+// --- @SolidEnvironment target validator ---
 
-/// Validates every `@SolidEnvironment` annotation in [unit] against the SPEC
-/// Section 3.6 valid-target list. Throws [ValidationError] on the first
-/// invalid placement; returns silently when every annotation targets a
-/// valid declaration (a `late` instance field with no initializer, a
-/// non-`SignalBase` type, on a `StatelessWidget`/`StatefulWidget`/`State<X>`
-/// host).
+/// Validates every `@SolidEnvironment` annotation in [unit] against the
+/// valid-target list. Throws [ValidationError] on the first invalid placement;
+/// returns silently when every annotation targets a valid declaration (a `late`
+/// instance field with no initializer, a non-`SignalBase` type, on a
+/// `StatelessWidget`/`StatefulWidget`/`State<X>` host).
 ///
 /// Runs after [validateSolidQueryTargets] and before transformation so that
 /// misplaced `@SolidEnvironment` annotations (non-`late` fields, fields with
@@ -339,13 +336,13 @@ Never _rejectEnvironment(String kind, String location) =>
 /// defense-in-depth check (the host-kind check needs the full class context
 /// the validator's `_walkUnit` doesn't provide). Instance non-final non-const
 /// non-static `late` fields with no initializer and a non-`SignalBase` type
-/// fall through silently — they are the canonical SPEC §3.6 valid target.
+/// fall through silently — they are the canonical valid target.
 ///
-/// Order matters per SPEC §3.6 invalid-target enumeration: structural
-/// modifiers (`static` / `const` / `final` / non-`late`) are checked before
-/// initializer presence and type shape. A `static const Signal<int> c = …`
-/// reports as `'static field'` (the dominant placement violation) rather
-/// than `'SignalBase-typed field'`.
+/// Order matters for invalid-target enumeration: structural modifiers
+/// (`static` / `const` / `final` / non-`late`) are checked before initializer
+/// presence and type shape. A `static const Signal<int> c = …` reports as
+/// `'static field'` (the dominant placement violation) rather than
+/// `'SignalBase-typed field'`.
 void _validateEnvironmentField(FieldDeclaration field, String className) {
   if (findAnnotationByName(solidEnvironmentName, field.metadata) == null) {
     return;
@@ -355,8 +352,8 @@ void _validateEnvironmentField(FieldDeclaration field, String className) {
   final location = '$className.$fieldName';
   if (field.isStatic) _rejectEnvironment('static field', location);
   if (varList.isConst) _rejectEnvironment('const field', location);
-  // `late final` is allowed (the SPEC §3.6 bullet allows immutability on the
-  // injected reference); only `final` WITHOUT `late` is rejected.
+  // `late final` is allowed (immutability on the injected reference is fine);
+  // only `final` WITHOUT `late` is rejected.
   if (varList.isFinal && !varList.isLate) {
     _rejectEnvironment('final field', location);
   }
@@ -365,9 +362,9 @@ void _validateEnvironmentField(FieldDeclaration field, String className) {
   if (variable.initializer != null) {
     _rejectEnvironment('field with initializer', location);
   }
-  // Textual `SignalBase` detection on the unresolved AST. Per SPEC §3.6's
-  // contract that the user must import `flutter_solidart` to write the type
-  // at all, the lexeme prefix is sufficient at the validator boundary.
+  // Textual `SignalBase` detection on the unresolved AST. The user must import
+  // `flutter_solidart` to write the type at all, so the lexeme prefix is
+  // sufficient at the validator boundary.
   final type = varList.type;
   if (type is NamedType && signalBaseTypeNames.contains(type.name.lexeme)) {
     _rejectEnvironment('SignalBase-typed field', location);
@@ -386,7 +383,7 @@ void _validateEnvironmentMethod(MethodDeclaration method, String className) {
   _rejectEnvironment('method', location);
 }
 
-/// Rejects `@SolidEnvironment` on top-level declarations (SPEC §3.6).
+/// Rejects `@SolidEnvironment` on top-level declarations.
 void _validateEnvironmentTopLevel(CompilationUnitMember decl) =>
     _validateTopLevelArticleAnnotation(
       decl,

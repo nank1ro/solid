@@ -10,9 +10,9 @@ import 'package:solid_generator/src/transformation_error.dart';
 import 'package:solid_generator/src/value_rewriter.dart';
 
 /// Simple-identifier name of the `Disposable` interface from
-/// `package:solid_annotations` (SPEC §10). Used to detect an existing
-/// declaration in the user's `implements` clause and to splice the marker
-/// into lowered headers.
+/// `package:solid_annotations`. Used to detect an existing declaration in
+/// the user's `implements` clause and to splice the marker into lowered
+/// headers.
 const String _disposableMarkerName = 'Disposable';
 
 /// Rewrites a plain Dart class (no widget supertype) containing `@SolidState`
@@ -20,15 +20,14 @@ const String _disposableMarkerName = 'Disposable';
 /// each annotated field with a `Signal<T>(…)`, each annotated method with a
 /// `late final … = Effect(…)` (Effect) or `late final … = Resource<T>(…)`
 /// (Query) field, and synthesizing a `dispose()` method (or merging into a
-/// user-defined one — SPEC §10 / §14 item 4). When Effects exist, a fresh
-/// no-arg constructor body materializes them — the plain-class analogue of
-/// the State class's `initState()` materialization (SPEC §4.7). Queries are
-/// intentionally never spliced into the synthesized constructor — Resources
-/// are lazy and the late-final initializer fires on first call-site read
-/// (SPEC §4.8 rule 10 / §8.3).
+/// user-defined one). When Effects exist, a fresh no-arg constructor body
+/// materializes them — the plain-class analogue of the State class's
+/// `initState()` materialization. Queries are intentionally never spliced
+/// into the synthesized constructor — Resources are lazy and the late-final
+/// initializer fires on first call-site read.
 ///
 /// Class header: `implements Disposable` is added to every Solid-lowered
-/// plain class per SPEC §10's marker rule (lines 1206–1210 of SPEC.md):
+/// plain class per the marker rule:
 /// when no `implements` clause is present, ` implements Disposable` is
 /// appended after any `extends` / `with` clauses; when one is present,
 /// `, Disposable` is appended to the existing list; when `Disposable` is
@@ -42,16 +41,12 @@ const String _disposableMarkerName = 'Disposable';
 /// through verbatim.
 ///
 /// Non-annotated members (other fields, user-defined methods other than
-/// `dispose()`, …) are emitted verbatim — with the SPEC §5.1 same-class
-/// `.value` rewrite applied to user method bodies (and the single-level
-/// cross-class slice from [classRegistry], so a `compareTo(Counter
-/// other) => value - other.value;` body lowers to
-/// `=> value.value - other.value.value;`). User-defined constructors are
-/// still rejected — constructor-merge is deferred to a later milestone.
-///
-/// See SPEC §8.3 (plain-class lowering header), §10 (dispose contract +
-/// `Disposable` marker rule + body merge), §14 item 4 (existing `State<X>`
-/// rule, extended here to plain classes).
+/// `dispose()`, …) are emitted verbatim — with the same-class `.value`
+/// rewrite applied to user method bodies (and the single-level cross-class
+/// slice from [classRegistry], so a `compareTo(Counter other) => value -
+/// other.value;` body lowers to `=> value.value - other.value.value;`).
+/// User-defined constructors are still rejected — constructor-merge is
+/// deferred to a later milestone.
 ///
 /// The emitted string is syntactically valid Dart but is not guaranteed to be
 /// pretty-printed — run through `DartFormatter` before writing.
@@ -69,11 +64,11 @@ RewriteResult rewritePlainClass(
   // getter→Computed only ships for `StatelessWidget`; reject here so the
   // valid-target pass isn't silently undone.
   rejectIfGettersNotYetSupported(solidGetters, 'plain class', className);
-  // SPEC §3.6: `@SolidEnvironment` requires a `BuildContext`, which only
-  // widget/state hosts provide — plain classes cannot resolve `context.read`.
-  // The user-facing rejection comes from `validateSolidEnvironmentTargets`;
-  // this is defense-in-depth to catch any path that bypasses validation
-  // (mirrors `readSolidEffectMethod`'s defensive `decl.isStatic` skip).
+  // `@SolidEnvironment` requires a `BuildContext`, which only widget/state
+  // hosts provide — plain classes cannot resolve `context.read`. The
+  // user-facing rejection comes from `validateSolidEnvironmentTargets`; this
+  // is defense-in-depth to catch any path that bypasses validation (mirrors
+  // `readSolidEffectMethod`'s defensive `decl.isStatic` skip).
   if (solidEnvironments.isNotEmpty) {
     throw CodeGenerationError(
       '@SolidEnvironment on plain class is invalid — '
@@ -83,10 +78,9 @@ RewriteResult rewritePlainClass(
     );
   }
   // Source-ordered emission so Signal fields, Effect fields, and Resource
-  // fields interleave by declaration order — required by SPEC §10's
-  // reverse-disposal rule (an Effect or Resource must be declared after the
-  // Signals it reads, so reverse order disposes dependents before their
-  // dependencies).
+  // fields interleave by declaration order — required for reverse-disposal
+  // correctness (an Effect or Resource must be declared after the Signals it
+  // reads, so reverse order disposes dependents before their dependencies).
   final fieldByName = {for (final f in solidFields) f.fieldName: f};
   final effectByName = {for (final e in solidEffects) e.methodName: e};
   final queryByName = {for (final q in solidQueries) q.methodName: q};
@@ -95,6 +89,11 @@ RewriteResult rewritePlainClass(
   final reactiveTypeTexts = <String, String>{
     for (final f in solidFields) f.fieldName: f.typeText,
   };
+  // Cross-query deps: each upstream's inner `T` is needed to emit
+  // `ResourceState<T>` elements in the synthesized source-Computed.
+  final queryInnerTypeTexts = solidQueries.isEmpty
+      ? const <String, String>{}
+      : {for (final q in solidQueries) q.methodName: q.innerTypeText};
   final reactiveNames = fieldByName.keys.toSet();
 
   final pieces = <String>[];
@@ -142,10 +141,15 @@ RewriteResult rewritePlainClass(
         effectNames.add(effect.methodName);
       } else if (queryByName.containsKey(name)) {
         // Queries are lazy — joining `disposeNames` only, never
-        // `effectNames`, so the synthesized constructor below skips them
-        // (SPEC §4.8 rule 10 / §8.3).
+        // `effectNames`, so the synthesized constructor below skips them.
         final query = queryByName[name]!;
-        emitQueryFields(query, reactiveTypeTexts, pieces, disposeNames);
+        emitQueryFields(
+          query,
+          reactiveTypeTexts,
+          queryInnerTypeTexts,
+          pieces,
+          disposeNames,
+        );
       } else {
         pieces.add(
           _rewriteUserMethod(member, reactiveNames, classRegistry, source),
@@ -202,9 +206,8 @@ RewriteResult rewritePlainClass(
 }
 
 /// Returns the verbatim class header (everything from `class` up to the
-/// opening `{`) with `Disposable` merged into the `implements` clause per
-/// SPEC §10 (lines 1206–1210). `extends` and `with` clauses are preserved
-/// verbatim.
+/// opening `{`) with `Disposable` merged into the `implements` clause.
+/// `extends` and `with` clauses are preserved verbatim.
 String _buildHeaderWithDisposable(ClassDeclaration classDecl, String source) {
   final classStart = classDecl.offset;
   final base = source.substring(classStart, classDecl.leftBracket.offset);
@@ -234,9 +237,9 @@ String _buildHeaderWithDisposable(ClassDeclaration classDecl, String source) {
       '${base.substring(spliceIdx)}';
 }
 
-/// Emits a non-annotated user method with the SPEC §5.1 `.value` rewrite
-/// applied to its body — both the same-class branch (bare `SimpleIdentifier`
-/// reads of [reactiveFields]) and the cross-class single-level branch from
+/// Emits a non-annotated user method with the `.value` rewrite applied to
+/// its body — both the same-class branch (bare `SimpleIdentifier` reads of
+/// [reactiveFields]) and the cross-class single-level branch from
 /// [classRegistry] in one AST walk.
 String _rewriteUserMethod(
   MethodDeclaration method,

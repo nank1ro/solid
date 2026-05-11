@@ -1,8 +1,8 @@
-// Fences SPEC §4.7 (`@SolidEffect` on method → `Effect`) at runtime.
+// Fences the `@SolidEffect` on method → `Effect` contract at runtime.
 // `_EffectCounterPage` mirrors the lowered shape, including the
 // synthesized `initState()` that materializes the `late final` Effect field
 // at mount time. Without that read, the Effect's autorun never fires during
-// the widget's mounted lifetime — see SPEC §4.7 last bullet.
+// the widget's mounted lifetime.
 //
 // Effect history accounting: the autorun fires once at mount with
 // `counter.value == 0`, recording `[0]`. Each FAB tap mutates `counter`,
@@ -100,7 +100,7 @@ class _EffectCounterPage extends StatefulWidget {
 class _EffectCounterPageState extends State<_EffectCounterPage> {
   final counter = Signal<int>(0, name: 'counter');
   final history = Signal<List<int>>(<int>[], name: 'history');
-  // Reads `history.untrackedValue` (the `.untracked` lowering, SPEC §6.4)
+  // Reads `history.untrackedValue` (the `.untracked` lowering)
   // so the spread does not register `history` as a tracked dependency.
   // Otherwise the same Effect that writes `history.value` would re-run on
   // its own write — a self-dep loop. Only `counter.value` is tracked, so the
@@ -113,8 +113,8 @@ class _EffectCounterPageState extends State<_EffectCounterPage> {
   void initState() {
     super.initState();
     // Materializes the `late final` Effect — the generator emits this exact
-    // pattern (SPEC §3.4 force-materialize) for late-final Effects. The
-    // statement is intentional even though the analyzer cannot tell.
+    // force-materialize pattern for late-final Effects. The statement is
+    // intentional even though the analyzer cannot tell.
     // ignore: unnecessary_statements
     recordHistory;
   }

@@ -1,6 +1,6 @@
-// Rejection suite for invalid `@SolidQuery` placements per SPEC §3.5.
+// Rejection suite for invalid `@SolidQuery` placements.
 //
-// Cases ordered to mirror the SPEC §3.5 bullet list: non-Future/Stream return
+// Cases ordered to mirror the bullet list: non-Future/Stream return
 // → Future-without-async body → parameterized → static → abstract/external →
 // getter → setter → top-level function. Class fields are NOT rejected: a
 // field initializer expression (e.g. `Future.value(0)`) is a valid fetcher

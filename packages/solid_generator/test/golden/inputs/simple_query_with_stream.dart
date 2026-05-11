@@ -1,7 +1,7 @@
-// SPEC §4.8 Stream-form query: a synchronous block body returning a Stream.
+// Stream-form query: a synchronous block body returning a Stream.
 // `Stream.periodic` produces an integer stream ticking every second.
 // `Ticker` has only a query (no mutable `@SolidState` field) so its
-// constructor could be const before lowering, but the SPEC §2 source model
+// constructor could be const before lowering, but the source model
 // writes user-facing widgets with non-const constructors uniformly.
 // ignore_for_file: prefer_const_constructors_in_immutables
 

@@ -1,31 +1,30 @@
 /// Canonical URI for the runtime package Solid emits references to.
 ///
-/// See SPEC Section 9 — added to the output whenever any reactive primitive
-/// (`Signal`, `Computed`, `Effect`, `Resource`, `SignalBuilder`,
-/// `SolidartConfig`) appears in the generated code.
+/// Added to the output whenever any reactive primitive (`Signal`, `Computed`,
+/// `Effect`, `Resource`, `SignalBuilder`, `SolidartConfig`) appears in the
+/// generated code.
 const String flutterSolidartUri =
     'package:flutter_solidart/flutter_solidart.dart';
 
 /// Canonical URI for `package:provider`. Added to the output whenever any
-/// annotated class carries an `@SolidEnvironment` field (SPEC §3.6 / §9): the
-/// lowered `late final <name> = context.read<T>();` line resolves through
-/// `provider`'s `ReadContext` extension on `BuildContext`. The full library
-/// is imported (no `show` clause) so consumers can also call other `provider`
-/// APIs (`Provider.of<T>(context)`, `MultiProvider`, …) in the same file
-/// without a duplicate-import.
+/// annotated class carries an `@SolidEnvironment` field: the lowered
+/// `late final <name> = context.read<T>();` line resolves through `provider`'s
+/// `ReadContext` extension on `BuildContext`. The full library is imported (no
+/// `show` clause) so consumers can also call other `provider` APIs
+/// (`Provider.of<T>(context)`, `MultiProvider`, …) in the same file without a
+/// duplicate-import.
 const String providerUri = 'package:provider/provider.dart';
 
 /// URI prefix matched when pruning `solid_annotations` imports from generator
-/// output (SPEC §9 bullet 4). Any source URI starting with this prefix is
-/// dropped unless the lowered code references `Disposable` or
-/// `.environment<T>()`.
+/// output. Any source URI starting with this prefix is dropped unless the
+/// lowered code references `Disposable` or `.environment<T>()`.
 const String solidAnnotationsUriPrefix = 'package:solid_annotations/';
 
 const String _dartScheme = 'dart:';
 const String _packageScheme = 'package:';
 
 /// Canonical set of identifiers exported by `flutter_solidart` whose presence
-/// in generated output triggers the import-add rule (SPEC Section 9).
+/// in generated output triggers the import-add rule.
 ///
 /// Each rewriter declares which subset of these names it statically emits;
 /// the builder unions those subsets and adds `flutter_solidart` if the union
@@ -45,18 +44,17 @@ const Set<String> solidartNames = {
 /// enumerates which [solidartNames] identifiers `text` references, used by the
 /// builder to decide whether to add the `flutter_solidart` import.
 /// `emitsDisposable` is true when the rewriter spliced `implements Disposable`
-/// into the lowered class header (SPEC §10 marker rule). The builder unions
-/// this flag across results to decide whether to keep the `solid_annotations`
-/// import.
+/// into the lowered class header (marker rule). The builder unions this flag
+/// across results to decide whether to keep the `solid_annotations` import.
 ///
 /// `constCtorNames` is the set of constructor invocation names (matching
 /// `InstanceCreationExpression.constructorName.toString()`) that this
 /// rewriter emitted with a `const` keyword on their declaration — `"Counter"`
 /// for the unnamed ctor, `"Counter.named"` for a named ctor. The builder
 /// unions these across all results and runs a post-emit pass that prepends
-/// `const ` to matching call sites elsewhere in the assembled output (SPEC
-/// §14 item 7 — keeps `prefer_const_constructors` silent end-to-end without
-/// requiring the user to run `dart fix`).
+/// `const ` to matching call sites elsewhere in the assembled output — keeps
+/// `prefer_const_constructors` silent end-to-end without requiring the user
+/// to run `dart fix`.
 typedef RewriteResult = ({
   String text,
   Set<String> solidartNames,
@@ -69,23 +67,22 @@ typedef RewriteResult = ({
 ///
 /// Imports are emitted in three groups — `dart:`, then `package:`, then
 /// relative — alphabetically by full URI within each group, matching the
-/// analyzer's `directives_ordering` rule (SPEC §9). Appended `flutter_solidart`
-/// and `provider` URIs are sorted into position alongside source imports
-/// rather than appended at the tail. If [addSolidart] is true and
-/// `flutter_solidart` is not already present in [sourceImports], it is added.
-/// If [addProvider] is true and `package:provider/provider.dart` is not
-/// already present, it is added (SPEC §3.6 / §9 — env fields lower to
-/// `context.read<T>()`).
+/// analyzer's `directives_ordering` rule. Appended `flutter_solidart` and
+/// `provider` URIs are sorted into position alongside source imports rather
+/// than appended at the tail. If [addSolidart] is true and `flutter_solidart`
+/// is not already present in [sourceImports], it is added. If [addProvider]
+/// is true and `package:provider/provider.dart` is not already present, it is
+/// added (env fields lower to `context.read<T>()`).
 ///
 /// `package:solid_annotations/...` imports are dropped from the result unless
-/// [referencesSolidAnnotations] is true (SPEC §9 bullet 4). Annotation
-/// classes (`@SolidState`, `@SolidEffect`, `@SolidQuery`, `@SolidEnvironment`)
-/// are stripped during lowering, so a file that uses only annotations leaves
-/// no live reference and the import is pruned. The caller computes the flag
-/// from the OR of any rewriter's `emitsDisposable` (the `Disposable` marker
-/// interface is the only way `solid_annotations` survives a class rewrite)
-/// and a textual scan of the lowered body for `.environment<T>()` (the
-/// providing extension survives verbatim from user widget code).
+/// [referencesSolidAnnotations] is true. Annotation classes (`@SolidState`,
+/// `@SolidEffect`, `@SolidQuery`, `@SolidEnvironment`) are stripped during
+/// lowering, so a file that uses only annotations leaves no live reference and
+/// the import is pruned. The caller computes the flag from the OR of any
+/// rewriter's `emitsDisposable` (the `Disposable` marker interface is the only
+/// way `solid_annotations` survives a class rewrite) and a textual scan of the
+/// lowered body for `.environment<T>()` (the providing extension survives
+/// verbatim from user widget code).
 List<String> computeOutputImports(
   List<String> sourceImports, {
   required bool addSolidart,
@@ -108,7 +105,7 @@ List<String> computeOutputImports(
   return result;
 }
 
-/// Comparator implementing the SPEC §9 emit order: `dart:` group first, then
+/// Comparator implementing the import emit order: `dart:` group first, then
 /// `package:`, then relative; alphabetical (full-URI string compare) within
 /// each group. Matches the analyzer's `directives_ordering` lint exactly —
 /// `package:flutter/material.dart` sorts before

@@ -12,14 +12,14 @@ import 'package:solid_generator/src/transformation_error.dart';
 ///
 /// Three cases, in priority order:
 ///
-/// 1. **Has initializer** (SPEC Section 4.1) →
+/// 1. **Has initializer** →
 ///    `Signal<T>(<init>, name: '<debug>')`. The `late` modifier (if any)
 ///    is preserved verbatim so that `Signal` construction itself is deferred
 ///    to first access.
-/// 2. **No initializer, nullable type** (SPEC Section 4.3) →
+/// 2. **No initializer, nullable type** →
 ///    `Signal<T?>(null, name: '<debug>')`. No `late` needed because `null`
 ///    is a valid default.
-/// 3. **No initializer, non-nullable type** (SPEC Section 4.2) →
+/// 3. **No initializer, non-nullable type** →
 ///    `Signal<T>.lazy(name: '<debug>')`. The source field must have been
 ///    declared `late` (the only way Dart accepts a non-nullable field with
 ///    no initializer); the modifier is preserved on the emitted field so
@@ -40,12 +40,12 @@ String emitSignalField(FieldModel f) {
 }
 
 /// Emits one `late final <name> = Computed<T>(<closure>, name: '<debug>');`
-/// line per SPEC §4.5 (expression body) or §4.6 (block body).
+/// line per getter body kind (expression body or block body).
 ///
 /// The result is always `late final` because a `Computed` references other
 /// `final` instance fields whose initialization order is not guaranteed
-/// (SPEC §4.5 last bullet). The body text in [g] has already had the
-/// SPEC §5.1 `.value` rewrite applied by `readSolidStateGetter`, so the
+/// at declaration time. The body text in [g] has already had the
+/// `.value` rewrite applied by `readSolidStateGetter`, so the
 /// emitter splices it directly into the closure. The closure shape depends
 /// on `g.isBlockBody`:
 ///
@@ -59,10 +59,10 @@ String emitComputedField(GetterModel g) {
   return '  late final ${g.getterName} = $ctor;';
 }
 
-/// Emits one `late final <name> = Effect(<closure>, name: '<debug>');` line
-/// per SPEC §4.7. Mirrors [emitComputedField] (same closure shape, same
-/// `late final` rationale, same body-text contract); the only differences
-/// are the absent type parameter and the `Effect` ctor.
+/// Emits one `late final <name> = Effect(<closure>, name: '<debug>');` line.
+/// Mirrors [emitComputedField] (same closure shape, same `late final`
+/// rationale, same body-text contract); the only differences are the absent
+/// type parameter and the `Effect` ctor.
 ///
 /// `Effect(...)` takes a zero-param `void Function()` callback per the
 /// upstream `flutter_solidart` API and returns an `Effect` object whose
@@ -76,9 +76,8 @@ String emitEffectField(EffectModel e) {
 
 /// Emits one `late final <name> = Resource<T>(<closure>, name: '<debug>');`
 /// (Future form) or the `Resource<T>.stream(...)` named-constructor variant
-/// (Stream form) line per SPEC §4.8. Mirrors [emitEffectField]'s closure-shape
-/// contract — same `late final` rationale, same body-text contract — but
-/// adds:
+/// (Stream form). Mirrors [emitEffectField]'s closure-shape contract — same
+/// `late final` rationale, same body-text contract — but adds:
 ///
 /// * a type argument `Resource<T>` peeled from the source `Future<T>` /
 ///   `Stream<T>` return type (carried on [QueryModel.innerTypeText]),
@@ -87,14 +86,13 @@ String emitEffectField(EffectModel e) {
 ///   `Future<T> Function()`),
 /// * the source body keyword spliced verbatim into the closure signature
 ///   ([QueryModel.bodyKeyword] is one of `'async'`, `'async*'`, or `''`), and
-/// * a public field name (no underscore prefix) — SPEC §4.8 rule 1 specifies
-///   a single emitted declaration per query.
+/// * a public field name (no underscore prefix) — a single emitted declaration
+///   per query.
 ///
 /// The Resource field always joins the unified ordered dispose list managed
-/// by [emitDispose] (SPEC §4.8 rule 11). Resources are NEVER materialized in
-/// `initState()` / the synthesized constructor — the lazy `late final`
-/// initializer fires on first read at the first reactive call site
-/// (SPEC §4.8 rule 10 / §14 item 4).
+/// by [emitDispose]. Resources are NEVER materialized in `initState()` /
+/// the synthesized constructor — the lazy `late final` initializer fires on
+/// first read at the first reactive call site.
 String emitResourceField(QueryModel q) {
   final debugName = q.annotationName ?? q.methodName;
   final asyncKw = q.bodyKeyword.isEmpty ? '' : '${q.bodyKeyword} ';
@@ -104,13 +102,19 @@ String emitResourceField(QueryModel q) {
   final ctorName = q.isStream
       ? 'Resource<${q.innerTypeText}>.stream'
       : 'Resource<${q.innerTypeText}>';
-  // SPEC §4.8 rule 5: a single-Signal Computed wrapper would be a no-op, so
-  // the one-name case passes the Signal/Computed directly as `source:`.
-  // SPEC §4.8 rule 9: `useRefreshing: true` is the upstream default and is
-  // omitted from emitted output to keep generated lines short.
-  final source = switch (q.trackedSignalNames) {
-    [] => null,
-    [final only] => only,
+  // A single-observable Computed wrapper would be a no-op, so the one-dep
+  // case (whether a state Signal or an upstream Resource) passes the
+  // observable directly as `source:`. State deps come from
+  // `trackedSignalNames`; query deps come from `trackedQueryNames` and pass
+  // the upstream `Resource<T>` field directly (Resource extends Signal so it
+  // qualifies as a `SignalBase<dynamic>` source — auto-tracking of upstream
+  // queries).
+  // `useRefreshing: true` is the upstream default and is omitted from emitted
+  // output to keep generated lines short.
+  final source = switch ((q.trackedSignalNames, q.trackedQueryNames)) {
+    ([], []) => null,
+    ([final only], []) => only,
+    ([], [final only]) => only,
     _ => q.sourceFieldName,
   };
   final args = [
@@ -124,16 +128,16 @@ String emitResourceField(QueryModel q) {
 }
 
 /// Emits one `late final <fieldName> = context.read<<T>>();` line per
-/// `@SolidEnvironment` field (SPEC §4.9). Env fields are NEVER added to the
-/// dispose-name list (SPEC §10 — the providing `Provider<T>` owns disposal)
-/// and NEVER materialized in `initState` (SPEC §4.9 rule 2 — they're lazy).
+/// `@SolidEnvironment` field. Env fields are NEVER added to the
+/// dispose-name list (the providing `Provider<T>` owns disposal) and NEVER
+/// materialized in `initState` (they're lazy).
 String emitEnvironmentField(EnvironmentModel e) {
   return '  late final ${e.fieldName} = context.read<${e.typeText}>();';
 }
 
 /// Emits the synthesized Record-Computed source field for an `@SolidQuery`
 /// method whose body reads two or more `@SolidState` field/getter
-/// identifiers (SPEC §3.5 / §4.8 rule 5). Shape:
+/// identifiers (multi-dep case). Shape:
 ///
 /// ```dart
 /// late final _<methodName>Source = Computed<(T1, T2, …)>(
@@ -155,7 +159,7 @@ String emitEnvironmentField(EnvironmentModel e) {
 /// element in the `(T1, T2, …)` Record type literal.
 ///
 /// Throws [CodeGenerationError] when any tracked name resolves to an empty
-/// type text — the SPEC requires explicit type annotations on `@SolidState`
+/// type text — explicit type annotations are required on `@SolidState`
 /// fields/getters, and a missing one would produce invalid Dart in the
 /// emitted Record-Computed type argument.
 ///
@@ -167,10 +171,15 @@ String emitEnvironmentField(EnvironmentModel e) {
 String? emitQuerySourceField(
   QueryModel q,
   Map<String, String> reactiveTypeTexts,
+  Map<String, String> queryInnerTypeTexts,
 ) {
   if (!q.needsSourceComputed) return null;
-  final names = q.trackedSignalNames;
-  final types = names.map((n) {
+  // State deps contribute element type `T` and read expression `<name>.value`;
+  // query deps contribute element type `ResourceState<T>` and read expression
+  // `<name>.state`. Source order is preserved across the merged list (state
+  // names first per body appearance, then query names per body appearance —
+  // matches the visitor's two parallel name lists).
+  final stateTypes = q.trackedSignalNames.map((n) {
     final t = reactiveTypeTexts[n];
     if (t == null || t.isEmpty) {
       throw CodeGenerationError(
@@ -184,8 +193,24 @@ String? emitQuerySourceField(
     }
     return t;
   }).toList();
-  final tupleType = '(${types.join(', ')})';
-  final tupleExpr = '(${names.map((n) => '$n.value').join(', ')})';
+  final queryTypes = q.trackedQueryNames.map((n) {
+    final t = queryInnerTypeTexts[n];
+    if (t == null || t.isEmpty) {
+      throw CodeGenerationError(
+        "@SolidQuery '${q.methodName}' depends on @SolidQuery '$n' which has "
+        'no inner type argument; declare an explicit `Future<T>` / `Stream<T>` '
+        'return type on the upstream query so the synthesized source-Computed '
+        'Record type can be emitted as `ResourceState<T>`',
+        null,
+        q.methodName,
+      );
+    }
+    return 'ResourceState<$t>';
+  }).toList();
+  final tupleType = '(${[...stateTypes, ...queryTypes].join(', ')})';
+  final stateReads = q.trackedSignalNames.map((n) => '$n.value');
+  final queryReads = q.trackedQueryNames.map((n) => '$n.state');
+  final tupleExpr = '(${[...stateReads, ...queryReads].join(', ')})';
   final fieldName = q.sourceFieldName;
   return '  late final $fieldName = '
       "Computed<$tupleType>(() => $tupleExpr, name: '$fieldName');";
@@ -197,13 +222,23 @@ String? emitQuerySourceField(
 /// declaration order, and their names are appended to [disposeNames] in the
 /// same order — so reverse-disposal tears down the Resource first, then the
 /// source Computed, then the underlying Signals.
+///
+/// [queryInnerTypeTexts] maps each `@SolidQuery` method name on the
+/// enclosing class to its inner `T` (e.g. `'int'` for a `Future<int>` query).
+/// Consumed by [emitQuerySourceField] to emit `ResourceState<T>` Record
+/// element types for cross-query deps.
 void emitQueryFields(
   QueryModel q,
   Map<String, String> reactiveTypeTexts,
+  Map<String, String> queryInnerTypeTexts,
   List<String> output,
   List<String> disposeNames,
 ) {
-  final sourceField = emitQuerySourceField(q, reactiveTypeTexts);
+  final sourceField = emitQuerySourceField(
+    q,
+    reactiveTypeTexts,
+    queryInnerTypeTexts,
+  );
   if (sourceField != null) {
     output.add(sourceField);
     disposeNames.add(q.sourceFieldName);
@@ -213,8 +248,7 @@ void emitQueryFields(
 }
 
 /// Emits a `dispose()` method disposing every name in
-/// [disposeNamesInDeclarationOrder] in **reverse declaration order** (SPEC
-/// §10).
+/// [disposeNamesInDeclarationOrder] in **reverse declaration order**.
 ///
 /// The list is the unified, source-ordered sequence of every reactive
 /// declaration (Signal field + Computed getter + Effect method) on the owning
@@ -225,8 +259,7 @@ void emitQueryFields(
 /// [emitOverride] gates the `@override` annotation. Pass `true` when the
 /// emitted `dispose()` overrides a supertype declaration — either `State<T>`
 /// (whose supertype chain has `dispose()`) or `Disposable` (the
-/// `solid_annotations` marker interface that lowered plain classes implement
-/// per SPEC §10).
+/// `solid_annotations` marker interface that lowered plain classes implement).
 ///
 /// [emitSuperCall] gates the trailing `super.dispose();` line. Pass `true`
 /// only when the class's supertype chain actually contains a `dispose()`
@@ -255,7 +288,7 @@ String emitDispose(
 
 /// Prepends one `<name>.dispose();` call per reactive declaration to the
 /// existing `dispose()` body's leading boundary, leaving the rest of the body
-/// untouched (SPEC §10 / §14 item 4).
+/// untouched.
 ///
 /// Shared by `state_class_rewriter` and `plain_class_rewriter` so the
 /// dispose-body merge contract stays single-sourced. The user's source body
@@ -265,9 +298,9 @@ String emitDispose(
 /// `\n<disposals>` block is spliced immediately after the body's opening
 /// brace. When the user's source `dispose()` lacks `@override`, the
 /// generator prepends one: the merged dispose always overrides — either
-/// `Disposable.dispose()` (plain class — SPEC §10 marker rule) or the
-/// supertype's `dispose()` (`State<X>` — SPEC §14 item 4) — so the lowered
-/// output is lint-clean against `annotate_overrides`.
+/// `Disposable.dispose()` (plain class marker rule) or the supertype's
+/// `dispose()` (`State<X>`) — so the lowered output is lint-clean against
+/// `annotate_overrides`.
 ///
 /// [disposeNamesInDeclarationOrder] is the unified, source-ordered list of
 /// reactive declarations (Signal field + Effect method + Resource query).
@@ -301,7 +334,7 @@ String mergeDispose(
       .map((name) => '    $name.dispose();')
       .join('\n');
   // Auto-add `@override` if the user omitted it — see the function-level
-  // doc comment for the SPEC contract.
+  // doc comment for the contract.
   final hasOverride = method.metadata.any((a) => a.name.name == 'override');
   final overridePrefix = hasOverride ? '' : '@override\n  ';
   return '$overridePrefix${source.substring(method.offset, lbrace + 1)}'
@@ -313,12 +346,12 @@ String mergeDispose(
 /// field by reading it as a bare-identifier statement (`<effectName>;`), in
 /// source-declaration order.
 ///
-/// SPEC §4.7: in Dart, `late final field = expr` defers the initializer until
-/// the field is first read. Without this synthesized read, the Effect's
-/// factory constructor — and its `effect.run()` autorun, which registers
-/// reactive dependencies — would never fire during the widget's mounted
-/// lifetime. The `dispose()` body's `<effectName>.dispose()` call is the
-/// first read, by which point signal mutations have already happened.
+/// In Dart, `late final field = expr` defers the initializer until the field
+/// is first read. Without this synthesized read, the Effect's factory
+/// constructor — and its `effect.run()` autorun, which registers reactive
+/// dependencies — would never fire during the widget's mounted lifetime. The
+/// `dispose()` body's `<effectName>.dispose()` call is the first read, by
+/// which point signal mutations have already happened.
 ///
 /// Touching each Effect by name in `initState` triggers the `late final`
 /// initializer at mount time, so `Effect(...)`'s autorun runs once with the
@@ -344,13 +377,13 @@ String emitInitState(List<String> effectNamesInDeclarationOrder) {
 /// Effect field by reading it as a bare-identifier statement
 /// (`<effectName>;`), in source-declaration order.
 ///
-/// SPEC §4.7 + §8.3: a plain Dart class has no `initState` lifecycle hook,
-/// but the same `late final` Effect-materialization rule applies — without a
-/// synthesized read, the Effect's factory constructor never runs and the
-/// autorun never registers dependencies. Reading each Effect inside the
-/// generated constructor body is the plain-class analogue of
-/// [emitInitState] for State classes: the Effects activate at construction
-/// time, so a `Counter()` instantiation is enough to start the autoruns.
+/// A plain Dart class has no `initState` lifecycle hook, but the same
+/// `late final` Effect-materialization rule applies — without a synthesized
+/// read, the Effect's factory constructor never runs and the autorun never
+/// registers dependencies. Reading each Effect inside the generated
+/// constructor body is the plain-class analogue of [emitInitState] for State
+/// classes: the Effects activate at construction time, so a `Counter()`
+/// instantiation is enough to start the autoruns.
 ///
 /// Caller is responsible for only invoking this when
 /// [effectNamesInDeclarationOrder] is non-empty — otherwise an empty

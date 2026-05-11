@@ -24,9 +24,8 @@ import 'dart:io';
 /// the dir just before the other reaches it). The state we want — orphans
 /// removed, populated dirs preserved — is reached either way.
 ///
-/// SPEC §9 "Empty-directory pruning". The build extension
-/// `^source/{{}} -> lib/{{}}` defines the pairing rule that determines
-/// which lib outputs are orphans.
+/// Empty-directory pruning. The build extension `^source/{{}} -> lib/{{}}`
+/// defines the pairing rule that determines which lib outputs are orphans.
 ///
 /// Safety guard: when [sourceRoot] does NOT exist on disk, the pruner
 /// returns 0 immediately without touching anything. A missing `source/`

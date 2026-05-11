@@ -1,5 +1,5 @@
-// Unit tests for `pruneOrphanedSubtree`. SPEC §9 "Empty-directory pruning"
-// — the helper that powers the embedded prune in `_SolidBuilder.build()`.
+// Unit tests for `pruneOrphanedSubtree` — the empty-directory pruning
+// helper that powers the embedded prune in `_SolidBuilder.build()`.
 //
 // Each test sets up parallel `lib/` and `source/` trees inside a freshly
 // created temp directory and asserts which entries (files + dirs) survive.

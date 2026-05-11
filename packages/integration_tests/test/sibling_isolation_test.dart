@@ -1,12 +1,12 @@
-// Proves SPEC §7.4 (siblings do not share wrappers) at runtime:
+// Proves at runtime that siblings do not share wrappers:
 // mutating signal A rebuilds only widget A; widget B's rebuild count stays
-// at zero. Validates that the minimum-subtree wrap rule (SPEC §7.2)
-// produces sibling isolation.
+// at zero. Validates that the minimum-subtree wrap rule produces sibling
+// isolation.
 //
 // Mutation goes through a `GlobalKey<State>` (same shape `counter_dispose_test`
 // uses) so the assertion isolates placement behaviour from tap/gesture wiring
-// — if SPEC §7.4 is ever violated, the failure points straight at the wrap
-// rule rather than at button plumbing.
+// — if the sibling-isolation rule is ever violated, the failure points straight
+// at the wrap rule rather than at button plumbing.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';

@@ -9,13 +9,13 @@ import 'package:solid_generator/src/value_rewriter.dart';
 
 /// Name of the `@SolidState` annotation class.
 ///
-/// Matching is textual on the unresolved AST (see SPEC Section 5.4 — type
-/// resolution is required for `.value` rewriting, but annotation detection is
-/// acceptable on names because the user must import `solid_annotations` to use
-/// `@SolidState` at all).
+/// Matching is textual on the unresolved AST — type resolution is required
+/// for `.value` rewriting, but annotation detection is acceptable on names
+/// because the user must import `solid_annotations` to use `@SolidState`
+/// at all.
 ///
-/// Exposed package-publicly so the target validator (SPEC Section 3.1
-/// rejections) can match the same identifier on non-field declarations.
+/// Exposed package-publicly so the target validator can match the same
+/// identifier on non-field declarations.
 const String solidStateName = 'SolidState';
 
 /// Name of the `@SolidEffect` annotation class. Same matching contract as
@@ -33,7 +33,7 @@ const String solidEnvironmentName = 'SolidEnvironment';
 /// Lexemes of the `flutter_solidart` types whose runtime classes extend
 /// `SignalBase<T>`. Matched textually on the unresolved AST per the
 /// [solidStateName] contract. Consumed by the target validator (rejecting
-/// `@SolidEnvironment` fields typed as one of these — SPEC §3.6) and by the
+/// `@SolidEnvironment` fields typed as one of these) and by the
 /// cross-class `.value` rewrite. Excludes `SignalBuilder` /
 /// `SolidartConfig` (those are non-`SignalBase` solidart names).
 const Set<String> signalBaseTypeNames = {
@@ -80,7 +80,7 @@ FieldModel? readSolidStateField(FieldDeclaration decl, String source) {
     // `TypeAnnotation.question` is the `?` token at the top level of the
     // declared type. Using it (vs. a `typeText.endsWith('?')` heuristic)
     // correctly classifies nested-nullable types like `List<int?>` as
-    // non-nullable at the outer level (SPEC Section 4.3).
+    // non-nullable at the outer level.
     isNullable: type?.question != null,
   );
 }
@@ -90,7 +90,7 @@ FieldModel? readSolidStateField(FieldDeclaration decl, String source) {
 /// present. Validation (`late` required, no initializer, non-`SignalBase`
 /// type, widget/state host) runs upstream in
 /// `validateSolidEnvironmentTargets`; this reader only extracts the textual
-/// name and type for `emitEnvironmentField` (SPEC §3.6 / §4.9).
+/// name and type for `emitEnvironmentField`.
 EnvironmentModel? readSolidEnvironmentField(
   FieldDeclaration decl,
   String source,
@@ -114,16 +114,17 @@ EnvironmentModel? readSolidEnvironmentField(
 /// `validateSolidStateTargets`, but this reader is defensive and skips them
 /// silently as well.
 ///
-/// The getter body is rewritten in place per SPEC §5.1: any reference to a
-/// name in [reactiveFields] receives `.value`. Both expression-body
-/// (`get x => <expr>;` — SPEC §4.5) and block-body (`get x { ... }` —
-/// SPEC §4.6) shapes are supported. Other body kinds (abstract / native) are
-/// rejected with a [CodeGenerationError].
+/// The getter body is rewritten in place: any reference to a name in
+/// [reactiveFields] receives `.value`. Both expression-body
+/// (`get x => <expr>;`) and block-body (`get x { ... }`) shapes are
+/// supported. Other body kinds (abstract / native) are rejected with a
+/// [CodeGenerationError].
 GetterModel? readSolidStateGetter(
   MethodDeclaration decl,
   Set<String> reactiveFields,
-  String source,
-) {
+  String source, {
+  Set<String> queryNames = const {},
+}) {
   if (!decl.isGetter || decl.isStatic) return null;
   final annotation = findAnnotationByName(solidStateName, decl.metadata);
   if (annotation == null) return null;
@@ -135,8 +136,17 @@ GetterModel? readSolidStateGetter(
 
   final body = decl.body;
   final getterName = decl.name.lexeme;
-  // Getters do not need tracked names; no `source:` wiring.
-  final (:bodyText, :isBlockBody, trackedNames: _) = _readReactiveBody(
+  // Getters do not need tracked names: the lowered Computed auto-tracks via
+  // its closure's reads at runtime — both `@SolidState` reads (rewritten
+  // with `.value`) and `@SolidQuery` calls subscribe through their respective
+  // upstream accessors (`Signal.value` / `Resource.call() → state`).
+  final (
+    :bodyText,
+    :isBlockBody,
+    trackedNames: _,
+    trackedQueryNames: _,
+    selfCycleFound: _,
+  ) = _readReactiveBody(
     body,
     reactiveFields,
     source,
@@ -147,6 +157,7 @@ GetterModel? readSolidStateGetter(
     unsupportedBodyError:
         '@SolidState getter must have an expression body (=> ...) or a '
         'block body ({ ... }); abstract and native bodies are not supported',
+    queryNames: queryNames,
   );
 
   return GetterModel(
@@ -159,22 +170,34 @@ GetterModel? readSolidStateGetter(
 }
 
 /// Returns the rewritten body text, whether it came from a block body, and
-/// the dedup'd source-order list of `@SolidState` field/getter names read in
-/// tracked position inside the body. Shared between `readSolidStateGetter`,
-/// `readSolidEffectMethod`, and `readSolidQueryMethod`: all three
-/// discriminate `ExpressionFunctionBody` vs `BlockFunctionBody`, run the
-/// SPEC §5.1 `.value` rewrite, and reject abstract/native bodies. The
-/// zero-deps check (SPEC §4.5 / §3.4) fires only when [emptyDepsError] is
-/// non-null; queries pass `null` because SPEC §3.5 explicitly waives the
-/// reactive-deps requirement. Error wording differs per caller
-/// (SPEC §4.5 vs §3.4 vs §3.5) — pass it in.
+/// the dedup'd source-order lists of `@SolidState` field/getter and
+/// `@SolidQuery` method names read in tracked position inside the body.
+/// Shared between `readSolidStateGetter`, `readSolidEffectMethod`, and
+/// `readSolidQueryMethod`: all three discriminate `ExpressionFunctionBody`
+/// vs `BlockFunctionBody`, run the `.value` rewrite, and reject
+/// abstract/native bodies. The zero-deps check fires only when
+/// [emptyDepsError] is non-null; queries pass `null` because the
+/// reactive-deps requirement is waived for them. Error wording differs per
+/// caller — pass it in.
 ///
 /// `trackedReadOffsets` from the rewrite are intentionally discarded here —
 /// SignalBuilder placement is a `build()` concern, not a `Computed` /
-/// `Effect` / `Resource` body concern. `trackedNames` is consumed only by
-/// `readSolidQueryMethod` to wire the Resource's `source:` argument; getter
-/// and effect callers destructure it into `_`.
-({String bodyText, bool isBlockBody, List<String> trackedNames})
+/// `Effect` / `Resource` body concern. The two name lists feed
+/// `readSolidQueryMethod`'s `source:` argument synthesis; getter and effect
+/// callers destructure them into `_` since their lowered shapes (Computed,
+/// Effect) auto-track via the closure's reads at runtime.
+///
+/// [currentMember] is the enclosing method's name when reading a
+/// `@SolidQuery` body — passed through to the visitor so a zero-arg call
+/// to it sets [ValueRewriteResult.selfCycleFound]. Pass `null` for
+/// state-getter / effect callers.
+({
+  String bodyText,
+  bool isBlockBody,
+  List<String> trackedNames,
+  List<String> trackedQueryNames,
+  bool selfCycleFound,
+})
 _readReactiveBody(
   FunctionBody body,
   Set<String> reactiveFields,
@@ -182,6 +205,8 @@ _readReactiveBody(
   required String memberName,
   required String? emptyDepsError,
   required String unsupportedBodyError,
+  Set<String> queryNames = const {},
+  String? currentMember,
 }) {
   final AstNode node;
   final bool isBlockBody;
@@ -194,8 +219,20 @@ _readReactiveBody(
   } else {
     throw CodeGenerationError(unsupportedBodyError, null, memberName);
   }
-  final result = collectValueEdits(node, reactiveFields, source);
-  if (emptyDepsError != null && result.edits.isEmpty) {
+  final result = collectValueEdits(
+    node,
+    reactiveFields,
+    source,
+    queryNames: queryNames,
+    currentMember: currentMember,
+  );
+  // Zero-deps Effect / Computed are rejected. A reactive dep is either a
+  // `.value`-rewritten state read OR a tracked query-call invocation.
+  // Queries pass `null` here because the deps requirement is waived for
+  // them.
+  if (emptyDepsError != null &&
+      result.edits.isEmpty &&
+      result.trackedQueryNames.isEmpty) {
     throw CodeGenerationError(emptyDepsError, null, memberName);
   }
   final bodyText = applyEditsToRange(
@@ -207,6 +244,8 @@ _readReactiveBody(
     bodyText: bodyText,
     isBlockBody: isBlockBody,
     trackedNames: result.trackedReadNames,
+    trackedQueryNames: result.trackedQueryNames,
+    selfCycleFound: result.selfCycleFound,
   );
 }
 
@@ -216,29 +255,36 @@ _readReactiveBody(
 /// here defensively (the target validator rejects them with a clearer
 /// error before this reader runs).
 ///
-/// The method body is rewritten in place per SPEC §5.1: any reference to a
-/// name in [reactiveFields] receives `.value`. Both expression-body
+/// The method body is rewritten in place: any reference to a name in
+/// [reactiveFields] receives `.value`. Both expression-body
 /// (`void m() => <expr>;`) and block-body (`void m() { ... }`) shapes are
-/// supported per SPEC §4.7. Other body kinds (abstract / native) are
-/// rejected with a [CodeGenerationError].
+/// supported. Other body kinds (abstract / native) are rejected with a
+/// [CodeGenerationError].
 ///
-/// SPEC §3.4 reactive-deps requirement: an Effect with zero reactive
-/// dependencies is rejected with the SPEC-defined message
+/// An Effect with zero reactive dependencies is rejected with the message
 /// `"effect '<name>' has no reactive dependencies"`. A dedicated rejection
 /// test pins this behavior.
 EffectModel? readSolidEffectMethod(
   MethodDeclaration decl,
   Set<String> reactiveFields,
-  String source,
-) {
+  String source, {
+  Set<String> queryNames = const {},
+}) {
   if (decl.isGetter || decl.isSetter || decl.isStatic) return null;
   final annotation = findAnnotationByName(solidEffectName, decl.metadata);
   if (annotation == null) return null;
 
   final methodName = decl.name.lexeme;
   // Effects do not need tracked names: the autorun subscribes by running the
-  // body eagerly, no explicit `source:` wiring.
-  final (:bodyText, :isBlockBody, trackedNames: _) = _readReactiveBody(
+  // body eagerly. A `<query>()` call inside an effect body subscribes via
+  // `Resource.call() → state` at runtime, same mechanism as a state read.
+  final (
+    :bodyText,
+    :isBlockBody,
+    trackedNames: _,
+    trackedQueryNames: _,
+    selfCycleFound: _,
+  ) = _readReactiveBody(
     decl.body,
     reactiveFields,
     source,
@@ -250,6 +296,7 @@ EffectModel? readSolidEffectMethod(
     unsupportedBodyError:
         '@SolidEffect method must have an expression body (=> ...) or a '
         'block body ({ ... }); abstract and native bodies are not supported',
+    queryNames: queryNames,
   );
 
   return EffectModel(
@@ -266,21 +313,22 @@ EffectModel? readSolidEffectMethod(
 /// setters, and static methods are filtered out here defensively; the target
 /// validator rejects them with a clearer error before this reader runs.
 ///
-/// The method body is rewritten in place per SPEC §5.1: any reference to a
-/// name in [reactiveFields] receives `.value`. Both expression-body
+/// The method body is rewritten in place: any reference to a name in
+/// [reactiveFields] receives `.value`. Both expression-body
 /// (`Future<T> m() async => …;` / `Stream<T> m() => …;`) and block-body
 /// (`Future<T> m() async {…}` / `Stream<T> m() async* {…}` /
-/// `Stream<T> m() {…}`) shapes are supported per SPEC §3.5 / §4.8. Other body
-/// kinds (abstract / native) are rejected with a [CodeGenerationError].
+/// `Stream<T> m() {…}`) shapes are supported. Other body kinds (abstract /
+/// native) are rejected with a [CodeGenerationError].
 ///
 /// Unlike [readSolidEffectMethod] / [readSolidStateGetter], this reader does
 /// NOT enforce a reactive-deps requirement — a query body MAY have zero
-/// reactive reads (SPEC §3.5 "No reactive-deps requirement").
+/// reactive reads.
 QueryModel? readSolidQueryMethod(
   MethodDeclaration decl,
   Set<String> reactiveFields,
-  String source,
-) {
+  String source, {
+  Set<String> queryNames = const {},
+}) {
   if (decl.isGetter || decl.isSetter || decl.isStatic) return null;
   final annotation = findAnnotationByName(solidQueryName, decl.metadata);
   if (annotation == null) return null;
@@ -298,8 +346,15 @@ QueryModel? readSolidQueryMethod(
       : source.substring(typeArg.offset, typeArg.end);
 
   final methodName = decl.name.lexeme;
-  // emptyDepsError: null — SPEC §3.5 waives the reactive-deps requirement.
-  final (:bodyText, :isBlockBody, :trackedNames) = _readReactiveBody(
+  // emptyDepsError: null — the reactive-deps requirement is waived for
+  // queries.
+  final (
+    :bodyText,
+    :isBlockBody,
+    :trackedNames,
+    :trackedQueryNames,
+    :selfCycleFound,
+  ) = _readReactiveBody(
     decl.body,
     reactiveFields,
     source,
@@ -308,7 +363,23 @@ QueryModel? readSolidQueryMethod(
     unsupportedBodyError:
         '@SolidQuery method must have an expression body (=> ...) or a '
         'block body ({ ... }); abstract and native bodies are not supported',
+    queryNames: queryNames,
+    currentMember: methodName,
   );
+
+  // A self-cycle is rejected at codegen — solidart would re-run
+  // indefinitely otherwise. Inter-query cycles (A reads B, B reads A) are
+  // not validated at codegen and surface as a runtime error.
+  if (selfCycleFound) {
+    throw CodeGenerationError(
+      "@SolidQuery '$methodName' invokes itself in its own body — "
+      'self-cycles are rejected at codegen because the lowered Resource '
+      'would re-run indefinitely. Refactor the body to remove the recursive '
+      'call, or split into two queries.',
+      null,
+      methodName,
+    );
+  }
 
   return QueryModel(
     methodName: methodName,
@@ -318,6 +389,7 @@ QueryModel? readSolidQueryMethod(
     bodyKeyword: decl.body.keyword?.lexeme ?? '',
     isStream: returnTypeName == streamLexeme,
     trackedSignalNames: trackedNames,
+    trackedQueryNames: trackedQueryNames,
     annotationName: extractNameArgument(annotation),
     debounce: extractDebounceArgument(annotation, source),
     useRefreshing: extractUseRefreshingArgument(annotation),
@@ -326,9 +398,9 @@ QueryModel? readSolidQueryMethod(
 
 /// Returns the first `@<className>(...)` annotation in [metadata], or `null`.
 ///
-/// Package-public so the target validator (SPEC §3.1 / §3.4 rejections) can
-/// reuse the same matcher on every declaration kind. Use the [solidStateName]
-/// or [solidEffectName] constants for [className] rather than bare strings.
+/// Package-public so the target validator can reuse the same matcher on
+/// every declaration kind. Use the [solidStateName] or [solidEffectName]
+/// constants for [className] rather than bare strings.
 Annotation? findAnnotationByName(
   String className,
   NodeList<Annotation> metadata,
@@ -353,7 +425,7 @@ Expression? _findNamedArg(Annotation annotation, String label) {
 
 /// Extracts the string value of a `name: '…'` named argument on [annotation],
 /// or `null` if the annotation has no such argument. Shared between the field
-/// and getter readers so both reactive shapes thread the SPEC §4.4 debug name
+/// and getter readers so both reactive shapes thread the debug name
 /// uniformly.
 String? extractNameArgument(Annotation annotation) {
   final expr = _findNamedArg(annotation, 'name');
@@ -387,9 +459,9 @@ String? extractDebounceArgument(Annotation annotation, String source) {
 /// Returns `true`/`false` for `useRefreshing: <bool>` on
 /// `@SolidQuery(useRefreshing: …)`, or `null` if the annotation has no
 /// `useRefreshing:` argument. The `null` case is distinct from the
-/// annotation default (`true`) at the model layer, but per SPEC §4.8 rule 9
-/// both omit the emitted `useRefreshing:` argument (the upstream
-/// `Resource` default is `true`, so emitting it would be redundant noise).
+/// annotation default (`true`) at the model layer, but both omit the
+/// emitted `useRefreshing:` argument (the upstream `Resource` default is
+/// `true`, so emitting it would be redundant noise).
 bool? extractUseRefreshingArgument(Annotation annotation) {
   final expr = _findNamedArg(annotation, 'useRefreshing');
   return expr is BooleanLiteral ? expr.value : null;

@@ -1,7 +1,7 @@
-// Rejection suite for invalid `@SolidEnvironment` placements per SPEC §3.6.
+// Rejection suite for invalid `@SolidEnvironment` placements.
 //
-// Cases ordered to mirror the SPEC §3.6 invalid-target enumeration and the
-// validator's own check order in `_validateEnvironmentField`:
+// Cases ordered to mirror the invalid-target enumeration and the validator's
+// own check order in `_validateEnvironmentField`:
 //   field with initializer → non-late field → final field → static field →
 //   method → getter → setter → top-level variable → SignalBase-typed field →
 //   plain-class host.

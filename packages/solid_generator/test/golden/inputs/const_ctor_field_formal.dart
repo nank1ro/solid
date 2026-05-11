@@ -1,5 +1,5 @@
-// SPEC §14 item 7 clause (a): a `this.<name>` FieldFormalParameter on a
-// `final` field is const-safe and triggers `const` on the lowered ctor.
+// A `this.<name>` FieldFormalParameter on a `final` field is const-safe
+// and triggers `const` on the lowered ctor.
 
 import 'package:flutter/widgets.dart';
 import 'package:solid_annotations/solid_annotations.dart';
