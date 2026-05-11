@@ -255,16 +255,18 @@ RewriteResult rewritePlainClass(
   // user ctor already had the Effect-materialization reads spliced in
   // above (`mergeConstructor`), so an extra synthesized ctor would
   // conflict with the existing default-name ctor.
+  //
+  // The synthesized ctor is inserted at position 0 so the lowered class
+  // satisfies `sort_constructors_first` — Dart member-lookup is
+  // declaration-order-independent, so referencing later-declared Effect
+  // fields from the ctor body is safe.
   if (disposeMethod != null) {
     pieces[disposeSlot] = disposeText;
-    if (effectNames.isNotEmpty && userCtors.isEmpty) {
-      pieces.insert(disposeSlot, emitConstructor(className, effectNames));
-    }
   } else {
-    if (effectNames.isNotEmpty && userCtors.isEmpty) {
-      pieces.add(emitConstructor(className, effectNames));
-    }
     pieces.add(disposeText);
+  }
+  if (effectNames.isNotEmpty && userCtors.isEmpty) {
+    pieces.insert(0, emitConstructor(className, effectNames));
   }
 
   final header = _buildHeaderWithDisposable(classDecl, source);

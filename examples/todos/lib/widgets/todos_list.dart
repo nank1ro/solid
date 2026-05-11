@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
 import 'package:provider/provider.dart';
-import 'package:todos_example/controllers/filter.dart';
-import 'package:todos_example/controllers/todos.dart';
-import 'package:todos_example/domain/todo.dart';
-import 'package:todos_example/widgets/todo_item.dart';
+import '../controllers/filter.dart';
+import '../controllers/todos.dart';
+import '../domain/todo.dart';
+import 'todo_item.dart';
 
 class TodoList extends StatefulWidget {
   const TodoList({super.key});

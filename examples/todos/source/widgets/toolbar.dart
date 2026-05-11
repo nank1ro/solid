@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:solid_annotations/solid_annotations.dart';
-import 'package:todos_example/controllers/filter.dart';
-import 'package:todos_example/controllers/todos.dart';
-import 'package:todos_example/domain/todo.dart';
+
+import '../controllers/filter.dart';
+import '../controllers/todos.dart';
+import '../domain/todo.dart';
 
 class Toolbar extends StatelessWidget {
   Toolbar({super.key});

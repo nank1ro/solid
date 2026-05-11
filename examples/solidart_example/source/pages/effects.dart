@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
-import 'package:solidart_example/controllers/effects.dart';
+import '../controllers/effects.dart';
 
 class EffectsPage extends StatefulWidget {
   const EffectsPage({super.key});

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:todos_example/widgets/todos_body.dart';
+
+import '../widgets/todos_body.dart';
 
 class TodosPage extends StatelessWidget {
   const TodosPage({super.key});

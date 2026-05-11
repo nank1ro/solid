@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
-import 'package:solidart_example/controllers/toggle.dart';
+import '../controllers/toggle.dart';
 
 class ShowPage extends StatefulWidget {
   const ShowPage({super.key});

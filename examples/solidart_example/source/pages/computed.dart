@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
-import 'package:solidart_example/controllers/computed_value.dart';
+import '../controllers/computed_value.dart';
 
 class ComputedPage extends StatefulWidget {
   const ComputedPage({super.key});

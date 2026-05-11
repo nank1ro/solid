@@ -91,14 +91,33 @@ I wanted to use `lib` as the input folder, but `flutter build` doesn't allow bui
 
 In addition, Solid is not a common generator because it transpiles your existing code to an optimized version of it.
 
+### Importing other source files
+
+When a file inside `source/` needs to reference another file in the same project, use a **relative import**, not a `package:<self>/...` URI.
+
+```dart title="source/pages/counter.dart" {3,4}
+import 'package:flutter/material.dart';
+import 'package:solid_annotations/solid_annotations.dart';
+
+import '../controllers/counter.dart';   // ✅ relative — resolves to source/controllers/counter.dart
+// import 'package:my_app/controllers/counter.dart';  // ❌ resolves to lib/ — the generated realm
+
+class CounterPage extends StatelessWidget { /* … */ }
+```
+
+Standard Dart `package:` URIs resolve to a package's `lib/` folder. In a Solid project that's the generated realm — pointing a `source/` file at `lib/` would route you through the lowered `Signal<T>` types instead of your authored shape, and "Go to definition" in your IDE would land in generated code. The build fails fast on this with a clear error pointing back here.
+
+Cross-package imports (`flutter`, `solid_annotations`, `provider`, third-party packages) keep the `package:` form — only **same-package** imports must be relative.
+
 ## Configuration
 
 To ensure Solid properly manages the lifecycle of your reactive atoms, configure `flutter_solidart` in your app's `main()` function:
 
 ```dart title="source/main.dart" {6}
-import 'package:example/counter.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
+
+import 'counter.dart';
 
 void main() {
   SolidartConfig.autoDispose = false;

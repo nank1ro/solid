@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
-import 'package:solidart_example/controllers/lazy_counter.dart';
+import '../controllers/lazy_counter.dart';
 
 class LazyCounterPage extends StatefulWidget {
   const LazyCounterPage({super.key});

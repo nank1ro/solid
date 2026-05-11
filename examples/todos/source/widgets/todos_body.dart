@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:solid_annotations/solid_annotations.dart';
-import 'package:todos_example/controllers/todos.dart';
-import 'package:todos_example/domain/todo.dart';
-import 'package:todos_example/widgets/todos_list.dart';
-import 'package:todos_example/widgets/toolbar.dart';
+
+import '../controllers/todos.dart';
+import '../domain/todo.dart';
+import 'todos_list.dart';
+import 'toolbar.dart';
 
 class TodosBody extends StatefulWidget {
   const TodosBody({super.key});

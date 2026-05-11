@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
 import 'package:solid_annotations/solid_annotations.dart';
-import 'package:todos_example/controllers/filter.dart';
-import 'package:todos_example/controllers/todos.dart';
-import 'package:todos_example/domain/todo.dart';
-import 'package:todos_example/pages/todos.dart';
+
+import 'controllers/filter.dart';
+import 'controllers/todos.dart';
+import 'domain/todo.dart';
+import 'pages/todos.dart';
 
 void main() {
   SolidartConfig.autoDispose = false;

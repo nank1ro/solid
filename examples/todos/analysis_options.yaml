@@ -29,3 +29,10 @@ analyzer:
 linter:
   rules:
     public_member_api_docs: false
+    # SPEC §2 forbids `package:<self>/...` URIs in source files; the
+    # generator mirrors paths 1:1 into `lib/`, so the same rule must hold
+    # there. Turn off `very_good_analysis`'s default `always_use_package_imports`
+    # and enable its opposite as a tripwire for any future generator
+    # regression that leaks `package:<self>/...` into `lib/`.
+    always_use_package_imports: false
+    prefer_relative_imports: true

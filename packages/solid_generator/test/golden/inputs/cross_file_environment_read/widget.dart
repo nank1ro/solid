@@ -6,15 +6,13 @@
 // `ListMixin.length` is reached through the receiver chain directly).
 // Both reads are wrapped in `SignalBuilder`.
 
-// The `package:a/...` import is a `build_test`-synthesised package URI —
-// the analyzer cannot resolve it outside the multi-file golden harness,
-// so the `uri_does_not_exist` / `undefined_class` errors are expected
-// here and suppressed.
-// ignore_for_file: uri_does_not_exist, undefined_class
+// Same-package imports must be relative (SPEC §2) — `controllers.dart` is a
+// sibling source file in the multi-file golden harness.
 
-import 'package:a/cross_file_environment_read/controllers.dart';
 import 'package:flutter/widgets.dart';
 import 'package:solid_annotations/solid_annotations.dart';
+
+import 'controllers.dart';
 
 class Display extends StatelessWidget {
   Display({super.key});

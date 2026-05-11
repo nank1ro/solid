@@ -2,16 +2,17 @@ import 'dart:developer' as dev;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
-import 'package:solidart_example/pages/computed.dart';
-import 'package:solidart_example/pages/counter.dart';
-import 'package:solidart_example/pages/effects.dart';
-import 'package:solidart_example/pages/lazy_counter.dart';
-import 'package:solidart_example/pages/list_signal.dart';
-import 'package:solidart_example/pages/map_signal.dart';
-import 'package:solidart_example/pages/resource.dart';
-import 'package:solidart_example/pages/set_signal.dart';
-import 'package:solidart_example/pages/show.dart';
-import 'package:solidart_example/pages/signal_builder.dart';
+
+import 'pages/computed.dart';
+import 'pages/counter.dart';
+import 'pages/effects.dart';
+import 'pages/lazy_counter.dart';
+import 'pages/list_signal.dart';
+import 'pages/map_signal.dart';
+import 'pages/resource.dart';
+import 'pages/set_signal.dart';
+import 'pages/show.dart';
+import 'pages/signal_builder.dart';
 
 class Logger implements SolidartObserver {
   @override

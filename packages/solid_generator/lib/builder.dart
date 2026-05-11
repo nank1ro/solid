@@ -21,6 +21,7 @@ import 'package:solid_generator/src/provider_dispose_rewriter.dart';
 import 'package:solid_generator/src/query_model.dart';
 import 'package:solid_generator/src/reserved_annotation_validator.dart';
 import 'package:solid_generator/src/signal_emitter.dart';
+import 'package:solid_generator/src/source_import_validator.dart';
 import 'package:solid_generator/src/state_class_rewriter.dart';
 import 'package:solid_generator/src/stateless_rewriter.dart';
 import 'package:solid_generator/src/target_validator.dart';
@@ -96,6 +97,10 @@ class _SolidBuilder implements Builder {
 
     final source = await buildStep.readAsString(buildStep.inputId);
 
+    // Rejects `package:<self>/...` in any source file — runs before the
+    // fast-path bypass so unannotated files are validated too.
+    validateSourceImportsFromText(source, buildStep.inputId.package);
+
     // Files without any @Solid* annotation pass through verbatim — UNLESS they
     // contain a `Provider(...)` or `.environment<T>()` call site, which the
     // auto-dispose pass must visit. A `source.contains` check is a cheap
@@ -121,6 +126,11 @@ class _SolidBuilder implements Builder {
         '(offset ${diagnostic.offset})',
       );
     }
+
+    // AST-precise re-check of the same-package-import rule. Redundant with
+    // the pre-parse text scan above but produces precise URI text in the
+    // error message; one extra `whereType` walk per parsed file.
+    validateSourceImportsFromAst(parsed.unit, buildStep.inputId.package);
 
     // Reserved-annotation guard. Currently a no-op; preserved as a regression
     // fence for future revisions.
