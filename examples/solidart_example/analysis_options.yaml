@@ -1,0 +1,15 @@
+include: package:very_good_analysis/analysis_options.yaml
+analyzer:
+  exclude:
+    - source/**
+  errors:
+    must_be_immutable: ignore
+    always_put_required_named_parameters_first: ignore
+    invalid_annotation_target: ignore
+    avoid_print: ignore
+    unnecessary_statements: ignore
+    lines_longer_than_80_chars: ignore
+    specify_nonobvious_property_types: ignore
+linter:
+  rules:
+    public_member_api_docs: false

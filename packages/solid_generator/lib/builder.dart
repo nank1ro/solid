@@ -531,15 +531,30 @@ String _renderOutput(
   final referencesSolidAnnotations =
       results.any((r) => r.emitsDisposable) ||
       _environmentExtensionRef.hasMatch(body);
+  // Single walk of source imports: collect URIs (passed to
+  // `computeOutputImports`) and the matching full directive source text in
+  // one pass, so `as <prefix>` aliases and `show` / `hide` combinators survive
+  // into the lowered output. Synthesized URIs (`flutter_solidart`, `provider`)
+  // have no source-side directive and fall back to the bare form below.
+  final sourceUris = <String>[];
+  final sourceDirectives = <String, String>{};
+  for (final directive in unit.directives.whereType<ImportDirective>()) {
+    final uri = directive.uri.stringValue;
+    if (uri == null) continue;
+    sourceUris.add(uri);
+    sourceDirectives[uri] = directive.toSource();
+  }
   final imports = computeOutputImports(
-    unit.directives.whereType<ImportDirective>().map(_importUri).toList(),
+    sourceUris,
     addSolidart: results.any(
       (r) => r.solidartNames.any(solidartNames.contains),
     ),
     addProvider: annotatedClasses.any((c) => c.environments.isNotEmpty),
     referencesSolidAnnotations: referencesSolidAnnotations,
   );
-  final importBlock = imports.map((u) => "import '$u';").join('\n');
+  final importBlock = imports
+      .map((u) => sourceDirectives[u] ?? "import '$u';")
+      .join('\n');
 
   final combined = '$importBlock\n\n$body\n';
   // Inject `dispose: (context, provider) => provider.dispose()` into every
@@ -656,10 +671,6 @@ RewriteResult _rewriteClass(
       );
   }
 }
-
-/// Returns the URI string of an `import '…';` directive, or the empty string
-/// if the directive has no URI (should not happen for well-formed source).
-String _importUri(ImportDirective d) => d.uri.stringValue ?? '';
 
 /// Resolver pass for the cross-file slice of the chain-aware rule. For each
 /// `@SolidEnvironment` field whose declared type is NOT defined in the

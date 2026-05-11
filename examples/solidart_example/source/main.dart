@@ -1,0 +1,99 @@
+import 'dart:developer' as dev;
+
+import 'package:flutter/material.dart';
+import 'package:flutter_solidart/flutter_solidart.dart';
+import 'package:solidart_example/pages/computed.dart';
+import 'package:solidart_example/pages/counter.dart';
+import 'package:solidart_example/pages/effects.dart';
+import 'package:solidart_example/pages/lazy_counter.dart';
+import 'package:solidart_example/pages/list_signal.dart';
+import 'package:solidart_example/pages/map_signal.dart';
+import 'package:solidart_example/pages/resource.dart';
+import 'package:solidart_example/pages/set_signal.dart';
+import 'package:solidart_example/pages/show.dart';
+import 'package:solidart_example/pages/signal_builder.dart';
+
+class Logger implements SolidartObserver {
+  @override
+  void didCreateSignal(SignalBase<Object?> signal) {
+    final value = signal.hasValue ? signal.value : 'undefined';
+    dev.log('didCreateSignal(name: ${signal.name}, value: $value)');
+  }
+
+  @override
+  void didDisposeSignal(SignalBase<Object?> signal) {
+    dev.log('didDisposeSignal(name: ${signal.name})');
+  }
+
+  @override
+  void didUpdateSignal(SignalBase<Object?> signal) {
+    dev.log(
+      'didUpdateSignal(name: ${signal.name}, previousValue: ${signal.previousValue}, value: ${signal.value})',
+    );
+  }
+}
+
+void main() {
+  SolidartConfig.observers.add(Logger());
+  runApp(const MyApp());
+}
+
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      title: 'Solid Flutter Demo',
+      theme: ThemeData(useMaterial3: false, primarySwatch: Colors.blue),
+      home: const HomePage(),
+      routes: routes,
+    );
+  }
+}
+
+final routes = <String, WidgetBuilder>{
+  '/counter': (_) => const CounterPage(),
+  '/lazy-counter': (_) => const LazyCounterPage(),
+  '/show': (_) => const ShowPage(),
+  '/computed': (_) => const ComputedPage(),
+  '/effects': (_) => const EffectsPage(),
+  '/signal-builder': (_) => const SignalBuilderPage(),
+  '/resource': (_) => const ResourcePage(),
+  '/list-signal': (_) => const ListSignalPage(),
+  '/set-signal': (_) => const SetSignalPage(),
+  '/map-signal': (_) => const MapSignalPage(),
+};
+
+final routeToNameRegex = RegExp('(?:^/|-)([a-z])');
+
+class HomePage extends StatelessWidget {
+  const HomePage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final keys = routes.keys;
+    return Scaffold(
+      appBar: AppBar(title: const Text('Solid showcase')),
+      body: ListView.builder(
+        itemCount: routes.length,
+        itemBuilder: (BuildContext context, int index) {
+          final route = keys.elementAt(index);
+
+          final name = route.replaceAllMapped(
+            routeToNameRegex,
+            (match) => match.group(0)!.substring(1).toUpperCase(),
+          );
+
+          return ListTile(
+            title: Text(name),
+            onTap: () {
+              Navigator.of(context).pushNamed(route);
+            },
+          );
+        },
+      ),
+    );
+  }
+}

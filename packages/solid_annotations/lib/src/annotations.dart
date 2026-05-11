@@ -90,3 +90,24 @@ extension UntrackedExtension<T> on T {
   /// {@macro SolidAnnotations.UntrackedExtension}
   T get untracked => this;
 }
+
+/// {@template SolidAnnotations.LazyStateExtension}
+/// Source-time stubs for `SignalBase<T>` getters that survive verbatim through
+/// lowering: `.hasValue` (lazy-state probe — see SPEC §4.2) and
+/// `.previousValue` (the value just before the most recent update — useful in
+/// `observe(...)` callbacks).
+///
+/// In source, `<field>.hasValue` reads through a non-reactive declaration
+/// (e.g. `late int counter`) and the bare Dart analyzer cannot prove the
+/// chain typechecks against the lowered `Signal<T>` type. This extension
+/// provides the source-side getter so the chain compiles; at lib-time the
+/// real `SignalBase<T>` getter wins (instance members beat extension members
+/// in Dart), so the stub body is unreachable for tracked-field call sites.
+/// {@endtemplate}
+extension LazyStateExtension<T> on T {
+  /// {@macro SolidAnnotations.LazyStateExtension}
+  bool get hasValue => true;
+
+  /// {@macro SolidAnnotations.LazyStateExtension}
+  T? get previousValue => null;
+}

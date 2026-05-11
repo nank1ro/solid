@@ -533,6 +533,7 @@ late final text = Signal<String>.lazy(name: 'text');
 Rules:
 
 - For any `late` field declared without an initializer, the generator emits `Signal<T>.lazy(name: '…')` regardless of `T`. `Signal.lazy` (flutter_solidart ≥ 2.0) has no initial value; reading `.value` before the first write throws `StateError` — the one-to-one analogue of Dart's own `LateInitializationError` for `late` fields.
+- Source code may probe initialization state via `<field>.hasValue` (and observe-history via `<field>.previousValue`) — chain accesses on the bare tracked identifier that the no-double-append guard (§5.4) passes through verbatim.
 - The `late` modifier is preserved on the emitted Dart field so that `Signal` construction itself is deferred until first access.
 - The rule is uniform across primitives, collections, and user-defined types: no defaults table, no rejection path. `@SolidState() late MyType foo;` is always valid as long as `MyType` is a real type.
 - Nullable fields (Section 4.3) do not require `late` because `null` is a valid default; those continue to emit `Signal<T?>(null, name: '…')`.
@@ -1105,6 +1106,8 @@ Compound-assignment operators (`+=`, `++`, etc.) are sugar: the LHS position is 
 The rewriter appends `.value` only when the receiver's resolved static type is `SignalBase<T>` or a subtype. If the type is anything else, the rewriter leaves the expression untouched.
 
 This matters because `.value` is a common field name on ordinary Dart objects (e.g., `TextEditingController.value`, `ValueNotifier.value`). A name-based rewriter would produce nonsensical `controller.value.value` code. The type-based rule is the only correct form and is also inherently idempotent: once `counter.value` has been rewritten, the outer expression's type is `int` (not `SignalBase<int>`), so the rule stops applying.
+
+In addition to `.value`, the rewriter preserves chain accesses on `SignalBase<T>` getters whose return type is a non-reactive value: `.hasValue` (lazy-state probe, see §4.2) and `.previousValue` (the value just before the most recent update). All three share the same idempotence property — the result type is not `SignalBase<T>`, so the rule does not fire again on the access. In the current name-based implementation slice, the rewriter recognizes the closed set `{value, hasValue, previousValue}` of pass-through getter names on a bare tracked-field receiver; a tracked-field access followed by any OTHER property name is treated as a bare read on the field and is rewritten to `<field>.value.<other>`. When the resolved-AST migration replaces name-based detection with `staticType` resolution, the rule generalizes naturally (the static type after `.hasValue` is `bool`, after `.previousValue` is `T?`, neither of which is a `SignalBase<T>` subtype).
 
 The generator MUST resolve types through `package:analyzer`. Name-matching, regex, or string heuristics are not acceptable implementations of this rule.
 

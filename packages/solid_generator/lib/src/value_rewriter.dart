@@ -201,6 +201,12 @@ const String _untrackedValueGetterName = 'untrackedValue';
 /// tracking context.
 const String _untrackedStateGetterName = 'untrackedState';
 
+/// `SignalBase<T>` getter names that take a reactive receiver as-is, so a
+/// bare tracked-field access followed by any of them must skip the `.value`
+/// append. A type-driven rewriter would derive this from the resolved
+/// `staticType` of the access; in name-set mode we enumerate.
+const Set<String> _signalApiGetters = {'value', 'hasValue', 'previousValue'};
+
 /// AST visitor that accumulates [ValueEdit]s for reactive-field identifiers.
 ///
 /// Scope tracking is intentionally minimal: a local variable whose name
@@ -477,7 +483,7 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
   /// widget subtree is wrapped in `SignalBuilder`.
   void _maybeRewriteCrossClass(PrefixedIdentifier node) {
     if (_isShadowed(node.prefix.name)) return;
-    if (_isAccessedValueProperty(node.identifier)) return;
+    if (_isAccessedSignalApiProperty(node.identifier)) return;
     final declaredTypeName =
         _resolveParameterTypeName(node.prefix) ??
         _environmentFields[node.prefix.name];
@@ -605,7 +611,7 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
   void visitSimpleIdentifier(SimpleIdentifier node) {
     final name = node.name;
     if (_isTrackedField(name)) {
-      if (_isAccessedValueProperty(node)) return;
+      if (_isAccessedSignalApiProperty(node)) return;
 
       // Collection-typed `@SolidState` fields: ListSignal / SetSignal /
       // MapSignal expose their underlying collection API directly via
@@ -690,20 +696,19 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
     if (!trackedQueryNames.contains(name)) trackedQueryNames.add(name);
   }
 
-  /// Detects `counter.value` shapes where appending another `.value` would
-  /// produce the `counter.value.value` regression. Type resolution would
-  /// handle this automatically; in name-set mode we guard syntactically on
-  /// the `.value` property name.
-  bool _isAccessedValueProperty(SimpleIdentifier id) {
+  /// True if [id] sits in receiver position of a chain access whose property
+  /// name is in [_signalApiGetters] — the syntactic stand-in for a type-aware
+  /// no-double-append guard. See SPEC §5.4.
+  bool _isAccessedSignalApiProperty(SimpleIdentifier id) {
     final parent = id.parent;
     if (parent is PropertyAccess &&
         parent.target == id &&
-        parent.propertyName.name == 'value') {
+        _signalApiGetters.contains(parent.propertyName.name)) {
       return true;
     }
     if (parent is PrefixedIdentifier &&
         parent.prefix == id &&
-        parent.identifier.name == 'value') {
+        _signalApiGetters.contains(parent.identifier.name)) {
       return true;
     }
     return false;
