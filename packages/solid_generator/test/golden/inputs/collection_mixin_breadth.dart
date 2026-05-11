@@ -63,8 +63,8 @@ class Breadth extends StatelessWidget {
 
   void mutate() {
     // Mutation methods — direct calls on the signal (no `.value`),
-    // because the cascade-free single call shape is `MethodInvocation`
-    // with target=identifier, which `_isChainPrefix` catches.
+    // because the single-call shape is `MethodInvocation` with
+    // target=identifier, which `_isChainPrefix` catches.
     xs.add(1);
     xs.insert(0, 5);
     xs.removeAt(0);

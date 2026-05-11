@@ -498,23 +498,32 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
     }
   }
 
-  /// True if [node] (a `<receiver>.<field>` PrefixedIdentifier) is itself
-  /// used as the prefix of a longer chain — i.e. the parent expression
-  /// reaches a member access, method invocation, or index expression on
-  /// top of it. Mirrors [_isChainPrefix] for the same-class branch.
+  /// True if [node] is the `target` of its parent expression — `PropertyAccess`,
+  /// `MethodInvocation`, `IndexExpression`, or `CascadeExpression`. Every
+  /// chain shape carries its receiver on a `target` field on the outer
+  /// node, so checking the parent is the only way to detect a cascade
+  /// (whose implicit receiver bypasses a member-chain on the inner
+  /// identifier entirely).
   ///
-  /// `PrefixedIdentifier.prefix` is always a `SimpleIdentifier`, so an
-  /// `a.b.c` chain parses as `PropertyAccess(target=PrefixedIdentifier(a,
-  /// b), property=c)` — never as nested `PrefixedIdentifier`s. The
-  /// PropertyAccess / MethodInvocation / IndexExpression branches cover
-  /// every legal chain-prefix shape.
-  bool _isCrossClassChainPrefix(PrefixedIdentifier node) {
+  /// Used by both same-class ([_isChainPrefix]) and cross-class
+  /// ([_isCrossClassChainPrefix]) branches.
+  static bool _isAnyChainTarget(Expression node) {
     final parent = node.parent;
     if (parent is PropertyAccess && parent.target == node) return true;
     if (parent is MethodInvocation && parent.target == node) return true;
     if (parent is IndexExpression && parent.target == node) return true;
+    if (parent is CascadeExpression && parent.target == node) return true;
     return false;
   }
+
+  /// True if [node] (a `<receiver>.<field>` PrefixedIdentifier) is itself
+  /// used as the prefix of a longer chain. `PrefixedIdentifier.prefix` is
+  /// always a `SimpleIdentifier`, so an `a.b.c` chain parses as
+  /// `PropertyAccess(target=PrefixedIdentifier(a, b), property=c)` —
+  /// never as nested `PrefixedIdentifier`s. Hence the cross-class case
+  /// delegates entirely to [_isAnyChainTarget].
+  bool _isCrossClassChainPrefix(PrefixedIdentifier node) =>
+      _isAnyChainTarget(node);
 
   /// If [prefix] resolves to a method/function parameter declared with a
   /// [NamedType] annotation, returns that type's simple name (e.g. `'Counter'`
@@ -653,19 +662,16 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
   }
 
   /// True if [id] occupies the receiver position of a chain access —
-  /// the prefix of a `PrefixedIdentifier`, the target of a `PropertyAccess`
-  /// / `MethodInvocation` / `IndexExpression`. Used by the collection-field
-  /// branch of [visitSimpleIdentifier] to recognise `xs.<member>`,
-  /// `xs.method(...)`, `xs[i]`, and `xs.cascade...` shapes, all of which
-  /// resolve through the collection-signal mixin and must NOT receive a
-  /// `.value` append.
+  /// the prefix of a `PrefixedIdentifier`, OR any of the four
+  /// chain-target shapes covered by [_isAnyChainTarget]. Used by the
+  /// collection-field branch of [visitSimpleIdentifier] to recognise
+  /// `xs.<member>`, `xs.method(...)`, `xs[i]`, and `xs..add(1)..add(2)`
+  /// cascades — all of which resolve through the collection-signal mixin
+  /// and must NOT receive a `.value` append.
   bool _isChainPrefix(SimpleIdentifier id) {
     final parent = id.parent;
     if (parent is PrefixedIdentifier && parent.prefix == id) return true;
-    if (parent is PropertyAccess && parent.target == id) return true;
-    if (parent is MethodInvocation && parent.target == id) return true;
-    if (parent is IndexExpression && parent.target == id) return true;
-    return false;
+    return _isAnyChainTarget(id);
   }
 
   /// Appends [name] to [trackedReadNames] iff not already present, preserving
