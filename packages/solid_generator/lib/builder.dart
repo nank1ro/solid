@@ -323,6 +323,16 @@ List<_AnnotatedClass> _collectAnnotatedClasses(
     final queries = <QueryModel>[];
     final environments = <EnvironmentModel>[];
     final reactiveNames = <String>{};
+    // Subset of [reactiveNames] whose emitter produces a collection signal
+    // (`ListSignal<T>` / `SetSignal<T>` / `MapSignal<K, V>`). Built
+    // incrementally so a `@SolidState` getter / `@SolidEffect` /
+    // `@SolidQuery` body declared LATER in the class can skip the
+    // `.value` insertion on chain reads of an EARLIER collection field —
+    // the collection signal's mixin already tracks reads natively, so
+    // `xs.where(...)` / `xs.length` / `xs[i]` resolve through the
+    // ListMixin / SetMixin / MapMixin without `.value`. Getters never go
+    // into this set (they lower to `Computed<T>`, no mixin contract).
+    final collectionFieldsSeen = <String>{};
     // Local view of the cross-class registries that excludes the enclosing
     // class itself — the reader pipeline already provides same-class
     // `@SolidState` field/getter names through [reactiveNames], so threading
@@ -355,6 +365,9 @@ List<_AnnotatedClass> _collectAnnotatedClasses(
         if (model != null) {
           fields.add(model);
           reactiveNames.add(model.fieldName);
+          if (isCollectionSignalField(model)) {
+            collectionFieldsSeen.add(model.fieldName);
+          }
           continue;
         }
         // `@SolidState` wins over `@SolidEnvironment` on a both-annotated
@@ -375,6 +388,7 @@ List<_AnnotatedClass> _collectAnnotatedClasses(
           classRegistry: crossClassRegistry,
           classCollectionFields: crossClassCollections,
           environmentFields: environmentFieldsForBody,
+          collectionFields: collectionFieldsSeen,
         );
         if (getter != null) {
           getters.add(getter);
@@ -395,6 +409,7 @@ List<_AnnotatedClass> _collectAnnotatedClasses(
           classRegistry: crossClassRegistry,
           classCollectionFields: crossClassCollections,
           environmentFields: environmentFieldsForBody,
+          collectionFields: collectionFieldsSeen,
         );
         if (effect != null) {
           effects.add(effect);
@@ -408,6 +423,7 @@ List<_AnnotatedClass> _collectAnnotatedClasses(
           classRegistry: crossClassRegistry,
           classCollectionFields: crossClassCollections,
           environmentFields: environmentFieldsForBody,
+          collectionFields: collectionFieldsSeen,
         );
         if (query != null) {
           queries.add(query);

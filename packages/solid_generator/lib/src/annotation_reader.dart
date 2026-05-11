@@ -127,6 +127,7 @@ GetterModel? readSolidStateGetter(
   Map<String, Set<String>> classRegistry = const {},
   Map<String, Set<String>> classCollectionFields = const {},
   Map<String, String> environmentFields = const {},
+  Set<String> collectionFields = const {},
 }) {
   if (!decl.isGetter || decl.isStatic) return null;
   final annotation = findAnnotationByName(solidStateName, decl.metadata);
@@ -164,6 +165,7 @@ GetterModel? readSolidStateGetter(
     classRegistry: classRegistry,
     classCollectionFields: classCollectionFields,
     environmentFields: environmentFields,
+    collectionFields: collectionFields,
   );
 
   return GetterModel(
@@ -216,6 +218,7 @@ _readReactiveBody(
   Map<String, Set<String>> classRegistry = const {},
   Map<String, Set<String>> classCollectionFields = const {},
   Map<String, String> environmentFields = const {},
+  Set<String> collectionFields = const {},
 }) {
   final AstNode node;
   final bool isBlockBody;
@@ -237,6 +240,7 @@ _readReactiveBody(
     classRegistry: classRegistry,
     classCollectionFields: classCollectionFields,
     environmentFields: environmentFields,
+    collectionFields: collectionFields,
   );
   // Zero-deps Effect / Computed are rejected. A reactive dep is either a
   // `.value`-rewritten state read, a tracked query-call invocation, OR a
@@ -286,6 +290,7 @@ EffectModel? readSolidEffectMethod(
   Map<String, Set<String>> classRegistry = const {},
   Map<String, Set<String>> classCollectionFields = const {},
   Map<String, String> environmentFields = const {},
+  Set<String> collectionFields = const {},
 }) {
   if (decl.isGetter || decl.isSetter || decl.isStatic) return null;
   final annotation = findAnnotationByName(solidEffectName, decl.metadata);
@@ -317,6 +322,7 @@ EffectModel? readSolidEffectMethod(
     classRegistry: classRegistry,
     classCollectionFields: classCollectionFields,
     environmentFields: environmentFields,
+    collectionFields: collectionFields,
   );
 
   return EffectModel(
@@ -351,6 +357,7 @@ QueryModel? readSolidQueryMethod(
   Map<String, Set<String>> classRegistry = const {},
   Map<String, Set<String>> classCollectionFields = const {},
   Map<String, String> environmentFields = const {},
+  Set<String> collectionFields = const {},
 }) {
   if (decl.isGetter || decl.isSetter || decl.isStatic) return null;
   final annotation = findAnnotationByName(solidQueryName, decl.metadata);
@@ -391,6 +398,7 @@ QueryModel? readSolidQueryMethod(
     classRegistry: classRegistry,
     classCollectionFields: classCollectionFields,
     environmentFields: environmentFields,
+    collectionFields: collectionFields,
   );
 
   // A self-cycle is rejected at codegen — solidart would re-run

@@ -10,12 +10,12 @@ class TodosController implements Disposable {
   final todos = ListSignal<Todo>(const [], name: 'todos');
 
   late final completedTodos = Computed<List<Todo>>(
-    () => todos.value.where((t) => t.completed).toList(),
+    () => todos.where((t) => t.completed).toList(),
     name: 'completedTodos',
   );
 
   late final incompleteTodos = Computed<List<Todo>>(
-    () => todos.value.where((t) => !t.completed).toList(),
+    () => todos.where((t) => !t.completed).toList(),
     name: 'incompleteTodos',
   );
 
