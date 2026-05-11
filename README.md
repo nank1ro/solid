@@ -10,7 +10,7 @@
 
 <a href="https://www.buymeacoffee.com/nank1ro" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/default-orange.png" alt="Buy Me A Coffee" height="41" width="174"></a>
 
-Congrats on your interest in **Solid**! Let's make Flutter development even more enjoyable.
+Congrats on your interest in **Flutter Solid**! Let's make Flutter development even more enjoyable.
 
 Solid is a tiny framework built on top of Flutter that makes building apps easier and more enjoyable.
 The benefits of using Solid include:
