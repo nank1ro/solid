@@ -63,6 +63,10 @@ import { Steps } from '@astrojs/starlight/components';
    linter:
      rules:
        public_member_api_docs: false # Disable documentation requirement for public members
+       # Same-package imports must be relative — `package:<self>/…` resolves to `lib/`,
+       # the generated realm, which is the wrong target for an authored file.
+       always_use_package_imports: false
+       prefer_relative_imports: true
    ```
 </Steps>
 
@@ -90,24 +94,6 @@ I decided not to use the `lib` folder directly because I don't want to touch the
 I wanted to use `lib` as the input folder, but `flutter build` doesn't allow building (as far as I know) an app from a different folder than `lib`.
 
 In addition, Solid is not a common generator because it transpiles your existing code to an optimized version of it.
-
-### Importing other source files
-
-When a file inside `source/` needs to reference another file in the same project, use a **relative import**, not a `package:<self>/...` URI.
-
-```dart title="source/pages/counter.dart" {3,4}
-import 'package:flutter/material.dart';
-import 'package:solid_annotations/solid_annotations.dart';
-
-import '../controllers/counter.dart';   // ✅ relative — resolves to source/controllers/counter.dart
-// import 'package:my_app/controllers/counter.dart';  // ❌ resolves to lib/ — the generated realm
-
-class CounterPage extends StatelessWidget { /* … */ }
-```
-
-Standard Dart `package:` URIs resolve to a package's `lib/` folder. In a Solid project that's the generated realm — pointing a `source/` file at `lib/` would route you through the lowered `Signal<T>` types instead of your authored shape, and "Go to definition" in your IDE would land in generated code. The build fails fast on this with a clear error pointing back here.
-
-Cross-package imports (`flutter`, `solid_annotations`, `provider`, third-party packages) keep the `package:` form — only **same-package** imports must be relative.
 
 ## Configuration
 
