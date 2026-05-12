@@ -490,7 +490,7 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
   /// widget subtree is wrapped in `SignalBuilder`.
   void _maybeRewriteCrossClass(PrefixedIdentifier node) {
     if (_isShadowed(node.prefix.name)) return;
-    if (_isAccessedSignalApiProperty(node.identifier)) return;
+    if (_isAccessOnSignalApi(node.identifier, _signalApiGetters)) return;
     // Outer-chain Signal API guard: a `<receiver>.<reactiveField>.<getter>`
     // chain where `<getter>` is `.value` / `.hasValue` / `.previousValue`
     // must pass through verbatim — inserting `.value` between the field and
@@ -635,15 +635,13 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
   void visitSimpleIdentifier(SimpleIdentifier node) {
     final name = node.name;
     if (_isTrackedField(name)) {
-      if (_isAccessedSignalApiProperty(node)) {
-        // `.hasValue` / `.previousValue` are reactive reads — their result
-        // flips when the underlying signal changes — so the enclosing
-        // subtree must still be wrapped in a `SignalBuilder`. `.value`
-        // reads, in contrast, are the user opting into the Signal API
-        // explicitly; existing behavior is to leave tracking to the bare-
-        // read path, so we only record offsets for the two non-`.value`
-        // getters here.
-        if (_isTrackedSignalApiAccess(node) && _untrackedDepth == 0) {
+      if (_isAccessOnSignalApi(node, _signalApiGetters)) {
+        // `.hasValue` / `.previousValue` flip with signal updates, so the
+        // enclosing subtree must still be wrapped — track here. Explicit
+        // `.value` is the user opting out of auto-tracking, so we let the
+        // bare-read path handle that case and skip recording here.
+        if (_isAccessOnSignalApi(node, _trackedSignalApiGetters) &&
+            _untrackedDepth == 0) {
           trackedReadOffsets.add(node.offset);
           _recordTrackedReadName(name);
         }
@@ -734,40 +732,20 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
   }
 
   /// True if [id] sits in receiver position of a chain access whose property
-  /// name is in [_signalApiGetters] — the syntactic stand-in for a type-aware
-  /// no-double-append guard. See SPEC §5.4.
-  bool _isAccessedSignalApiProperty(SimpleIdentifier id) {
+  /// name is in [propertyNames]. The two callers pivot the rule:
+  ///   * [_signalApiGetters] — no-double-append guard (SPEC §5.4).
+  ///   * [_trackedSignalApiGetters] — `.hasValue` / `.previousValue` reads
+  ///     that must record a tracking offset for SignalBuilder placement.
+  bool _isAccessOnSignalApi(SimpleIdentifier id, Set<String> propertyNames) {
     final parent = id.parent;
     if (parent is PropertyAccess &&
         parent.target == id &&
-        _signalApiGetters.contains(parent.propertyName.name)) {
+        propertyNames.contains(parent.propertyName.name)) {
       return true;
     }
     if (parent is PrefixedIdentifier &&
         parent.prefix == id &&
-        _signalApiGetters.contains(parent.identifier.name)) {
-      return true;
-    }
-    return false;
-  }
-
-  /// True if [id] sits in receiver position of a chain to one of the
-  /// "tracked" Signal API getters — `.hasValue` / `.previousValue`. These
-  /// reads ARE reactive (their result flips with signal updates), so the
-  /// SignalBuilder placement pass must wrap the enclosing widget subtree.
-  /// `.value` reads are handled by the bare-read path and are NOT included
-  /// here to preserve the existing "explicit `.value` is the user opting
-  /// into Signal API" semantics.
-  bool _isTrackedSignalApiAccess(SimpleIdentifier id) {
-    final parent = id.parent;
-    if (parent is PropertyAccess &&
-        parent.target == id &&
-        _trackedSignalApiGetters.contains(parent.propertyName.name)) {
-      return true;
-    }
-    if (parent is PrefixedIdentifier &&
-        parent.prefix == id &&
-        _trackedSignalApiGetters.contains(parent.identifier.name)) {
+        propertyNames.contains(parent.identifier.name)) {
       return true;
     }
     return false;

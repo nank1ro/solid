@@ -67,16 +67,12 @@ Set<Expression> computeWrapSet(
   return wrapSet;
 }
 
-/// Removes any wrap that's strictly redundant: the outer wrap is dropped
-/// only when ALL of its tracked-read offsets fall inside the inner wrap's
-/// source range — i.e., the inner wrap already covers everything the outer
-/// would. The old "always drop the outer when nested" rule was unsafe
-/// because the outer often subscribed to a different identifier (e.g.
-/// `xs.length` at `ListView`'s `itemCount:` argument, outside an inner
-/// `Text` that reads `xs[i]`); dropping that outer breaks list-length
-/// reactivity. Symmetric reverse pruning (drop the inner) is unsafe in
-/// general because the inner may subscribe to a different signal than the
-/// outer; the inner's reactivity would be lost without it.
+/// Drops an outer wrap only when ALL of its tracked-read offsets fall
+/// inside the inner wrap's source range — the inner wrap already covers
+/// everything the outer would. The naive "always drop the outer when
+/// nested" rule was unsafe: e.g. `ListView(itemCount: xs.length, ...)`
+/// with an inner `Text` reading `xs[i]` would lose list-length reactivity
+/// because the outer's read sits outside the inner's range.
 void _pruneAncestors(
   Set<Expression> wrapSet,
   Map<Expression, Set<int>> wrapOffsets,

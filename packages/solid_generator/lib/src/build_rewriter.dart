@@ -123,45 +123,30 @@ String rewriteBuildMethod(
       return a.end.compareTo(b.end);
     });
 
-  // For each wrap, find its IMMEDIATE parent (the smallest other wrap that
-  // strictly contains it) so the wrap tree is unambiguous. Value edits get
-  // pinned to the smallest wrap that contains them. Both pivots are used
-  // below to embed inner wraps exactly once in the outer wrap's replacement,
-  // and to route each value edit to the right wrap (or no wrap at all).
-  final wrapParent = <Expression, Expression?>{};
-  for (final wrap in orderedWraps) {
-    Expression? parent;
-    for (final cand in orderedWraps) {
-      if (identical(cand, wrap)) continue;
-      if (cand.offset > wrap.offset || cand.end < wrap.end) continue;
-      if (cand.offset == wrap.offset && cand.end == wrap.end) continue;
-      if (parent == null ||
-          cand.offset > parent.offset ||
-          cand.end < parent.end) {
-        parent = cand;
-      }
-    }
-    wrapParent[wrap] = parent;
-  }
+  // Wrap tree: each wrap's IMMEDIATE parent (smallest strictly-containing
+  // wrap) plus the inverse children map. Value edits pin to the smallest
+  // wrap that contains them (or `null` for edits outside every wrap).
+  // Together these route every value edit and every nested wrap to exactly
+  // one outer wrap's replacement.
+  final wrapParent = <Expression, Expression?>{
+    for (final wrap in orderedWraps)
+      wrap: _smallestContaining(
+        orderedWraps,
+        wrap.offset,
+        wrap.end,
+        strict: true,
+      ),
+  };
   final wrapChildren = <Expression, List<Expression>>{};
   for (final entry in wrapParent.entries) {
     final parent = entry.value;
     if (parent == null) continue;
     wrapChildren.putIfAbsent(parent, () => []).add(entry.key);
   }
-  final valueEditOwner = <ValueEdit, Expression?>{};
-  for (final e in valueResult.edits) {
-    Expression? smallest;
-    for (final w in orderedWraps) {
-      if (w.offset > e.offset || e.end > w.end) continue;
-      if (smallest == null ||
-          w.offset > smallest.offset ||
-          w.end < smallest.end) {
-        smallest = w;
-      }
-    }
-    valueEditOwner[e] = smallest;
-  }
+  final valueEditOwner = <ValueEdit, Expression?>{
+    for (final e in valueResult.edits)
+      e: _smallestContaining(orderedWraps, e.offset, e.end),
+  };
 
   final wrapReplacements = <Expression, String>{};
   for (final node in orderedWraps) {
@@ -229,4 +214,27 @@ String _signalBuilderWrap(String inner) {
       '    return $inner;\n'
       '  },\n'
       ')';
+}
+
+/// Smallest wrap in [wraps] whose source range contains `[offset, end)`,
+/// or `null` if none does. When [strict] is true, exact-range matches
+/// (offset and end both equal) are excluded — used by the parent-of-wrap
+/// pass so a wrap cannot be its own parent.
+Expression? _smallestContaining(
+  List<Expression> wraps,
+  int offset,
+  int end, {
+  bool strict = false,
+}) {
+  Expression? smallest;
+  for (final w in wraps) {
+    if (w.offset > offset || end > w.end) continue;
+    if (strict && w.offset == offset && w.end == end) continue;
+    if (smallest == null ||
+        w.offset > smallest.offset ||
+        w.end < smallest.end) {
+      smallest = w;
+    }
+  }
+  return smallest;
 }
