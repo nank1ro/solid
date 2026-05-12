@@ -113,33 +113,93 @@ String rewriteBuildMethod(
 
   final edits = <SourceEdit>[];
 
-  // Wrap edits supersede any value edits inside their node's source range
-  // because the wrap's replacement string already embeds the rewritten
-  // inner text.
-  for (final node in wrapNodes) {
+  // Process wraps deepest-first so an outer wrap's replacement embeds the
+  // already-rewritten inner wraps verbatim — overlapping edits would
+  // otherwise corrupt each other when applied to the same source range.
+  final orderedWraps = wrapNodes.toList()
+    ..sort((a, b) {
+      final byOffset = b.offset.compareTo(a.offset);
+      if (byOffset != 0) return byOffset;
+      return a.end.compareTo(b.end);
+    });
+
+  // For each wrap, find its IMMEDIATE parent (the smallest other wrap that
+  // strictly contains it) so the wrap tree is unambiguous. Value edits get
+  // pinned to the smallest wrap that contains them. Both pivots are used
+  // below to embed inner wraps exactly once in the outer wrap's replacement,
+  // and to route each value edit to the right wrap (or no wrap at all).
+  final wrapParent = <Expression, Expression?>{};
+  for (final wrap in orderedWraps) {
+    Expression? parent;
+    for (final cand in orderedWraps) {
+      if (identical(cand, wrap)) continue;
+      if (cand.offset > wrap.offset || cand.end < wrap.end) continue;
+      if (cand.offset == wrap.offset && cand.end == wrap.end) continue;
+      if (parent == null ||
+          cand.offset > parent.offset ||
+          cand.end < parent.end) {
+        parent = cand;
+      }
+    }
+    wrapParent[wrap] = parent;
+  }
+  final wrapChildren = <Expression, List<Expression>>{};
+  for (final entry in wrapParent.entries) {
+    final parent = entry.value;
+    if (parent == null) continue;
+    wrapChildren.putIfAbsent(parent, () => []).add(entry.key);
+  }
+  final valueEditOwner = <ValueEdit, Expression?>{};
+  for (final e in valueResult.edits) {
+    Expression? smallest;
+    for (final w in orderedWraps) {
+      if (w.offset > e.offset || e.end > w.end) continue;
+      if (smallest == null ||
+          w.offset > smallest.offset ||
+          w.end < smallest.end) {
+        smallest = w;
+      }
+    }
+    valueEditOwner[e] = smallest;
+  }
+
+  final wrapReplacements = <Expression, String>{};
+  for (final node in orderedWraps) {
     final innerStart = node.offset - methodStart;
     final innerEnd = node.end - methodStart;
     final innerOriginal = methodText.substring(innerStart, innerEnd);
-    final innerValueEdits = valueResult.edits
-        .where((e) => e.offset >= node.offset && e.end <= node.end)
-        .toList();
+    final innerEdits = <ValueEdit>[
+      for (final e in valueResult.edits)
+        if (identical(valueEditOwner[e], node)) e,
+      for (final child in wrapChildren[node] ?? const <Expression>[])
+        ValueEdit(child.offset, child.end, wrapReplacements[child]!),
+    ];
     final rewrittenInner = applyEditsToRange(
       innerOriginal,
-      innerValueEdits,
+      innerEdits,
       node.offset,
     );
-    final wrap = _signalBuilderWrap(rewrittenInner);
-    edits.add(SourceEdit(innerStart, innerEnd, wrap));
+    wrapReplacements[node] = _signalBuilderWrap(rewrittenInner);
   }
 
-  // Value edits NOT covered by a wrap land as standalone source edits. The
+  // Only emit edits for OUTERMOST wraps; inner wraps are already inlined
+  // into their containing outer wrap's replacement above.
+  for (final node in orderedWraps) {
+    if (wrapParent[node] != null) continue;
+    edits.add(
+      SourceEdit(
+        node.offset - methodStart,
+        node.end - methodStart,
+        wrapReplacements[node]!,
+      ),
+    );
+  }
+
+  // Value edits NOT owned by any wrap land as standalone source edits. The
   // `onPressed: () => counter++` case is typical — its `.value` edit lives
   // outside every wrapped subtree.
   for (final edit in valueResult.edits) {
-    final inside = wrapNodes.any(
-      (n) => edit.offset >= n.offset && edit.end <= n.end,
-    );
-    if (inside) continue;
+    if (valueEditOwner[edit] != null) continue;
     edits.add(
       SourceEdit(
         edit.offset - methodStart,

@@ -1,21 +1,21 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_solidart/flutter_solidart.dart';
-import '../controllers/user.dart';
+import 'package:http/http.dart' as http;
+import 'package:solid_annotations/solid_annotations.dart';
 
-class ResourcePage extends StatefulWidget {
+class ResourcePage extends StatelessWidget {
   const ResourcePage({super.key});
 
-  @override
-  State<ResourcePage> createState() => _ResourcePageState();
-}
+  @SolidState()
+  int userId = 1;
 
-class _ResourcePageState extends State<ResourcePage> {
-  late final controller = UserController();
-
-  @override
-  void dispose() {
-    controller.dispose();
-    super.dispose();
+  @SolidQuery()
+  Future<String> user() async {
+    await Future<void>.delayed(const Duration(seconds: 2));
+    final response = await http.get(
+      Uri.parse('https://jsonplaceholder.typicode.com/users/$userId/'),
+      headers: {'Accept': 'application/json'},
+    );
+    return response.body;
   }
 
   @override
@@ -32,48 +32,43 @@ class _ResourcePageState extends State<ResourcePage> {
               onChanged: (s) {
                 final intValue = int.tryParse(s);
                 if (intValue == null) return;
-                controller.setUserId(intValue);
+                userId = intValue;
               },
             ),
             const SizedBox(height: 16),
-            SignalBuilder(
-              builder: (context, child) {
-                final userState = controller.user();
-                return userState.when(
-                  ready: (data) => Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      ListTile(
-                        title: Text(data),
-                        subtitle: Text('refreshing: ${userState.isRefreshing}'),
-                      ),
-                      if (userState.isRefreshing)
-                        const CircularProgressIndicator()
-                      else
-                        ElevatedButton(
-                          onPressed: controller.user.refresh,
-                          child: const Text('Refresh'),
-                        ),
-                    ],
+            user().when(
+              ready: (data) => Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ListTile(
+                    title: Text(data),
+                    subtitle: Text('refreshing: ${user().isRefreshing}'),
                   ),
-                  error: (e, _) => Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(e.toString()),
-                      if (userState.isRefreshing)
-                        const CircularProgressIndicator()
-                      else
-                        ElevatedButton(
-                          onPressed: controller.user.refresh,
-                          child: const Text('Refresh'),
-                        ),
-                    ],
-                  ),
-                  loading: () => const RepaintBoundary(
-                    child: CircularProgressIndicator(),
-                  ),
-                );
-              },
+                  if (user().isRefreshing)
+                    const CircularProgressIndicator()
+                  else
+                    ElevatedButton(
+                      onPressed: user.refresh,
+                      child: const Text('Refresh'),
+                    ),
+                ],
+              ),
+              error: (e, _) => Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(e.toString()),
+                  if (user().isRefreshing)
+                    const CircularProgressIndicator()
+                  else
+                    ElevatedButton(
+                      onPressed: user.refresh,
+                      child: const Text('Refresh'),
+                    ),
+                ],
+              ),
+              loading: () => const RepaintBoundary(
+                child: CircularProgressIndicator(),
+              ),
             ),
           ],
         ),

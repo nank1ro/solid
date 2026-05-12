@@ -1,4 +1,4 @@
-// Observer callbacks print to the console as the simplest demonstration of
+// Observer effect prints to the console as the simplest demonstration of
 // reactive set mutations; production code would route this through a
 // proper logger instead.
 // ignore_for_file: avoid_print
@@ -6,31 +6,21 @@
 import 'dart:math';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_solidart/flutter_solidart.dart';
+import 'package:solid_annotations/solid_annotations.dart';
+
 import '../controllers/items_controller.dart';
 
-class SetSignalPage extends StatefulWidget {
+class SetSignalPage extends StatelessWidget {
   const SetSignalPage({super.key});
 
-  @override
-  State<SetSignalPage> createState() => _SetSignalPageState();
-}
+  @SolidEnvironment()
+  late SetItemsController controller;
 
-class _SetSignalPageState extends State<SetSignalPage> {
-  late final controller = SetItemsController();
-
-  @override
-  void initState() {
-    super.initState();
-    controller.items.observe((previousValue, value) {
-      print('Items changed: $previousValue -> $value');
-    });
-  }
-
-  @override
-  void dispose() {
-    controller.dispose();
-    super.dispose();
+  @SolidEffect()
+  void logItemsChanges() {
+    print(
+      'Items changed: ${controller.items.previousValue} -> ${controller.items}',
+    );
   }
 
   @override
@@ -42,19 +32,13 @@ class _SetSignalPageState extends State<SetSignalPage> {
         child: Column(
           children: [
             Expanded(
-              child: SignalBuilder(
-                builder: (context, child) {
-                  return ListView.separated(
-                    itemCount: controller.items.value.length,
-                    itemBuilder: (context, index) {
-                      return Text(
-                        controller.items.value.elementAt(index).toString(),
-                      );
-                    },
-                    separatorBuilder: (context, index) {
-                      return const SizedBox(height: 16);
-                    },
-                  );
+              child: ListView.separated(
+                itemCount: controller.items.length,
+                itemBuilder: (context, index) {
+                  return Text(controller.items.elementAt(index).toString());
+                },
+                separatorBuilder: (context, index) {
+                  return const SizedBox(height: 16);
                 },
               ),
             ),

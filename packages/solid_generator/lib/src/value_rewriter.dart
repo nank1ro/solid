@@ -207,6 +207,13 @@ const String _untrackedStateGetterName = 'untrackedState';
 /// `staticType` of the access; in name-set mode we enumerate.
 const Set<String> _signalApiGetters = {'value', 'hasValue', 'previousValue'};
 
+/// Subset of [_signalApiGetters] whose access counts as a tracked read for
+/// SignalBuilder placement. `.value` is excluded — by convention, an
+/// explicit `.value` read is the user opting out of the auto-tracking flow,
+/// while `.hasValue` / `.previousValue` have no bare equivalent and must be
+/// tracked to keep the enclosing widget subtree reactive to signal updates.
+const Set<String> _trackedSignalApiGetters = {'hasValue', 'previousValue'};
+
 /// AST visitor that accumulates [ValueEdit]s for reactive-field identifiers.
 ///
 /// Scope tracking is intentionally minimal: a local variable whose name
@@ -484,6 +491,23 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
   void _maybeRewriteCrossClass(PrefixedIdentifier node) {
     if (_isShadowed(node.prefix.name)) return;
     if (_isAccessedSignalApiProperty(node.identifier)) return;
+    // Outer-chain Signal API guard: a `<receiver>.<reactiveField>.<getter>`
+    // chain where `<getter>` is `.value` / `.hasValue` / `.previousValue`
+    // must pass through verbatim — inserting `.value` between the field and
+    // the getter would route the call through the unboxed payload type.
+    // `.hasValue` / `.previousValue` chains are reactive reads and still
+    // record an offset so SignalBuilder placement wraps the surrounding
+    // subtree (see [_trackedSignalApiGetters]).
+    final outerParent = node.parent;
+    if (outerParent is PropertyAccess &&
+        outerParent.target == node &&
+        _signalApiGetters.contains(outerParent.propertyName.name)) {
+      if (_trackedSignalApiGetters.contains(outerParent.propertyName.name) &&
+          _untrackedDepth == 0) {
+        trackedReadOffsets.add(node.offset);
+      }
+      return;
+    }
     final declaredTypeName =
         _resolveParameterTypeName(node.prefix) ??
         _environmentFields[node.prefix.name];
@@ -611,7 +635,20 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
   void visitSimpleIdentifier(SimpleIdentifier node) {
     final name = node.name;
     if (_isTrackedField(name)) {
-      if (_isAccessedSignalApiProperty(node)) return;
+      if (_isAccessedSignalApiProperty(node)) {
+        // `.hasValue` / `.previousValue` are reactive reads — their result
+        // flips when the underlying signal changes — so the enclosing
+        // subtree must still be wrapped in a `SignalBuilder`. `.value`
+        // reads, in contrast, are the user opting into the Signal API
+        // explicitly; existing behavior is to leave tracking to the bare-
+        // read path, so we only record offsets for the two non-`.value`
+        // getters here.
+        if (_isTrackedSignalApiAccess(node) && _untrackedDepth == 0) {
+          trackedReadOffsets.add(node.offset);
+          _recordTrackedReadName(name);
+        }
+        return;
+      }
 
       // Collection-typed `@SolidState` fields: ListSignal / SetSignal /
       // MapSignal expose their underlying collection API directly via
@@ -709,6 +746,28 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
     if (parent is PrefixedIdentifier &&
         parent.prefix == id &&
         _signalApiGetters.contains(parent.identifier.name)) {
+      return true;
+    }
+    return false;
+  }
+
+  /// True if [id] sits in receiver position of a chain to one of the
+  /// "tracked" Signal API getters — `.hasValue` / `.previousValue`. These
+  /// reads ARE reactive (their result flips with signal updates), so the
+  /// SignalBuilder placement pass must wrap the enclosing widget subtree.
+  /// `.value` reads are handled by the bare-read path and are NOT included
+  /// here to preserve the existing "explicit `.value` is the user opting
+  /// into Signal API" semantics.
+  bool _isTrackedSignalApiAccess(SimpleIdentifier id) {
+    final parent = id.parent;
+    if (parent is PropertyAccess &&
+        parent.target == id &&
+        _trackedSignalApiGetters.contains(parent.propertyName.name)) {
+      return true;
+    }
+    if (parent is PrefixedIdentifier &&
+        parent.prefix == id &&
+        _trackedSignalApiGetters.contains(parent.identifier.name)) {
       return true;
     }
     return false;

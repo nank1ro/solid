@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
+import 'package:provider/provider.dart';
 import '../controllers/computed_value.dart';
 
 class ComputedPage extends StatefulWidget {
@@ -10,29 +11,29 @@ class ComputedPage extends StatefulWidget {
 }
 
 class _ComputedPageState extends State<ComputedPage> {
-  late final controller = ComputedValueController();
-
-  @override
-  void dispose() {
-    controller.dispose();
-    super.dispose();
-  }
+  late final controller = context.read<ComputedValueController>();
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Computed')),
       body: Center(
-        child: SignalBuilder(
-          builder: (_, _) => Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text('Count: ${controller.count.value}'),
-              const SizedBox(height: 16),
-              Text('Double Count: ${controller.doubleCount.value}'),
-              const SizedBox(height: 16),
-            ],
-          ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SignalBuilder(
+              builder: (context, child) {
+                return Text('Count: ${controller.count.value}');
+              },
+            ),
+            const SizedBox(height: 16),
+            SignalBuilder(
+              builder: (context, child) {
+                return Text('Double Count: ${controller.doubleCount.value}');
+              },
+            ),
+            const SizedBox(height: 16),
+          ],
         ),
       ),
       floatingActionButton: FloatingActionButton(

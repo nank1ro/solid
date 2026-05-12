@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
+import 'package:provider/provider.dart';
 import '../controllers/lazy_counter.dart';
 
 class LazyCounterPage extends StatefulWidget {
@@ -10,13 +11,7 @@ class LazyCounterPage extends StatefulWidget {
 }
 
 class _LazyCounterPageState extends State<LazyCounterPage> {
-  late final controller = LazyCounterController();
-
-  @override
-  void dispose() {
-    controller.dispose();
-    super.dispose();
-  }
+  late final controller = context.read<LazyCounterController>();
 
   @override
   Widget build(BuildContext context) {
@@ -24,11 +19,12 @@ class _LazyCounterPageState extends State<LazyCounterPage> {
       appBar: AppBar(title: const Text('Lazy Counter')),
       body: Center(
         child: SignalBuilder(
-          builder: (_, _) {
-            return switch (controller.lazyCounter.hasValue) {
-              true => Text('Counter: ${controller.lazyCounter.value}'),
-              false => const Text('Counter: not initialized'),
-            };
+          builder: (context, child) {
+            return Text(
+              controller.lazyCounter.hasValue
+                  ? 'Counter: ${controller.lazyCounter.value}'
+                  : 'Counter: not initialized',
+            );
           },
         ),
       ),

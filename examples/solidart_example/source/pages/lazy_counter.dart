@@ -1,35 +1,23 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_solidart/flutter_solidart.dart';
+import 'package:solid_annotations/solid_annotations.dart';
+
 import '../controllers/lazy_counter.dart';
 
-class LazyCounterPage extends StatefulWidget {
+class LazyCounterPage extends StatelessWidget {
   const LazyCounterPage({super.key});
 
-  @override
-  State<LazyCounterPage> createState() => _LazyCounterPageState();
-}
-
-class _LazyCounterPageState extends State<LazyCounterPage> {
-  late final controller = LazyCounterController();
-
-  @override
-  void dispose() {
-    controller.dispose();
-    super.dispose();
-  }
+  @SolidEnvironment()
+  late LazyCounterController controller;
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Lazy Counter')),
       body: Center(
-        child: SignalBuilder(
-          builder: (_, _) {
-            return switch (controller.lazyCounter.hasValue) {
-              true => Text('Counter: ${controller.lazyCounter.value}'),
-              false => const Text('Counter: not initialized'),
-            };
-          },
+        child: Text(
+          controller.lazyCounter.hasValue
+              ? 'Counter: ${controller.lazyCounter}'
+              : 'Counter: not initialized',
         ),
       ),
       floatingActionButton: Row(

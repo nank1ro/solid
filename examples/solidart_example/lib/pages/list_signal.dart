@@ -1,12 +1,7 @@
-// Observer callbacks print to the console as the simplest demonstration of
-// reactive list mutations; production code would route this through a
-// proper logger instead.
-// ignore_for_file: avoid_print
-
 import 'dart:math';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
+import 'package:provider/provider.dart';
 import '../controllers/items_controller.dart';
 
 class ListSignalPage extends StatefulWidget {
@@ -17,19 +12,22 @@ class ListSignalPage extends StatefulWidget {
 }
 
 class _ListSignalPageState extends State<ListSignalPage> {
-  late final controller = ItemsController();
+  late final controller = context.read<ItemsController>();
+  late final logItemsChanges = Effect(() {
+    print(
+      'Items changed: ${controller.items.previousValue} -> ${controller.items.value}',
+    );
+  }, name: 'logItemsChanges');
 
   @override
   void initState() {
     super.initState();
-    controller.items.observe((previousValue, value) {
-      print('Items changed: $previousValue -> $value');
-    });
+    logItemsChanges;
   }
 
   @override
   void dispose() {
-    controller.dispose();
+    logItemsChanges.dispose();
     super.dispose();
   }
 
@@ -45,9 +43,13 @@ class _ListSignalPageState extends State<ListSignalPage> {
               child: SignalBuilder(
                 builder: (context, child) {
                   return ListView.separated(
-                    itemCount: controller.items.value.length,
+                    itemCount: controller.items.length,
                     itemBuilder: (context, index) {
-                      return Text(controller.items.value[index].toString());
+                      return SignalBuilder(
+                        builder: (context, child) {
+                          return Text(controller.items[index].toString());
+                        },
+                      );
                     },
                     separatorBuilder: (context, index) {
                       return const SizedBox(height: 16);

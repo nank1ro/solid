@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
-import '../controllers/user.dart';
+import 'package:http/http.dart' as http;
 
 class ResourcePage extends StatefulWidget {
   const ResourcePage({super.key});
@@ -10,11 +10,26 @@ class ResourcePage extends StatefulWidget {
 }
 
 class _ResourcePageState extends State<ResourcePage> {
-  late final controller = UserController();
+  final userId = Signal<int>(1, name: 'userId');
+  late final user = Resource<String>(
+    () async {
+      await Future<void>.delayed(const Duration(seconds: 2));
+      final response = await http.get(
+        Uri.parse(
+          'https://jsonplaceholder.typicode.com/users/${userId.value}/',
+        ),
+        headers: {'Accept': 'application/json'},
+      );
+      return response.body;
+    },
+    source: userId,
+    name: 'user',
+  );
 
   @override
   void dispose() {
-    controller.dispose();
+    user.dispose();
+    userId.dispose();
     super.dispose();
   }
 
@@ -32,46 +47,58 @@ class _ResourcePageState extends State<ResourcePage> {
               onChanged: (s) {
                 final intValue = int.tryParse(s);
                 if (intValue == null) return;
-                controller.setUserId(intValue);
+                userId.value = intValue;
               },
             ),
             const SizedBox(height: 16),
             SignalBuilder(
               builder: (context, child) {
-                final userState = controller.user();
-                return userState.when(
-                  ready: (data) => Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      ListTile(
-                        title: Text(data),
-                        subtitle: Text('refreshing: ${userState.isRefreshing}'),
-                      ),
-                      if (userState.isRefreshing)
-                        const CircularProgressIndicator()
-                      else
-                        ElevatedButton(
-                          onPressed: controller.user.refresh,
-                          child: const Text('Refresh'),
-                        ),
-                    ],
+                return user().when(
+                  ready: (data) => SignalBuilder(
+                    builder: (context, child) {
+                      return Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          ListTile(
+                            title: Text(data),
+                            subtitle: SignalBuilder(
+                              builder: (context, child) {
+                                return Text(
+                                  'refreshing: ${user().isRefreshing}',
+                                );
+                              },
+                            ),
+                          ),
+                          if (user().isRefreshing)
+                            const CircularProgressIndicator()
+                          else
+                            ElevatedButton(
+                              onPressed: user.refresh,
+                              child: const Text('Refresh'),
+                            ),
+                        ],
+                      );
+                    },
                   ),
-                  error: (e, _) => Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(e.toString()),
-                      if (userState.isRefreshing)
-                        const CircularProgressIndicator()
-                      else
-                        ElevatedButton(
-                          onPressed: controller.user.refresh,
-                          child: const Text('Refresh'),
-                        ),
-                    ],
+                  error: (e, _) => SignalBuilder(
+                    builder: (context, child) {
+                      return Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(e.toString()),
+                          if (user().isRefreshing)
+                            const CircularProgressIndicator()
+                          else
+                            ElevatedButton(
+                              onPressed: user.refresh,
+                              child: const Text('Refresh'),
+                            ),
+                        ],
+                      );
+                    },
                   ),
-                  loading: () => const RepaintBoundary(
-                    child: CircularProgressIndicator(),
-                  ),
+                  loading: () =>
+                      const RepaintBoundary(child: CircularProgressIndicator()),
                 );
               },
             ),

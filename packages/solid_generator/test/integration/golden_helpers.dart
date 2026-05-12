@@ -101,6 +101,7 @@ const List<String> goldenNames = <String>[
   'collection_mixin_breadth',
   'collection_cascade',
   'late_hasvalue_chain',
+  'cross_class_hasvalue_chain',
 ];
 
 /// Memoized golden directory resolution. Resolved relative to the package

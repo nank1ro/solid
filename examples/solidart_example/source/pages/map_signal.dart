@@ -1,4 +1,4 @@
-// Observer callbacks print to the console as the simplest demonstration of
+// Observer effect prints to the console as the simplest demonstration of
 // reactive map mutations; production code would route this through a
 // proper logger instead.
 // ignore_for_file: avoid_print
@@ -6,40 +6,30 @@
 import 'dart:math';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_solidart/flutter_solidart.dart';
+import 'package:solid_annotations/solid_annotations.dart';
+
 import '../controllers/items_controller.dart';
 
 const _chars = 'AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz1234567890';
 
-class MapSignalPage extends StatefulWidget {
+String _randomKey(int length) => String.fromCharCodes(
+  Iterable.generate(
+    length,
+    (_) => _chars.codeUnitAt(Random().nextInt(_chars.length)),
+  ),
+);
+
+class MapSignalPage extends StatelessWidget {
   const MapSignalPage({super.key});
 
-  @override
-  State<MapSignalPage> createState() => _MapSignalPageState();
-}
+  @SolidEnvironment()
+  late MapItemsController controller;
 
-class _MapSignalPageState extends State<MapSignalPage> {
-  late final controller = MapItemsController();
-
-  String getRandomString(int length) => String.fromCharCodes(
-    Iterable.generate(
-      length,
-      (_) => _chars.codeUnitAt(Random().nextInt(_chars.length)),
-    ),
-  );
-
-  @override
-  void initState() {
-    super.initState();
-    controller.items.observe((previousValue, value) {
-      print('Items changed: $previousValue -> $value');
-    });
-  }
-
-  @override
-  void dispose() {
-    controller.dispose();
-    super.dispose();
+  @SolidEffect()
+  void logItemsChanges() {
+    print(
+      'Items changed: ${controller.items.previousValue} -> ${controller.items}',
+    );
   }
 
   @override
@@ -51,20 +41,15 @@ class _MapSignalPageState extends State<MapSignalPage> {
         child: Column(
           children: [
             Expanded(
-              child: SignalBuilder(
-                builder: (context, child) {
-                  final items = controller.items.value;
-                  return ListView.separated(
-                    itemCount: items.length,
-                    itemBuilder: (context, index) {
-                      final key = items.keys.elementAt(index);
-                      final value = items[key];
-                      return Text('{$key: $value}');
-                    },
-                    separatorBuilder: (context, index) {
-                      return const SizedBox(height: 16);
-                    },
-                  );
+              child: ListView.separated(
+                itemCount: controller.items.length,
+                itemBuilder: (context, index) {
+                  final key = controller.items.keys.elementAt(index);
+                  final value = controller.items[key];
+                  return Text('{$key: $value}');
+                },
+                separatorBuilder: (context, index) {
+                  return const SizedBox(height: 16);
                 },
               ),
             ),
@@ -84,7 +69,7 @@ class _MapSignalPageState extends State<MapSignalPage> {
         onTap: (i) {
           switch (i) {
             case 0:
-              controller.add(getRandomString(2), Random().nextInt(100));
+              controller.add(_randomKey(2), Random().nextInt(100));
             case 1:
               controller.removeLast();
             case 2:

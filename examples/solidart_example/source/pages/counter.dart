@@ -1,34 +1,22 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_solidart/flutter_solidart.dart';
+import 'package:solid_annotations/solid_annotations.dart';
+
 import '../controllers/counter.dart';
 
-class CounterPage extends StatefulWidget {
+class CounterPage extends StatelessWidget {
   const CounterPage({super.key});
 
-  @override
-  State<CounterPage> createState() => _CounterPageState();
-}
-
-class _CounterPageState extends State<CounterPage> {
-  late final counterController = CounterController();
-
-  @override
-  void dispose() {
-    counterController.dispose();
-    super.dispose();
-  }
+  @SolidEnvironment()
+  late CounterController counterController;
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Counter')),
       body: Center(
-        child: SignalBuilder(
-          builder: (_, _) {
-            return Text(
-              'Counter: ${counterController.counter.value}\nDouble: ${counterController.doubleCounter.value}',
-            );
-          },
+        child: Text(
+          'Counter: ${counterController.counter}\n'
+          'Double: ${counterController.doubleCounter}',
         ),
       ),
       floatingActionButton: Row(

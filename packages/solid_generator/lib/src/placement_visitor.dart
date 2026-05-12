@@ -45,7 +45,10 @@ Set<Expression> computeWrapSet(
   final widgets = collector.widgets;
   if (widgets.isEmpty) return <Expression>{};
 
-  final wrapSet = <Expression>{};
+  // Per-wrap tracked-offset map drives the safer pruning rule below — an
+  // outer wrap is only redundant if every offset that picked it also falls
+  // inside some inner wrap's range.
+  final wrapOffsets = <Expression, Set<int>>{};
   for (final offset in trackedReadOffsets) {
     Expression? smallest;
     for (final w in widgets) {
@@ -53,23 +56,42 @@ Set<Expression> computeWrapSet(
         if (smallest == null || w.offset > smallest.offset) smallest = w;
       }
     }
-    if (smallest != null) wrapSet.add(smallest);
+    if (smallest != null) {
+      wrapOffsets.putIfAbsent(smallest, () => <int>{}).add(offset);
+    }
   }
 
-  _pruneAncestors(wrapSet);
+  final wrapSet = wrapOffsets.keys.toSet();
+  _pruneAncestors(wrapSet, wrapOffsets);
   _suppressAlreadyWrapped(wrapSet);
   return wrapSet;
 }
 
-/// Removes any entry from [wrapSet] that strictly contains another entry
-/// (nested-reads rule). After this call, no two entries are in an
-/// ancestor / descendant relationship.
-void _pruneAncestors(Set<Expression> wrapSet) {
+/// Removes any wrap that's strictly redundant: the outer wrap is dropped
+/// only when ALL of its tracked-read offsets fall inside the inner wrap's
+/// source range — i.e., the inner wrap already covers everything the outer
+/// would. The old "always drop the outer when nested" rule was unsafe
+/// because the outer often subscribed to a different identifier (e.g.
+/// `xs.length` at `ListView`'s `itemCount:` argument, outside an inner
+/// `Text` that reads `xs[i]`); dropping that outer breaks list-length
+/// reactivity. Symmetric reverse pruning (drop the inner) is unsafe in
+/// general because the inner may subscribe to a different signal than the
+/// outer; the inner's reactivity would be lost without it.
+void _pruneAncestors(
+  Set<Expression> wrapSet,
+  Map<Expression, Set<int>> wrapOffsets,
+) {
   final toRemove = <Expression>{};
   for (final outer in wrapSet) {
+    final outerOffsets = wrapOffsets[outer] ?? const <int>{};
+    if (outerOffsets.isEmpty) continue;
     for (final inner in wrapSet) {
       if (identical(outer, inner)) continue;
-      if (outer.offset <= inner.offset && inner.end <= outer.end) {
+      if (outer.offset > inner.offset || inner.end > outer.end) continue;
+      final allCovered = outerOffsets.every(
+        (o) => inner.offset <= o && o < inner.end,
+      );
+      if (allCovered) {
         toRemove.add(outer);
         break;
       }
@@ -154,13 +176,22 @@ class _WidgetCollector extends RecursiveAstVisitor<void> {
   }
 }
 
-/// Syntactic heuristic: a bare `Foo(...)` call with no target and an
-/// UpperCamelCase method name is almost certainly a widget constructor in
-/// pre-resolution Dart AST. Named constructors on classes (`Foo.named(...)`)
-/// and library-prefixed calls are left for the future type-resolved pivot.
+/// Syntactic heuristic: a `Foo(...)` or `Foo.named(...)` call with an
+/// UpperCamelCase receiver (class name) is almost certainly a widget
+/// constructor in pre-resolution Dart AST. The bare form covers ordinary
+/// widget creation; the named-constructor form covers `ListView.separated`,
+/// `ListView.builder`, `GridView.builder`, etc. Library-prefixed calls
+/// (`prefix.Foo(...)`) are left for the future type-resolved pivot.
 bool _looksLikeWidgetCtor(MethodInvocation node) {
-  if (node.target != null) return false;
-  final name = node.methodName.name;
+  final target = node.target;
+  if (target == null) {
+    return _startsUpperCamel(node.methodName.name);
+  }
+  if (target is! SimpleIdentifier) return false;
+  return _startsUpperCamel(target.name);
+}
+
+bool _startsUpperCamel(String name) {
   if (name.isEmpty) return false;
   final first = name.codeUnitAt(0);
   return first >= 0x41 && first <= 0x5A; // 'A'..'Z'

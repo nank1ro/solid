@@ -1,12 +1,7 @@
-// Observer callbacks print to the console as the simplest demonstration of
-// reactive set mutations; production code would route this through a
-// proper logger instead.
-// ignore_for_file: avoid_print
-
 import 'dart:math';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
+import 'package:provider/provider.dart';
 import '../controllers/items_controller.dart';
 
 class SetSignalPage extends StatefulWidget {
@@ -17,19 +12,22 @@ class SetSignalPage extends StatefulWidget {
 }
 
 class _SetSignalPageState extends State<SetSignalPage> {
-  late final controller = SetItemsController();
+  late final controller = context.read<SetItemsController>();
+  late final logItemsChanges = Effect(() {
+    print(
+      'Items changed: ${controller.items.previousValue} -> ${controller.items.value}',
+    );
+  }, name: 'logItemsChanges');
 
   @override
   void initState() {
     super.initState();
-    controller.items.observe((previousValue, value) {
-      print('Items changed: $previousValue -> $value');
-    });
+    logItemsChanges;
   }
 
   @override
   void dispose() {
-    controller.dispose();
+    logItemsChanges.dispose();
     super.dispose();
   }
 
@@ -45,10 +43,14 @@ class _SetSignalPageState extends State<SetSignalPage> {
               child: SignalBuilder(
                 builder: (context, child) {
                   return ListView.separated(
-                    itemCount: controller.items.value.length,
+                    itemCount: controller.items.length,
                     itemBuilder: (context, index) {
-                      return Text(
-                        controller.items.value.elementAt(index).toString(),
+                      return SignalBuilder(
+                        builder: (context, child) {
+                          return Text(
+                            controller.items.elementAt(index).toString(),
+                          );
+                        },
                       );
                     },
                     separatorBuilder: (context, index) {

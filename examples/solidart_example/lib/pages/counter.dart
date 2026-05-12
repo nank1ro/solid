@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
+import 'package:provider/provider.dart';
 import '../controllers/counter.dart';
 
 class CounterPage extends StatefulWidget {
@@ -10,13 +11,7 @@ class CounterPage extends StatefulWidget {
 }
 
 class _CounterPageState extends State<CounterPage> {
-  late final counterController = CounterController();
-
-  @override
-  void dispose() {
-    counterController.dispose();
-    super.dispose();
-  }
+  late final counterController = context.read<CounterController>();
 
   @override
   Widget build(BuildContext context) {
@@ -24,9 +19,10 @@ class _CounterPageState extends State<CounterPage> {
       appBar: AppBar(title: const Text('Counter')),
       body: Center(
         child: SignalBuilder(
-          builder: (_, _) {
+          builder: (context, child) {
             return Text(
-              'Counter: ${counterController.counter.value}\nDouble: ${counterController.doubleCounter.value}',
+              'Counter: ${counterController.counter.value}\n'
+              'Double: ${counterController.doubleCounter.value}',
             );
           },
         ),

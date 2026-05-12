@@ -3,7 +3,14 @@ import 'dart:developer' as dev;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
+import 'package:solid_annotations/solid_annotations.dart';
 
+import 'controllers/computed_value.dart';
+import 'controllers/counter.dart';
+import 'controllers/effects.dart';
+import 'controllers/items_controller.dart';
+import 'controllers/lazy_counter.dart';
+import 'controllers/toggle.dart';
 import 'pages/computed.dart';
 import 'pages/counter.dart';
 import 'pages/effects.dart';
@@ -56,16 +63,23 @@ class MyApp extends StatelessWidget {
 }
 
 final routes = <String, WidgetBuilder>{
-  '/counter': (_) => const CounterPage(),
-  '/lazy-counter': (_) => const LazyCounterPage(),
-  '/show': (_) => const ShowPage(),
-  '/computed': (_) => const ComputedPage(),
-  '/effects': (_) => const EffectsPage(),
+  '/counter': (_) =>
+      const CounterPage().environment((_) => CounterController()),
+  '/lazy-counter': (_) =>
+      const LazyCounterPage().environment((_) => LazyCounterController()),
+  '/show': (_) => const ShowPage().environment((_) => ToggleController()),
+  '/computed': (_) =>
+      const ComputedPage().environment((_) => ComputedValueController()),
+  '/effects': (_) =>
+      const EffectsPage().environment((_) => EffectsController()),
   '/signal-builder': (_) => const SignalBuilderPage(),
   '/resource': (_) => const ResourcePage(),
-  '/list-signal': (_) => const ListSignalPage(),
-  '/set-signal': (_) => const SetSignalPage(),
-  '/map-signal': (_) => const MapSignalPage(),
+  '/list-signal': (_) =>
+      const ListSignalPage().environment((_) => ItemsController()),
+  '/set-signal': (_) =>
+      const SetSignalPage().environment((_) => SetItemsController()),
+  '/map-signal': (_) =>
+      const MapSignalPage().environment((_) => MapItemsController()),
 };
 
 final routeToNameRegex = RegExp('(?:^/|-)([a-z])');

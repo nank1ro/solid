@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
+import 'package:provider/provider.dart';
 import '../controllers/effects.dart';
 
 class EffectsPage extends StatefulWidget {
@@ -10,13 +11,7 @@ class EffectsPage extends StatefulWidget {
 }
 
 class _EffectsPageState extends State<EffectsPage> {
-  late final controller = EffectsController();
-
-  @override
-  void dispose() {
-    controller.dispose();
-    super.dispose();
-  }
+  late final controller = context.read<EffectsController>();
 
   @override
   Widget build(BuildContext context) {
