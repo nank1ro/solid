@@ -1,3 +1,6 @@
+// Observer callbacks print to the console as the simplest demonstration of
+// reactive map mutations; production code would route this through a
+// proper logger instead.
 // ignore_for_file: avoid_print
 
 import 'dart:math';
@@ -53,12 +56,12 @@ class _MapSignalPageState extends State<MapSignalPage> {
                   final items = controller.items.value;
                   return ListView.separated(
                     itemCount: items.length,
-                    itemBuilder: (BuildContext context, int index) {
+                    itemBuilder: (context, index) {
                       final key = items.keys.elementAt(index);
                       final value = items[key];
                       return Text('{$key: $value}');
                     },
-                    separatorBuilder: (BuildContext context, int index) {
+                    separatorBuilder: (context, index) {
                       return const SizedBox(height: 16);
                     },
                   );

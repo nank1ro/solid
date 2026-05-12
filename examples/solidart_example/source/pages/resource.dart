@@ -45,27 +45,28 @@ class _ResourcePageState extends State<ResourcePage> {
                     children: [
                       ListTile(
                         title: Text(data),
-                        subtitle:
-                            Text('refreshing: ${userState.isRefreshing}'),
+                        subtitle: Text('refreshing: ${userState.isRefreshing}'),
                       ),
-                      userState.isRefreshing
-                          ? const CircularProgressIndicator()
-                          : ElevatedButton(
-                              onPressed: controller.user.refresh,
-                              child: const Text('Refresh'),
-                            ),
+                      if (userState.isRefreshing)
+                        const CircularProgressIndicator()
+                      else
+                        ElevatedButton(
+                          onPressed: controller.user.refresh,
+                          child: const Text('Refresh'),
+                        ),
                     ],
                   ),
                   error: (e, _) => Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(e.toString()),
-                      userState.isRefreshing
-                          ? const CircularProgressIndicator()
-                          : ElevatedButton(
-                              onPressed: controller.user.refresh,
-                              child: const Text('Refresh'),
-                            ),
+                      if (userState.isRefreshing)
+                        const CircularProgressIndicator()
+                      else
+                        ElevatedButton(
+                          onPressed: controller.user.refresh,
+                          child: const Text('Refresh'),
+                        ),
                     ],
                   ),
                   loading: () => const RepaintBoundary(

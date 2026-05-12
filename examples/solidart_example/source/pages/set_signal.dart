@@ -1,3 +1,6 @@
+// Observer callbacks print to the console as the simplest demonstration of
+// reactive set mutations; production code would route this through a
+// proper logger instead.
 // ignore_for_file: avoid_print
 
 import 'dart:math';
@@ -43,12 +46,12 @@ class _SetSignalPageState extends State<SetSignalPage> {
                 builder: (context, child) {
                   return ListView.separated(
                     itemCount: controller.items.value.length,
-                    itemBuilder: (BuildContext context, int index) {
+                    itemBuilder: (context, index) {
                       return Text(
                         controller.items.value.elementAt(index).toString(),
                       );
                     },
-                    separatorBuilder: (BuildContext context, int index) {
+                    separatorBuilder: (context, index) {
                       return const SizedBox(height: 16);
                     },
                   );

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:developer' as dev;
 
 import 'package:flutter/material.dart';
@@ -79,7 +80,7 @@ class HomePage extends StatelessWidget {
       appBar: AppBar(title: const Text('Solid showcase')),
       body: ListView.builder(
         itemCount: routes.length,
-        itemBuilder: (BuildContext context, int index) {
+        itemBuilder: (context, index) {
           final route = keys.elementAt(index);
 
           final name = route.replaceAllMapped(
@@ -90,7 +91,7 @@ class HomePage extends StatelessWidget {
           return ListTile(
             title: Text(name),
             onTap: () {
-              Navigator.of(context).pushNamed(route);
+              unawaited(Navigator.of(context).pushNamed(route));
             },
           );
         },

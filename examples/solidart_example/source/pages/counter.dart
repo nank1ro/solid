@@ -36,14 +36,14 @@ class _CounterPageState extends State<CounterPage> {
         children: [
           FloatingActionButton(
             heroTag: 'subtract hero',
-            child: const Icon(Icons.remove),
             onPressed: counterController.decrement,
+            child: const Icon(Icons.remove),
           ),
           const SizedBox(width: 8),
           FloatingActionButton(
             heroTag: 'add hero',
-            child: const Icon(Icons.add),
             onPressed: counterController.increment,
+            child: const Icon(Icons.add),
           ),
         ],
       ),

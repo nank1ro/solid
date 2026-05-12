@@ -37,14 +37,14 @@ class _LazyCounterPageState extends State<LazyCounterPage> {
         children: [
           FloatingActionButton(
             heroTag: 'subtract hero',
-            child: const Icon(Icons.remove),
             onPressed: controller.decrement,
+            child: const Icon(Icons.remove),
           ),
           const SizedBox(width: 8),
           FloatingActionButton(
             heroTag: 'add hero',
-            child: const Icon(Icons.add),
             onPressed: controller.increment,
+            child: const Icon(Icons.add),
           ),
         ],
       ),

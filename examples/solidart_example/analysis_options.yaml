@@ -10,6 +10,12 @@ analyzer:
     unnecessary_statements: ignore
     lines_longer_than_80_chars: ignore
     specify_nonobvious_property_types: ignore
+    # Solid controllers expose state mutations as methods (`increment`,
+    # `setUserId`, …) rather than Dart setters so the method body stays
+    # inside the same-class `.value`-rewrite scope. A `set` accessor on the
+    # same name as a `@SolidState` field would also collide with the
+    # implicit setter the generator emits. Suppress at the example level.
+    use_setters_to_change_properties: ignore
 linter:
   rules:
     public_member_api_docs: false
