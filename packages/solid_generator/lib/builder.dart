@@ -99,7 +99,11 @@ class _SolidBuilder implements Builder {
 
     // Rejects `package:<self>/...` in any source file — runs before the
     // fast-path bypass so unannotated files are validated too.
-    validateSourceImportsFromText(source, buildStep.inputId.package);
+    validateSourceImportsFromText(
+      source,
+      buildStep.inputId.package,
+      buildStep.inputId.path,
+    );
 
     // Files without any @Solid* annotation pass through verbatim — UNLESS they
     // contain a `Provider(...)` or `.environment<T>()` call site, which the
@@ -130,7 +134,12 @@ class _SolidBuilder implements Builder {
     // AST-precise re-check of the same-package-import rule. Redundant with
     // the pre-parse text scan above but produces precise URI text in the
     // error message; one extra `whereType` walk per parsed file.
-    validateSourceImportsFromAst(parsed.unit, buildStep.inputId.package);
+    validateSourceImportsFromAst(
+      parsed.unit,
+      buildStep.inputId.package,
+      buildStep.inputId.path,
+      source,
+    );
 
     // Reserved-annotation guard. Currently a no-op; preserved as a regression
     // fence for future revisions.

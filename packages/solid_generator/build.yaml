@@ -1,4 +1,4 @@
-# Builders for the Solid generator. See SPEC Section 2.
+# Builders for the Solid generator.
 builders:
   solid_builder:
     import: "package:solid_generator/builder.dart"

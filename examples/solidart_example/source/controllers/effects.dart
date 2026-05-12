@@ -1,5 +1,4 @@
-// ignore_for_file: avoid_print
-
+import 'package:flutter/foundation.dart';
 import 'package:solid_annotations/solid_annotations.dart';
 
 class EffectsController {
@@ -8,7 +7,7 @@ class EffectsController {
 
   @SolidEffect()
   void logCount() {
-    print('The count is now $count');
+    debugPrint('The count is now $count');
   }
 
   void increment() => count++;

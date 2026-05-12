@@ -35,21 +35,22 @@ import 'package:analyzer/dart/ast/visitor.dart';
 /// offsets themselves come from `value_rewriter`.
 Set<Expression> computeWrapSet(
   MethodDeclaration buildMethod,
-  List<int> trackedReadOffsets, {
+  Map<int, String> trackedReadNamesByOffset, {
   Set<String> queryNames = const {},
 }) {
-  if (trackedReadOffsets.isEmpty) return <Expression>{};
+  if (trackedReadNamesByOffset.isEmpty) return <Expression>{};
 
   final collector = _WidgetCollector(queryNames);
   buildMethod.accept(collector);
   final widgets = collector.widgets;
   if (widgets.isEmpty) return <Expression>{};
 
-  // Per-wrap tracked-offset map drives the safer pruning rule below — an
-  // outer wrap is only redundant if every offset that picked it also falls
-  // inside some inner wrap's range.
-  final wrapOffsets = <Expression, Set<int>>{};
-  for (final offset in trackedReadOffsets) {
+  // Per-wrap name-set drives the prune rule below: collapse nested wraps
+  // whose underlying signal/query reads all read names the outer wrap
+  // already subscribes to.
+  final wrapNames = <Expression, Set<String>>{};
+  for (final entry in trackedReadNamesByOffset.entries) {
+    final offset = entry.key;
     Expression? smallest;
     for (final w in widgets) {
       if (w.offset <= offset && offset < w.end) {
@@ -57,39 +58,39 @@ Set<Expression> computeWrapSet(
       }
     }
     if (smallest != null) {
-      wrapOffsets.putIfAbsent(smallest, () => <int>{}).add(offset);
+      wrapNames.putIfAbsent(smallest, () => <String>{}).add(entry.value);
     }
   }
 
-  final wrapSet = wrapOffsets.keys.toSet();
-  _pruneAncestors(wrapSet, wrapOffsets);
+  final wrapSet = wrapNames.keys.toSet();
+  _pruneAncestors(wrapSet, wrapNames);
   _suppressAlreadyWrapped(wrapSet);
   return wrapSet;
 }
 
-/// Drops an outer wrap only when ALL of its tracked-read offsets fall
-/// inside the inner wrap's source range — the inner wrap already covers
-/// everything the outer would. The naive "always drop the outer when
-/// nested" rule was unsafe: e.g. `ListView(itemCount: xs.length, ...)`
-/// with an inner `Text` reading `xs[i]` would lose list-length reactivity
-/// because the outer's read sits outside the inner's range.
+/// Drops an inner wrap when the strictly-containing outer wrap's name-set
+/// already covers every signal/query the inner subscribes to. The outer
+/// `SignalBuilder.builder` runs synchronously through the subtree it
+/// returns, so same-name reads in the inner widget become dependencies of
+/// the outer wrap too. Different-signal nesting (outer reads `sigA`, inner
+/// reads `sigB`) keeps both wraps; the superset check fails and the
+/// inner's reactivity is preserved.
 void _pruneAncestors(
   Set<Expression> wrapSet,
-  Map<Expression, Set<int>> wrapOffsets,
+  Map<Expression, Set<String>> wrapNames,
 ) {
   final toRemove = <Expression>{};
   for (final outer in wrapSet) {
-    final outerOffsets = wrapOffsets[outer] ?? const <int>{};
-    if (outerOffsets.isEmpty) continue;
+    final outerNames = wrapNames[outer] ?? const <String>{};
     for (final inner in wrapSet) {
       if (identical(outer, inner)) continue;
       if (outer.offset > inner.offset || inner.end > outer.end) continue;
-      final allCovered = outerOffsets.every(
-        (o) => inner.offset <= o && o < inner.end,
-      );
-      if (allCovered) {
-        toRemove.add(outer);
-        break;
+      final innerNames = wrapNames[inner] ?? const <String>{};
+      // No recorded names on the inner means we can't prove the outer's
+      // dependencies cover the inner's reactivity — keep both wraps.
+      if (innerNames.isEmpty) continue;
+      if (outerNames.containsAll(innerNames)) {
+        toRemove.add(inner);
       }
     }
   }

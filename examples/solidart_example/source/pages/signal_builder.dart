@@ -1,24 +1,14 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_solidart/flutter_solidart.dart';
-import '../controllers/counter.dart';
+import 'package:solid_annotations/solid_annotations.dart';
 
-class SignalBuilderPage extends StatefulWidget {
+class SignalBuilderPage extends StatelessWidget {
   const SignalBuilderPage({super.key});
 
-  @override
-  State<SignalBuilderPage> createState() => _SignalBuilderPageState();
-}
+  @SolidState()
+  int counter1 = 0;
 
-class _SignalBuilderPageState extends State<SignalBuilderPage> {
-  late final counter1 = CounterController();
-  late final counter2 = CounterController();
-
-  @override
-  void dispose() {
-    counter1.dispose();
-    counter2.dispose();
-    super.dispose();
-  }
+  @SolidState()
+  int counter2 = 0;
 
   @override
   Widget build(BuildContext context) {
@@ -30,50 +20,35 @@ class _SignalBuilderPageState extends State<SignalBuilderPage> {
           mainAxisSize: MainAxisSize.min,
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            SignalBuilder(
-              builder: (_, _) {
-                return ListTile(
-                  title: Text(
-                    'First counter: ${counter1.counter.value}',
-                    textAlign: TextAlign.center,
-                    style: textTheme.titleMedium!.copyWith(color: Colors.black),
-                  ),
-                  subtitle: Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Text(
-                      'Second counter: ${counter2.counter.value}',
-                      textAlign: TextAlign.center,
-                      style: textTheme.titleMedium!.copyWith(
-                        color: Colors.black,
-                      ),
-                    ),
-                  ),
-                );
-              },
+            ListTile(
+              title: Text(
+                'First counter: $counter1',
+                textAlign: TextAlign.center,
+                style: textTheme.titleMedium!.copyWith(color: Colors.black),
+              ),
+              subtitle: Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  'Second counter: $counter2',
+                  textAlign: TextAlign.center,
+                  style: textTheme.titleMedium!.copyWith(color: Colors.black),
+                ),
+              ),
             ),
             const SizedBox(height: 16),
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 ElevatedButton(
-                  onPressed: counter1.increment,
+                  onPressed: () => counter1++,
                   child: const Text('Counter1++'),
                 ),
                 const SizedBox(width: 16),
                 ElevatedButton(
-                  onPressed: counter2.increment,
+                  onPressed: () => counter2++,
                   child: const Text('Counter2++'),
                 ),
               ],
-            ),
-            const SizedBox(height: 16),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 60),
-              child: Text(
-                'Using a SignalBuilder the builder is fired for each change in any signal. '
-                'Even when only one signal updates, the whole builder is called again. ',
-                style: textTheme.titleMedium!.copyWith(color: Colors.blueGrey),
-              ),
             ),
           ],
         ),

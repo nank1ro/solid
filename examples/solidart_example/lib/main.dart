@@ -10,7 +10,6 @@ import 'controllers/counter.dart';
 import 'controllers/effects.dart';
 import 'controllers/items_controller.dart';
 import 'controllers/lazy_counter.dart';
-import 'controllers/toggle.dart';
 import 'pages/computed.dart';
 import 'pages/counter.dart';
 import 'pages/effects.dart';
@@ -19,7 +18,6 @@ import 'pages/list_signal.dart';
 import 'pages/map_signal.dart';
 import 'pages/resource.dart';
 import 'pages/set_signal.dart';
-import 'pages/show.dart';
 import 'pages/signal_builder.dart';
 
 class Logger implements SolidartObserver {
@@ -69,10 +67,6 @@ final routes = <String, WidgetBuilder>{
   ),
   '/lazy-counter': (_) => const LazyCounterPage().environment(
     (_) => LazyCounterController(),
-    dispose: (context, provider) => provider.dispose(),
-  ),
-  '/show': (_) => const ShowPage().environment(
-    (_) => ToggleController(),
     dispose: (context, provider) => provider.dispose(),
   ),
   '/computed': (_) => const ComputedPage().environment(

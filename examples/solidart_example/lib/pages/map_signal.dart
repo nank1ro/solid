@@ -23,7 +23,7 @@ class MapSignalPage extends StatefulWidget {
 class _MapSignalPageState extends State<MapSignalPage> {
   late final controller = context.read<MapItemsController>();
   late final logItemsChanges = Effect(() {
-    print(
+    debugPrint(
       'Items changed: ${controller.items.previousValue} -> ${controller.items.value}',
     );
   }, name: 'logItemsChanges');

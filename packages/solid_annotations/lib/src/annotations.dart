@@ -93,7 +93,7 @@ extension UntrackedExtension<T> on T {
 
 /// {@template SolidAnnotations.LazyStateExtension}
 /// Source-time stubs for `SignalBase<T>` getters that survive verbatim through
-/// lowering: `.hasValue` (lazy-state probe — see SPEC §4.2) and
+/// lowering: `.hasValue` (lazy-state probe) and
 /// `.previousValue` (the value just before the most recent update — useful in
 /// `observe(...)` callbacks).
 ///

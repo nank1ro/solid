@@ -1,16 +1,20 @@
 include: package:very_good_analysis/analysis_options.yaml
 analyzer:
-  # `source/` is the user-written input to the Solid generator. The
-  # analyzer resolves `package:todos_example/...` imports to the generated
-  # `lib/` types (post-transformation), so cross-class chain reads in
-  # `source/` appear as type errors against `Signal<T>` / `ListSignal<T>`
-  # — which the generator rewrites in lib/. Excluding the directory keeps
-  # the IDE focused on the actual runnable output without losing source
-  # control of the inputs (still under git).
-  exclude:
-    - source/**
   errors:
     must_be_immutable: ignore
+    # `const Page({super.key})` with an `@SolidEnvironment() late Foo field;`
+    # is structurally non-const in source — but the generator splits the
+    # widget class so the field lives on State, making the lowered Widget
+    # const-eligible. Suppress both the declaration-side and the call-site
+    # error so source LSP doesn't flood while keeping const ctors for the
+    # runtime const optimization.
+    const_constructor_with_non_final_field: ignore
+    const_with_non_const: ignore
+    # File-level `// ignore_for_file:` directives in source/ describe
+    # source-side type mismatches that don't fire in the lowered lib/ —
+    # the lib analyzer would otherwise flag those directives as
+    # unnecessary. Suppress to keep source/ and lib/ ignores symmetric.
+    unnecessary_ignore: ignore
     always_put_required_named_parameters_first: ignore
     invalid_annotation_target: ignore
     avoid_print: ignore
@@ -29,7 +33,7 @@ analyzer:
 linter:
   rules:
     public_member_api_docs: false
-    # SPEC §2 forbids `package:<self>/...` URIs in source files; the
+    # Source files must use relative imports for same-package siblings; the
     # generator mirrors paths 1:1 into `lib/`, so the same rule must hold
     # there. Turn off `very_good_analysis`'s default `always_use_package_imports`
     # and enable its opposite as a tripwire for any future generator

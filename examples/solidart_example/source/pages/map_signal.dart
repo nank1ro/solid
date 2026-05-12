@@ -1,8 +1,3 @@
-// Observer effect prints to the console as the simplest demonstration of
-// reactive map mutations; production code would route this through a
-// proper logger instead.
-// ignore_for_file: avoid_print
-
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -27,7 +22,7 @@ class MapSignalPage extends StatelessWidget {
 
   @SolidEffect()
   void logItemsChanges() {
-    print(
+    debugPrint(
       'Items changed: ${controller.items.previousValue} -> ${controller.items}',
     );
   }

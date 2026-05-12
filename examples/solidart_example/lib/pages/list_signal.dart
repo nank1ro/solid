@@ -14,7 +14,7 @@ class ListSignalPage extends StatefulWidget {
 class _ListSignalPageState extends State<ListSignalPage> {
   late final controller = context.read<ItemsController>();
   late final logItemsChanges = Effect(() {
-    print(
+    debugPrint(
       'Items changed: ${controller.items.previousValue} -> ${controller.items.value}',
     );
   }, name: 'logItemsChanges');
@@ -45,11 +45,7 @@ class _ListSignalPageState extends State<ListSignalPage> {
                   return ListView.separated(
                     itemCount: controller.items.length,
                     itemBuilder: (context, index) {
-                      return SignalBuilder(
-                        builder: (context, child) {
-                          return Text(controller.items[index].toString());
-                        },
-                      );
+                      return Text(controller.items[index].toString());
                     },
                     separatorBuilder: (context, index) {
                       return const SizedBox(height: 16);

@@ -188,8 +188,8 @@ GetterModel? readSolidStateGetter(
 /// reactive-deps requirement is waived for them. Error wording differs per
 /// caller — pass it in.
 ///
-/// `trackedReadOffsets` from the rewrite are intentionally discarded here —
-/// SignalBuilder placement is a `build()` concern, not a `Computed` /
+/// `trackedReadNamesByOffset` from the rewrite is intentionally discarded
+/// here — SignalBuilder placement is a `build()` concern, not a `Computed` /
 /// `Effect` / `Resource` body concern. The two name lists feed
 /// `readSolidQueryMethod`'s `source:` argument synthesis; getter and effect
 /// callers destructure them into `_` since their lowered shapes (Computed,
@@ -250,7 +250,7 @@ _readReactiveBody(
   if (emptyDepsError != null &&
       result.edits.isEmpty &&
       result.trackedQueryNames.isEmpty &&
-      result.trackedReadOffsets.isEmpty) {
+      result.trackedReadNamesByOffset.isEmpty) {
     throw CodeGenerationError(emptyDepsError, null, memberName);
   }
   final bodyText = applyEditsToRange(

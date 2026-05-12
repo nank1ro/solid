@@ -1320,9 +1320,27 @@ If a developer has manually written `SignalBuilder(...)` in source (rare but leg
 
 If two sibling widgets each contain a tracked read of a different signal, each is wrapped in its own `SignalBuilder`. Siblings do not share wrappers.
 
-### 7.5 Nested tracked reads
+### 7.5 Nested same-signal reads
 
-If an outer widget and an inner widget both contain tracked reads, only the inner widget is wrapped. The outer widget relies on the inner `SignalBuilder` to trigger the rebuild of its subtree. This is the "only the leaf rebuilds" guarantee.
+When an outer widget and an inner widget contain tracked reads of the **same** signal (or query), only the outer widget is wrapped. The outer `SignalBuilder`'s builder execution synchronously evaluates everything inside its subtree — including string interpolation, `if`-elements, and `.when(...)` callbacks — so every signal read in the inner widget is registered as a dependency of the outer wrap. When that signal updates, the outer rebuilds the entire subtree and the inner reads pick up fresh values automatically.
+
+The implementation rule: an inner wrap is dropped iff the outer wrap strictly contains it AND the set of signal/query names the outer's tracked reads cover is a superset of the inner's. This collapses canonical patterns like:
+
+```dart
+user().when(                              // ← outer wrap subscribes to `user`
+  ready: (data) => Column(children: [
+    Text(data),
+    Text('refreshing: ${user().isRefreshing}'),  // ← inner read of `user`
+  ]),
+  ...
+)
+```
+
+into a single `SignalBuilder` around `user().when(...)`, matching the pattern hand-written reactive code uses idiomatically.
+
+### 7.6 Mixed-signal nested reads
+
+When an outer widget reads signal `A` and an inner widget reads a different signal `B`, both wraps are kept. The outer wrap subscribes only to `A`; dropping the inner would lose `B`'s reactivity when the outer's reactive context doesn't re-trigger for `B`-only updates. Same applies to query reads vs. signal reads, or two different signals — different names always keep both wraps.
 
 ---
 

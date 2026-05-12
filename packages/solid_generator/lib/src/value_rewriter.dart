@@ -27,15 +27,15 @@ class ValueEdit {
 /// subscribe. Writes never appear here; reads inside user-interaction
 /// callbacks or `<field>.untracked` reads are excluded.
 class ValueRewriteResult {
-  /// Creates a result holding [edits], [trackedReadOffsets],
+  /// Creates a result holding [edits], [trackedReadNamesByOffset],
   /// [trackedReadNames], [trackedQueryNames], and [selfCycleFound].
   const ValueRewriteResult(
     this.edits,
-    this.trackedReadOffsets,
+    this.trackedReadNamesByOffset,
     this.trackedReadNames,
     this.trackedQueryNames,
-    // Positional to keep the constructor signature consistent with the four
-    // list-typed args above; the field is single-use sentinel data.
+    // Positional to keep the constructor signature consistent with the
+    // list/map-typed args above; the field is single-use sentinel data.
     // ignore: avoid_positional_boolean_parameters
     this.selfCycleFound,
   );
@@ -44,8 +44,12 @@ class ValueRewriteResult {
   final List<ValueEdit> edits;
 
   /// Source offsets of reads that must be tracked for SignalBuilder
-  /// placement (Section 7). A subset of the read identifiers in [edits].
-  final List<int> trackedReadOffsets;
+  /// placement, keyed by the `@SolidState` field name or `@SolidQuery`
+  /// method name the read references. Map insertion order is
+  /// source-first-appearance, so `.keys` iteration is stable. Drives the
+  /// placement pass's same-signal nested-wrap collapse — an inner wrap is
+  /// dropped iff its name set is a subset of the outer's.
+  final Map<int, String> trackedReadNamesByOffset;
 
   /// Names of `@SolidState` field/getter identifiers read in tracked
   /// position, in source-first-appearance order, deduplicated.
@@ -99,9 +103,9 @@ bool _isOnPrefixedCallbackName(String name) {
 /// enclosing class. Zero-argument `MethodInvocation`s whose target is
 /// a bare `SimpleIdentifier` matching a query name (and not shadowed, and not
 /// inside an untracked context) have their offsets recorded in
-/// [ValueRewriteResult.trackedReadOffsets] so SignalBuilder placement can
-/// wrap their enclosing widget subtree. NO source edit is emitted for the
-/// call expression itself — the call survives byte-identical because the
+/// [ValueRewriteResult.trackedReadNamesByOffset] so SignalBuilder placement
+/// can wrap their enclosing widget subtree. NO source edit is emitted for
+/// the call expression itself — the call survives byte-identical because the
 /// lowered `<name>()` resolves through `Resource<T>.call() => state` to
 /// upstream extensions on `ResourceState<T>`.
 ///
@@ -123,7 +127,7 @@ bool _isOnPrefixedCallbackName(String name) {
 /// [node] is typically the `build()` `MethodDeclaration` or the body
 /// expression of a `@SolidState` getter. Both share the same
 /// identifier-rewrite contract; only `build()` consumes
-/// [ValueRewriteResult.trackedReadOffsets] for SignalBuilder placement.
+/// [ValueRewriteResult.trackedReadNamesByOffset] for SignalBuilder placement.
 ///
 /// [ValueRewriteResult.trackedReadNames] holds only `@SolidState` field /
 /// getter reads. Same-class `@SolidQuery` calls in tracked position are
@@ -161,7 +165,7 @@ ValueRewriteResult collectValueEdits(
   node.accept(visitor);
   return ValueRewriteResult(
     visitor.edits,
-    visitor.trackedReadOffsets,
+    visitor.trackedReadNamesByOffset,
     visitor.trackedReadNames,
     visitor.trackedQueryNames,
     visitor.selfCycleFound,
@@ -289,7 +293,12 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
   final Map<String, Set<String>> _classCollectionFields;
 
   final List<ValueEdit> edits = [];
-  final List<int> trackedReadOffsets = [];
+
+  /// Tracked-read offsets keyed by signal name — drives the placement
+  /// pass's same-signal collapse. See [ValueRewriteResult] for the full
+  /// contract; the map's `.keys` iteration order is also the canonical
+  /// tracked-offset ordering downstream consumers expect.
+  final Map<int, String> trackedReadNamesByOffset = {};
 
   /// Reactive-field/getter identifier names read in tracked position, in
   /// source-first-appearance order. Deduplicated via [_recordTrackedReadName].
@@ -376,7 +385,7 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
       // survives byte-identical because the lowered field is a `Resource<T>`
       // whose `call()` returns `ResourceState<T>` and the trailing chain
       // resolves to upstream extensions.
-      trackedReadOffsets.add(node.offset);
+      _recordTrackedRead(node.offset, node.methodName.name);
       _recordTrackedQueryName(node.methodName.name);
     }
     super.visitMethodInvocation(node);
@@ -437,7 +446,7 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
   void visitPrefixedIdentifier(PrefixedIdentifier node) {
     // Rewrite `<reactiveField>.untracked` to `<field>.untrackedValue` (the
     // runtime primitive on `ReadableSignal<T>`). The offset is intentionally
-    // NOT added to trackedReadOffsets and `_untrackedDepth` is intentionally
+    // NOT recorded as a tracked read and `_untrackedDepth` is intentionally
     // not consulted — an `.untracked` read must never subscribe, regardless
     // of surrounding context.
     if (node.identifier.name == _untrackedGetterName &&
@@ -504,7 +513,7 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
         _signalApiGetters.contains(outerParent.propertyName.name)) {
       if (_trackedSignalApiGetters.contains(outerParent.propertyName.name) &&
           _untrackedDepth == 0) {
-        trackedReadOffsets.add(node.offset);
+        _recordTrackedRead(node.offset, node.identifier.name);
       }
       return;
     }
@@ -524,7 +533,7 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
       edits.add(ValueEdit(node.end, node.end, '.value'));
     }
     if (_untrackedDepth == 0) {
-      trackedReadOffsets.add(node.offset);
+      _recordTrackedRead(node.offset, node.identifier.name);
     }
   }
 
@@ -604,7 +613,7 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
         ),
       );
       if (_untrackedDepth == 0) {
-        trackedReadOffsets.add(expr.offset);
+        _recordTrackedRead(expr.offset, expr.name);
         _recordTrackedReadName(expr.name);
       }
       return;
@@ -642,7 +651,7 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
         // bare-read path handle that case and skip recording here.
         if (_isAccessOnSignalApi(node, _trackedSignalApiGetters) &&
             _untrackedDepth == 0) {
-          trackedReadOffsets.add(node.offset);
+          _recordTrackedRead(node.offset, name);
           _recordTrackedReadName(name);
         }
         return;
@@ -661,7 +670,7 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
       if (_collectionFields.contains(name)) {
         if (_isChainPrefix(node)) {
           if (_untrackedDepth == 0) {
-            trackedReadOffsets.add(node.offset);
+            _recordTrackedRead(node.offset, name);
             _recordTrackedReadName(name);
           }
           return;
@@ -671,7 +680,7 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
         final isGet = node.inGetterContext();
         final isSet = node.inSetterContext();
         if (isGet && !isSet && _untrackedDepth == 0) {
-          trackedReadOffsets.add(node.offset);
+          _recordTrackedRead(node.offset, name);
           _recordTrackedReadName(name);
         }
         return;
@@ -687,7 +696,7 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
       // subscribe, so both pure writes and compound writes are excluded
       // from tracked reads.
       if (isGet && !isSet && _untrackedDepth == 0) {
-        trackedReadOffsets.add(node.offset);
+        _recordTrackedRead(node.offset, name);
         _recordTrackedReadName(name);
       }
       return;
@@ -723,6 +732,16 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
     if (!trackedReadNames.contains(name)) trackedReadNames.add(name);
   }
 
+  /// Records [offset] as a tracked read keyed by signal [name]. Map
+  /// insertion order is source-first-appearance because Dart's `Map<K, V>`
+  /// literal preserves insertion order, so downstream consumers can iterate
+  /// `trackedReadNamesByOffset.keys` in the same order as a parallel list
+  /// would emit. Every caller is in a branch that already verified
+  /// `_untrackedDepth == 0`.
+  void _recordTrackedRead(int offset, String name) {
+    trackedReadNamesByOffset[offset] = name;
+  }
+
   /// Appends [name] to [trackedQueryNames] iff not already present,
   /// preserving source-first-appearance order. A query body that calls the
   /// same upstream `<query>()` at multiple offsets must contribute the name
@@ -733,7 +752,7 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
 
   /// True if [id] sits in receiver position of a chain access whose property
   /// name is in [propertyNames]. The two callers pivot the rule:
-  ///   * [_signalApiGetters] — no-double-append guard (SPEC §5.4).
+  ///   * [_signalApiGetters] — no-double-append guard.
   ///   * [_trackedSignalApiGetters] — `.hasValue` / `.previousValue` reads
   ///     that must record a tracking offset for SignalBuilder placement.
   bool _isAccessOnSignalApi(SimpleIdentifier id, Set<String> propertyNames) {

@@ -107,7 +107,7 @@ String rewriteBuildMethod(
   );
   final wrapNodes = computeWrapSet(
     buildMethod,
-    valueResult.trackedReadOffsets,
+    valueResult.trackedReadNamesByOffset,
     queryNames: queryNames,
   );
 

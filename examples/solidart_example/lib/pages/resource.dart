@@ -54,48 +54,34 @@ class _ResourcePageState extends State<ResourcePage> {
             SignalBuilder(
               builder: (context, child) {
                 return user().when(
-                  ready: (data) => SignalBuilder(
-                    builder: (context, child) {
-                      return Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          ListTile(
-                            title: Text(data),
-                            subtitle: SignalBuilder(
-                              builder: (context, child) {
-                                return Text(
-                                  'refreshing: ${user().isRefreshing}',
-                                );
-                              },
-                            ),
-                          ),
-                          if (user().isRefreshing)
-                            const CircularProgressIndicator()
-                          else
-                            ElevatedButton(
-                              onPressed: user.refresh,
-                              child: const Text('Refresh'),
-                            ),
-                        ],
-                      );
-                    },
+                  ready: (data) => Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      ListTile(
+                        title: Text(data),
+                        subtitle: Text('refreshing: ${user().isRefreshing}'),
+                      ),
+                      if (user().isRefreshing)
+                        const CircularProgressIndicator()
+                      else
+                        ElevatedButton(
+                          onPressed: user.refresh,
+                          child: const Text('Refresh'),
+                        ),
+                    ],
                   ),
-                  error: (e, _) => SignalBuilder(
-                    builder: (context, child) {
-                      return Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(e.toString()),
-                          if (user().isRefreshing)
-                            const CircularProgressIndicator()
-                          else
-                            ElevatedButton(
-                              onPressed: user.refresh,
-                              child: const Text('Refresh'),
-                            ),
-                        ],
-                      );
-                    },
+                  error: (e, _) => Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(e.toString()),
+                      if (user().isRefreshing)
+                        const CircularProgressIndicator()
+                      else
+                        ElevatedButton(
+                          onPressed: user.refresh,
+                          child: const Text('Refresh'),
+                        ),
+                    ],
                   ),
                   loading: () =>
                       const RepaintBoundary(child: CircularProgressIndicator()),

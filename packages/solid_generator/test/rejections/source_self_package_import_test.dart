@@ -1,6 +1,6 @@
 // Rejection suite for same-package `package:<self>/...` imports in source
 // files. Source must stay inside the source/ realm — `package:` URIs route
-// through `lib/`, which is the wrong target for an authored file. See SPEC §2.
+// through `lib/`, which is the wrong target for an authored file.
 
 import '../integration/golden_helpers.dart';
 

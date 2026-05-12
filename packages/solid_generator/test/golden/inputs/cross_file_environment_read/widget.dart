@@ -6,7 +6,7 @@
 // `ListMixin.length` is reached through the receiver chain directly).
 // Both reads are wrapped in `SignalBuilder`.
 
-// Same-package imports must be relative (SPEC §2) — `controllers.dart` is a
+// Same-package imports must be relative — `controllers.dart` is a
 // sibling source file in the multi-file golden harness.
 
 import 'package:flutter/widgets.dart';
