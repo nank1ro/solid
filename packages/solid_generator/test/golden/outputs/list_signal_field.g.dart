@@ -9,7 +9,7 @@ class ListProbe extends StatefulWidget {
 }
 
 class _ListProbeState extends State<ListProbe> {
-  final xs = ListSignal<int>(const [], name: 'xs');
+  final xs = ListSignal<int>([], name: 'xs');
 
   @override
   void dispose() {

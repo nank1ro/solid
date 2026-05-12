@@ -26,13 +26,13 @@ class Breadth extends StatelessWidget {
   Breadth({super.key});
 
   @SolidState()
-  List<int> xs = const [];
+  List<int> xs = [];
 
   @SolidState()
-  Set<int> tags = const {};
+  Set<int> tags = {};
 
   @SolidState()
-  Map<String, int> counts = const {};
+  Map<String, int> counts = {};
 
   // Same-class Computed bodies exercising a wide mix of mixin members.
   @SolidState()

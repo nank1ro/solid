@@ -9,9 +9,9 @@ class LateCollectionProbe extends StatefulWidget {
 }
 
 class _LateCollectionProbeState extends State<LateCollectionProbe> {
-  late final xs = ListSignal<int>(const <int>[], name: 'xs');
-  late final tags = SetSignal<String>(const <String>{}, name: 'tags');
-  late final hits = MapSignal<String, int>(const <String, int>{}, name: 'hits');
+  late final xs = ListSignal<int>(<int>[], name: 'xs');
+  late final tags = SetSignal<String>(<String>{}, name: 'tags');
+  late final hits = MapSignal<String, int>(<String, int>{}, name: 'hits');
 
   @override
   void dispose() {

@@ -6,7 +6,7 @@ class Inventory implements Disposable {
     log;
   }
 
-  final items = ListSignal<int>(const [], name: 'items');
+  final items = ListSignal<int>([], name: 'items');
 
   late final evens = Computed<List<int>>(
     () => items.where((i) => i.isEven).toList(),

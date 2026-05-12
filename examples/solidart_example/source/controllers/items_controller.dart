@@ -2,7 +2,7 @@ import 'package:solid_annotations/solid_annotations.dart';
 
 class ItemsController {
   @SolidState()
-  List<int> items = const [1, 2];
+  List<int> items = [1, 2];
 
   void add(int value) => items.add(value);
 
@@ -19,7 +19,7 @@ class ItemsController {
 
 class SetItemsController {
   @SolidState()
-  Set<int> items = const {1, 2};
+  Set<int> items = {1, 2};
 
   void add(int value) => items.add(value);
 
@@ -34,7 +34,7 @@ class SetItemsController {
 
 class MapItemsController {
   @SolidState()
-  Map<String, int> items = const {'a': 1, 'b': 2};
+  Map<String, int> items = {'a': 1, 'b': 2};
 
   void add(String key, int value) => items[key] = value;
 

@@ -9,7 +9,7 @@ class MapProbe extends StatefulWidget {
 }
 
 class _MapProbeState extends State<MapProbe> {
-  final scores = MapSignal<String, int>(const {}, name: 'scores');
+  final scores = MapSignal<String, int>({}, name: 'scores');
 
   @override
   void dispose() {

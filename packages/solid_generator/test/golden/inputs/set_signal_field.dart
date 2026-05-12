@@ -9,7 +9,7 @@ class SetProbe extends StatelessWidget {
   SetProbe({super.key});
 
   @SolidState()
-  Set<int> tags = const {};
+  Set<int> tags = {};
 
   @override
   Widget build(BuildContext context) {

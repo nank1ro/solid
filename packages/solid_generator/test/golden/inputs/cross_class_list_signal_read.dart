@@ -10,7 +10,7 @@ import 'package:flutter/widgets.dart';
 
 class Controller {
   @SolidState()
-  List<int> todos = const [];
+  List<int> todos = [];
 }
 
 class Display extends StatelessWidget {

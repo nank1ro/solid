@@ -11,5 +11,5 @@ class Counter {
   int value = 0;
 
   @SolidState()
-  List<int> history = const [];
+  List<int> history = [];
 }

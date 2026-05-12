@@ -2,7 +2,7 @@ import 'package:flutter_solidart/flutter_solidart.dart';
 import 'package:solid_annotations/solid_annotations.dart';
 
 class ItemsController implements Disposable {
-  final items = ListSignal<int>(const [1, 2], name: 'items');
+  final items = ListSignal<int>([1, 2], name: 'items');
 
   void add(int value) => items.add(value);
 
@@ -23,7 +23,7 @@ class ItemsController implements Disposable {
 }
 
 class SetItemsController implements Disposable {
-  final items = SetSignal<int>(const {1, 2}, name: 'items');
+  final items = SetSignal<int>({1, 2}, name: 'items');
 
   void add(int value) => items.add(value);
 
@@ -42,7 +42,7 @@ class SetItemsController implements Disposable {
 }
 
 class MapItemsController implements Disposable {
-  final items = MapSignal<String, int>(const {'a': 1, 'b': 2}, name: 'items');
+  final items = MapSignal<String, int>({'a': 1, 'b': 2}, name: 'items');
 
   void add(String key, int value) => items[key] = value;
 

@@ -9,7 +9,7 @@ class SetProbe extends StatefulWidget {
 }
 
 class _SetProbeState extends State<SetProbe> {
-  final tags = SetSignal<int>(const {}, name: 'tags');
+  final tags = SetSignal<int>({}, name: 'tags');
 
   @override
   void dispose() {
