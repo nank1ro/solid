@@ -48,3 +48,6 @@ lcov.info
 .firebase
 .fvmrc
 .supermaven
+
+# skill-creator run_loop / eval workspaces (ephemeral artifacts)
+solid-workspace/
