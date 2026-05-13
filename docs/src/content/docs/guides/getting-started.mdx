@@ -70,10 +70,18 @@ import { Steps } from '@astrojs/starlight/components';
    ```
 </Steps>
 
-<Aside title="AI assistant setup (optional)">
-If you use Claude Code, Cursor, Codex, GitHub Copilot, or another supported agent, install the Solid skill so your assistant follows Solid's conventions (edit `source/`, never `lib/`; correct annotation targets; setup steps): `npx skills add nank1ro/solid`. Or copy `skills/solid/SKILL.md` from the [Solid repo](https://github.com/nank1ro/solid) into your editor's skill location.
+<Aside title="AI assistant setup (recommended)">
+**Step 1 — Drop `AGENTS.md` at your app root.** Most AI coding tools (Claude Code, Cursor, Codex, GitHub Copilot, Amp, OpenHands, …) auto-load `AGENTS.md` at session start. It teaches every agent the inverted `source/` vs `lib/` rule **without depending on skill triggering** — so the rule applies to every interaction, even short or routine-looking ones. Copy the template:
 
-If your tool fetches documentation over HTTP (Cursor `@docs`, ChatGPT custom GPTs, claude.ai web search, …), point it at [`/llms-full.txt`](https://solid.mariuti.com/llms-full.txt) — the full docs as a single LLM-friendly file. A short index lives at [`/llms.txt`](https://solid.mariuti.com/llms.txt).
+```bash
+curl -o AGENTS.md https://raw.githubusercontent.com/nank1ro/solid/main/skills/solid/assets/AGENTS.md
+# If your tool only looks for CLAUDE.md, symlink:
+ln -s AGENTS.md CLAUDE.md
+```
+
+**Step 2 — Install the Solid skill.** `npx skills add nank1ro/solid`, or copy `skills/solid/` from the [Solid repo](https://github.com/nank1ro/solid) into your editor's skill location. The skill gives the agent deeper guidance (full annotation contract, scripts, troubleshooting) when it triggers on Solid-related work. The two layers complement each other: `AGENTS.md` is the always-loaded baseline, the skill is the on-demand reference.
+
+**Step 3 — HTTP docs (optional).** If your tool fetches documentation over HTTP (Cursor `@docs`, ChatGPT custom GPTs, claude.ai web search, …), point it at [`/llms-full.txt`](https://solid.mariuti.com/llms-full.txt) — the full docs as a single LLM-friendly file. A short index lives at [`/llms.txt`](https://solid.mariuti.com/llms.txt).
 </Aside>
 
 ## How it works
