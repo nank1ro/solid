@@ -121,13 +121,13 @@ String emitSignalField(FieldModel f) {
       final mutableExample = f.initializerText.replaceFirst(constPrefix, '');
       throw CodeGenerationError(
         '@SolidState() collection field `${f.fieldName}` has a `const` '
-            'initializer:\n'
-            '  ${f.typeText} ${f.fieldName} = ${f.initializerText};\n'
-            'A `const` literal is unmodifiable — the lowered '
-            '${collection.ctorName} would throw `UnsupportedError` on the '
-            'first write. Drop the `const` so the collection signal wraps a '
-            'mutable copy:\n'
-            '  ${f.typeText} ${f.fieldName} = $mutableExample;',
+        'initializer:\n'
+        '  ${f.typeText} ${f.fieldName} = ${f.initializerText};\n'
+        'A `const` literal is unmodifiable — the lowered '
+        '${collection.ctorName} would throw `UnsupportedError` on the '
+        'first write. Drop the `const` so the collection signal wraps a '
+        'mutable copy:\n'
+        '  ${f.typeText} ${f.fieldName} = $mutableExample;',
         null,
         f.fieldName,
       );
