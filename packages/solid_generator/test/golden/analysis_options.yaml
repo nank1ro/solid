@@ -1,17 +1,17 @@
 # Analysis config for the paired golden fixtures.
 #
 # Inputs are test source files that intentionally violate user-facing rules
-# Solid expects (SPEC Section 2: a `StatelessWidget` with a mutable
-# `@SolidState` field trips `must_be_immutable`) and import runtime packages
-# (flutter, flutter_solidart) that the generator package itself does not
-# depend on. Both are suppressed here.
+# Solid expects (a `StatelessWidget` with a mutable `@SolidState` field
+# trips `must_be_immutable`) and import runtime packages (flutter,
+# flutter_solidart) that the generator package itself does not depend on.
+# Both are suppressed here.
 #
 # Outputs are byte-comparison fixtures for builder output, not shippable lib
-# code. Per SPEC Section 9 and Section 14 item 7 the generator emits clean
-# post-cleanup output: imports are alphabetized within each group, unused
-# `solid_annotations` is pruned when not referenced, and `const` is
-# prefixed on eligible widget constructors. The generator absorbs all three
-# cleanups directly because there is no post-build hook in build_runner.
+# code. The generator emits clean post-cleanup output: imports are
+# alphabetized within each group, unused `solid_annotations` is pruned when
+# not referenced, and `const` is prefixed on eligible widget constructors.
+# The generator absorbs all three cleanups directly because there is no
+# post-build hook in build_runner.
 #
 # Outputs are still excluded from analysis here because they import runtime
 # packages (`package:flutter/...`, `package:flutter_solidart/...`) that the

@@ -13,7 +13,7 @@ class ListProbe extends StatelessWidget {
   ListProbe({super.key});
 
   @SolidState()
-  List<int> xs = const [];
+  List<int> xs = [];
 
   @override
   Widget build(BuildContext context) {

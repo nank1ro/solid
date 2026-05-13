@@ -1,5 +1,6 @@
 import 'package:solid_annotations/solid_annotations.dart';
-import 'package:todos_example/domain/todo.dart';
+
+import '../domain/todo.dart';
 
 class TodosController {
   TodosController({List<Todo> initialTodos = const []}) {

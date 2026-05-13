@@ -63,6 +63,10 @@ import { Steps } from '@astrojs/starlight/components';
    linter:
      rules:
        public_member_api_docs: false # Disable documentation requirement for public members
+       # Same-package imports must be relative — `package:<self>/…` resolves to `lib/`,
+       # the generated realm, which is the wrong target for an authored file.
+       always_use_package_imports: false
+       prefer_relative_imports: true
    ```
 </Steps>
 
@@ -96,9 +100,10 @@ In addition, Solid is not a common generator because it transpiles your existing
 To ensure Solid properly manages the lifecycle of your reactive atoms, configure `flutter_solidart` in your app's `main()` function:
 
 ```dart title="source/main.dart" {6}
-import 'package:example/counter.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
+
+import 'counter.dart';
 
 void main() {
   SolidartConfig.autoDispose = false;

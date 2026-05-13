@@ -10,10 +10,10 @@ import 'package:solid_annotations/solid_annotations.dart';
 
 class CascadeProbe {
   @SolidState()
-  List<int> xs = const [];
+  List<int> xs = [];
 
   @SolidState()
-  Map<String, int> counts = const {};
+  Map<String, int> counts = {};
 
   void seed() {
     xs

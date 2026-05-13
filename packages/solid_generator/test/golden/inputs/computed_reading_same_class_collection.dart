@@ -16,7 +16,7 @@ import 'package:solid_annotations/solid_annotations.dart';
 
 class Inventory {
   @SolidState()
-  List<int> items = const [];
+  List<int> items = [];
 
   @SolidState()
   List<int> get evens => items.where((i) => i.isEven).toList();

@@ -35,43 +35,62 @@ import 'package:analyzer/dart/ast/visitor.dart';
 /// offsets themselves come from `value_rewriter`.
 Set<Expression> computeWrapSet(
   MethodDeclaration buildMethod,
-  List<int> trackedReadOffsets, {
+  Map<int, String> trackedReadNamesByOffset, {
   Set<String> queryNames = const {},
 }) {
-  if (trackedReadOffsets.isEmpty) return <Expression>{};
+  if (trackedReadNamesByOffset.isEmpty) return <Expression>{};
 
   final collector = _WidgetCollector(queryNames);
   buildMethod.accept(collector);
   final widgets = collector.widgets;
   if (widgets.isEmpty) return <Expression>{};
 
-  final wrapSet = <Expression>{};
-  for (final offset in trackedReadOffsets) {
+  // Per-wrap name-set drives the prune rule below: collapse nested wraps
+  // whose underlying signal/query reads all read names the outer wrap
+  // already subscribes to.
+  final wrapNames = <Expression, Set<String>>{};
+  for (final entry in trackedReadNamesByOffset.entries) {
+    final offset = entry.key;
     Expression? smallest;
     for (final w in widgets) {
       if (w.offset <= offset && offset < w.end) {
         if (smallest == null || w.offset > smallest.offset) smallest = w;
       }
     }
-    if (smallest != null) wrapSet.add(smallest);
+    if (smallest != null) {
+      wrapNames.putIfAbsent(smallest, () => <String>{}).add(entry.value);
+    }
   }
 
-  _pruneAncestors(wrapSet);
+  final wrapSet = wrapNames.keys.toSet();
+  _pruneAncestors(wrapSet, wrapNames);
   _suppressAlreadyWrapped(wrapSet);
   return wrapSet;
 }
 
-/// Removes any entry from [wrapSet] that strictly contains another entry
-/// (nested-reads rule). After this call, no two entries are in an
-/// ancestor / descendant relationship.
-void _pruneAncestors(Set<Expression> wrapSet) {
+/// Drops an inner wrap when the strictly-containing outer wrap's name-set
+/// already covers every signal/query the inner subscribes to. The outer
+/// `SignalBuilder.builder` runs synchronously through the subtree it
+/// returns, so same-name reads in the inner widget become dependencies of
+/// the outer wrap too. Different-signal nesting (outer reads `sigA`, inner
+/// reads `sigB`) keeps both wraps; the superset check fails and the
+/// inner's reactivity is preserved.
+void _pruneAncestors(
+  Set<Expression> wrapSet,
+  Map<Expression, Set<String>> wrapNames,
+) {
   final toRemove = <Expression>{};
   for (final outer in wrapSet) {
+    final outerNames = wrapNames[outer] ?? const <String>{};
     for (final inner in wrapSet) {
       if (identical(outer, inner)) continue;
-      if (outer.offset <= inner.offset && inner.end <= outer.end) {
-        toRemove.add(outer);
-        break;
+      if (outer.offset > inner.offset || inner.end > outer.end) continue;
+      final innerNames = wrapNames[inner] ?? const <String>{};
+      // No recorded names on the inner means we can't prove the outer's
+      // dependencies cover the inner's reactivity — keep both wraps.
+      if (innerNames.isEmpty) continue;
+      if (outerNames.containsAll(innerNames)) {
+        toRemove.add(inner);
       }
     }
   }
@@ -154,13 +173,22 @@ class _WidgetCollector extends RecursiveAstVisitor<void> {
   }
 }
 
-/// Syntactic heuristic: a bare `Foo(...)` call with no target and an
-/// UpperCamelCase method name is almost certainly a widget constructor in
-/// pre-resolution Dart AST. Named constructors on classes (`Foo.named(...)`)
-/// and library-prefixed calls are left for the future type-resolved pivot.
+/// Syntactic heuristic: a `Foo(...)` or `Foo.named(...)` call with an
+/// UpperCamelCase receiver (class name) is almost certainly a widget
+/// constructor in pre-resolution Dart AST. The bare form covers ordinary
+/// widget creation; the named-constructor form covers `ListView.separated`,
+/// `ListView.builder`, `GridView.builder`, etc. Library-prefixed calls
+/// (`prefix.Foo(...)`) are left for the future type-resolved pivot.
 bool _looksLikeWidgetCtor(MethodInvocation node) {
-  if (node.target != null) return false;
-  final name = node.methodName.name;
+  final target = node.target;
+  if (target == null) {
+    return _startsUpperCamel(node.methodName.name);
+  }
+  if (target is! SimpleIdentifier) return false;
+  return _startsUpperCamel(target.name);
+}
+
+bool _startsUpperCamel(String name) {
   if (name.isEmpty) return false;
   final first = name.codeUnitAt(0);
   return first >= 0x41 && first <= 0x5A; // 'A'..'Z'

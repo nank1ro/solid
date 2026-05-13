@@ -35,6 +35,7 @@ Rules:
 - **Solid emits no `.g.dart` files of its own.** Third-party generators (freezed, json_serializable, drift) may emit `.g.dart` or `.freezed.dart` files under `source/`; Solid copies those verbatim to the mirrored path under `lib/`.
 - **The example app's `main.dart`** lives in `lib/` (or `source/` if itself annotated) and imports from `lib/` using normal Flutter imports (`import 'counter.dart';`).
 - **Source is analyzed** with a couple of lint suppressions (notably `must_be_immutable`) so that a `StatelessWidget` with a mutable `@SolidState` field does not trip the analyzer. Source remains valid Dart at all times; any real error (typo, type error, undefined symbol) fails analysis.
+- **Same-package imports must be relative.** A source file references another source file in the same package via a relative URI (`../controllers/foo.dart`), never via `package:<self>/foo.dart`. The `package:` form resolves to `lib/` — the generated-artifact realm — which is the wrong target for an authored file (IDE "Go to definition" would jump to the lowered Signal types). The generator rejects same-package `package:` URIs in source files with a clear error. Cross-package imports (Flutter, `solid_annotations`, third-party, …) keep the `package:` form.
 - **Hot reload requires a bridge.** `dart run build_runner watch` regenerates `lib/` as the developer edits `source/`, but `flutter run` does not auto-detect that filesystem change because no IDE save event fires. The developer must either press `r` in the `flutter run` terminal after build_runner emits, or use `dashmon` (https://pub.dev/packages/dashmon) to bridge the filesystem change to Flutter's stdin automatically. See Section 12 for the full workflow.
 
 ---
@@ -533,6 +534,7 @@ late final text = Signal<String>.lazy(name: 'text');
 Rules:
 
 - For any `late` field declared without an initializer, the generator emits `Signal<T>.lazy(name: '…')` regardless of `T`. `Signal.lazy` (flutter_solidart ≥ 2.0) has no initial value; reading `.value` before the first write throws `StateError` — the one-to-one analogue of Dart's own `LateInitializationError` for `late` fields.
+- Source code may probe initialization state via `<field>.hasValue` (and observe-history via `<field>.previousValue`) — chain accesses on the bare tracked identifier that the no-double-append guard (§5.4) passes through verbatim.
 - The `late` modifier is preserved on the emitted Dart field so that `Signal` construction itself is deferred until first access.
 - The rule is uniform across primitives, collections, and user-defined types: no defaults table, no rejection path. `@SolidState() late MyType foo;` is always valid as long as `MyType` is a real type.
 - Nullable fields (Section 4.3) do not require `late` because `null` is a valid default; those continue to emit `Signal<T?>(null, name: '…')`.
@@ -1106,6 +1108,8 @@ The rewriter appends `.value` only when the receiver's resolved static type is `
 
 This matters because `.value` is a common field name on ordinary Dart objects (e.g., `TextEditingController.value`, `ValueNotifier.value`). A name-based rewriter would produce nonsensical `controller.value.value` code. The type-based rule is the only correct form and is also inherently idempotent: once `counter.value` has been rewritten, the outer expression's type is `int` (not `SignalBase<int>`), so the rule stops applying.
 
+In addition to `.value`, the rewriter preserves chain accesses on `SignalBase<T>` getters whose return type is a non-reactive value: `.hasValue` (lazy-state probe, see §4.2) and `.previousValue` (the value just before the most recent update). All three share the same idempotence property — the result type is not `SignalBase<T>`, so the rule does not fire again on the access. In the current name-based implementation slice, the rewriter recognizes the closed set `{value, hasValue, previousValue}` of pass-through getter names on a bare tracked-field receiver; a tracked-field access followed by any OTHER property name is treated as a bare read on the field and is rewritten to `<field>.value.<other>`. When the resolved-AST migration replaces name-based detection with `staticType` resolution, the rule generalizes naturally (the static type after `.hasValue` is `bool`, after `.previousValue` is `T?`, neither of which is a `SignalBase<T>` subtype).
+
 The generator MUST resolve types through `package:analyzer`. Name-matching, regex, or string heuristics are not acceptable implementations of this rule.
 
 ### 5.5 Shadowing
@@ -1316,9 +1320,27 @@ If a developer has manually written `SignalBuilder(...)` in source (rare but leg
 
 If two sibling widgets each contain a tracked read of a different signal, each is wrapped in its own `SignalBuilder`. Siblings do not share wrappers.
 
-### 7.5 Nested tracked reads
+### 7.5 Nested same-signal reads
 
-If an outer widget and an inner widget both contain tracked reads, only the inner widget is wrapped. The outer widget relies on the inner `SignalBuilder` to trigger the rebuild of its subtree. This is the "only the leaf rebuilds" guarantee.
+When an outer widget and an inner widget contain tracked reads of the **same** signal (or query), only the outer widget is wrapped. The outer `SignalBuilder`'s builder execution synchronously evaluates everything inside its subtree — including string interpolation, `if`-elements, and `.when(...)` callbacks — so every signal read in the inner widget is registered as a dependency of the outer wrap. When that signal updates, the outer rebuilds the entire subtree and the inner reads pick up fresh values automatically.
+
+The implementation rule: an inner wrap is dropped iff the outer wrap strictly contains it AND the set of signal/query names the outer's tracked reads cover is a superset of the inner's. This collapses canonical patterns like:
+
+```dart
+user().when(                              // ← outer wrap subscribes to `user`
+  ready: (data) => Column(children: [
+    Text(data),
+    Text('refreshing: ${user().isRefreshing}'),  // ← inner read of `user`
+  ]),
+  ...
+)
+```
+
+into a single `SignalBuilder` around `user().when(...)`, matching the pattern hand-written reactive code uses idiomatically.
+
+### 7.6 Mixed-signal nested reads
+
+When an outer widget reads signal `A` and an inner widget reads a different signal `B`, both wraps are kept. The outer wrap subscribes only to `A`; dropping the inner would lose `B`'s reactivity when the outer's reactive context doesn't re-trigger for `B`-only updates. Same applies to query reads vs. signal reads, or two different signals — different names always keep both wraps.
 
 ---
 

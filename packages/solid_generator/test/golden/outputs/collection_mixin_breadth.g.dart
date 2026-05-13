@@ -9,9 +9,9 @@ class Breadth extends StatefulWidget {
 }
 
 class _BreadthState extends State<Breadth> {
-  final xs = ListSignal<int>(const [], name: 'xs');
-  final tags = SetSignal<int>(const {}, name: 'tags');
-  final counts = MapSignal<String, int>(const {}, name: 'counts');
+  final xs = ListSignal<int>([], name: 'xs');
+  final tags = SetSignal<int>({}, name: 'tags');
+  final counts = MapSignal<String, int>({}, name: 'counts');
   late final sum = Computed<int>(
     () => xs.fold<int>(0, (a, b) => a + b),
     name: 'sum',

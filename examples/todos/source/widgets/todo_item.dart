@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:solid_annotations/solid_annotations.dart';
-import 'package:todos_example/controllers/todos.dart';
-import 'package:todos_example/domain/todo.dart';
+
+import '../controllers/todos.dart';
+import '../domain/todo.dart';
 
 class TodoItem extends StatelessWidget {
   TodoItem({super.key, required this.todo});

@@ -239,7 +239,7 @@ RewriteResult rewriteStateClass(
     solidartNames: <String>{
       // `Signal` is only emitted when the class has at least one scalar
       // `@SolidState` field. Collection-typed fields use ListSignal /
-      // SetSignal / MapSignal instead — see Section 4.4 of SPEC.md.
+      // SetSignal / MapSignal instead.
       if (hasScalarSignalField) 'Signal',
       if (hasListSignalField) 'ListSignal',
       if (hasSetSignalField) 'SetSignal',

@@ -2,9 +2,9 @@ import 'package:flutter_solidart/flutter_solidart.dart';
 import 'package:solid_annotations/solid_annotations.dart';
 
 class CascadeProbe implements Disposable {
-  final xs = ListSignal<int>(const [], name: 'xs');
+  final xs = ListSignal<int>([], name: 'xs');
 
-  final counts = MapSignal<String, int>(const {}, name: 'counts');
+  final counts = MapSignal<String, int>({}, name: 'counts');
 
   void seed() {
     xs

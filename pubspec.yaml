@@ -8,6 +8,7 @@ workspace:
   - packages/integration_tests
   - example
   - examples/todos
+  - examples/solidart_example
 
 dev_dependencies:
   very_good_analysis: ^10.0.0

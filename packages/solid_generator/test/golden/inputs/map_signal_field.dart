@@ -9,7 +9,7 @@ class MapProbe extends StatelessWidget {
   MapProbe({super.key});
 
   @SolidState()
-  Map<String, int> scores = const {};
+  Map<String, int> scores = {};
 
   @override
   Widget build(BuildContext context) {

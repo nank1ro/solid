@@ -64,22 +64,20 @@ bool isCollectionSignalField(FieldModel f) {
   return parseCollectionTypeText(f.typeText) != null;
 }
 
-/// Returns the empty-literal source for a collection-signal initializer
-/// when the source field has no explicit `= …` clause:
+/// Returns a MUTABLE empty-literal source for a collection-signal
+/// initializer when the source field has no explicit `= …` clause.
 ///
-/// - `List<T>` → `const <T>[]`
-/// - `Set<T>`  → `const <T>{}`
-/// - `Map<K, V>` → `const <K, V>{}`
-///
-/// The inner-type text is spliced verbatim so generic args round-trip —
-/// `List<List<int>>` → `const <List<int>>[]`.
+/// `const` is intentionally NOT emitted: a collection signal forwards
+/// mutations to the wrapped collection via `ListMixin` / `SetMixin` /
+/// `MapMixin`, so an unmodifiable empty literal would throw
+/// `UnsupportedError` on the first write.
 String _emptyCollectionLiteral(CollectionSignalKind kind) {
   switch (kind.ctorName) {
     case 'ListSignal':
-      return 'const <${kind.innerType}>[]';
+      return '<${kind.innerType}>[]';
     case 'SetSignal':
     case 'MapSignal':
-      return 'const <${kind.innerType}>{}';
+      return '<${kind.innerType}>{}';
   }
   // Unreachable — `parseCollectionTypeText` only produces these three names.
   throw StateError('unknown collection ctor: ${kind.ctorName}');
@@ -90,10 +88,16 @@ String _emptyCollectionLiteral(CollectionSignalKind kind) {
 /// Collection fields (`List<T>` / `Set<T>` / `Map<K, V>`, non-nullable)
 /// lower to `ListSignal<T>` / `SetSignal<T>` / `MapSignal<K, V>` regardless
 /// of `late`. The user's `= …` clause is spliced verbatim when present;
-/// otherwise an empty literal (`const <T>[]` / `const <T>{}` /
-/// `const <K, V>{}`) is used. The collection-signal mixin tracks reads
-/// through the same channels `.value` would, so `late` adds no value here
-/// (and collection signals don't expose `.lazy` anyway).
+/// otherwise an empty literal (`<T>[]` / `<T>{}` / `<K, V>{}`) is used. The
+/// collection-signal mixin tracks reads through the same channels `.value`
+/// would, so `late` adds no value here (and collection signals don't expose
+/// `.lazy` anyway).
+///
+/// A `const` user initializer is rejected with a `CodeGenerationError`:
+/// the lowered collection signal forwards mutations through `ListMixin` /
+/// `SetMixin` / `MapMixin` to the wrapped collection, so a `const` literal
+/// throws `UnsupportedError` on the first write. The error surfaces at
+/// build time instead of lying dormant until the first user mutation.
 ///
 /// Non-collection (scalar) cases, in priority order:
 ///
@@ -112,6 +116,22 @@ String emitSignalField(FieldModel f) {
   final String ctor;
   if (isCollectionSignalField(f)) {
     final collection = parseCollectionTypeText(f.typeText)!;
+    final constPrefix = RegExp(r'^const\s+');
+    if (constPrefix.hasMatch(f.initializerText)) {
+      final mutableExample = f.initializerText.replaceFirst(constPrefix, '');
+      throw CodeGenerationError(
+        '@SolidState() collection field `${f.fieldName}` has a `const` '
+        'initializer:\n'
+        '  ${f.typeText} ${f.fieldName} = ${f.initializerText};\n'
+        'A `const` literal is unmodifiable — the lowered '
+        '${collection.ctorName} would throw `UnsupportedError` on the '
+        'first write. Drop the `const` so the collection signal wraps a '
+        'mutable copy:\n'
+        '  ${f.typeText} ${f.fieldName} = $mutableExample;',
+        null,
+        f.fieldName,
+      );
+    }
     final init = f.initializerText.isNotEmpty
         ? f.initializerText
         : _emptyCollectionLiteral(collection);

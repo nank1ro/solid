@@ -107,39 +107,84 @@ String rewriteBuildMethod(
   );
   final wrapNodes = computeWrapSet(
     buildMethod,
-    valueResult.trackedReadOffsets,
+    valueResult.trackedReadNamesByOffset,
     queryNames: queryNames,
   );
 
   final edits = <SourceEdit>[];
 
-  // Wrap edits supersede any value edits inside their node's source range
-  // because the wrap's replacement string already embeds the rewritten
-  // inner text.
-  for (final node in wrapNodes) {
+  // Process wraps deepest-first so an outer wrap's replacement embeds the
+  // already-rewritten inner wraps verbatim — overlapping edits would
+  // otherwise corrupt each other when applied to the same source range.
+  final orderedWraps = wrapNodes.toList()
+    ..sort((a, b) {
+      final byOffset = b.offset.compareTo(a.offset);
+      if (byOffset != 0) return byOffset;
+      return a.end.compareTo(b.end);
+    });
+
+  // Wrap tree: each wrap's IMMEDIATE parent (smallest strictly-containing
+  // wrap) plus the inverse children map. Value edits pin to the smallest
+  // wrap that contains them (or `null` for edits outside every wrap).
+  // Together these route every value edit and every nested wrap to exactly
+  // one outer wrap's replacement.
+  final wrapParent = <Expression, Expression?>{
+    for (final wrap in orderedWraps)
+      wrap: _smallestContaining(
+        orderedWraps,
+        wrap.offset,
+        wrap.end,
+        strict: true,
+      ),
+  };
+  final wrapChildren = <Expression, List<Expression>>{};
+  for (final entry in wrapParent.entries) {
+    final parent = entry.value;
+    if (parent == null) continue;
+    wrapChildren.putIfAbsent(parent, () => []).add(entry.key);
+  }
+  final valueEditOwner = <ValueEdit, Expression?>{
+    for (final e in valueResult.edits)
+      e: _smallestContaining(orderedWraps, e.offset, e.end),
+  };
+
+  final wrapReplacements = <Expression, String>{};
+  for (final node in orderedWraps) {
     final innerStart = node.offset - methodStart;
     final innerEnd = node.end - methodStart;
     final innerOriginal = methodText.substring(innerStart, innerEnd);
-    final innerValueEdits = valueResult.edits
-        .where((e) => e.offset >= node.offset && e.end <= node.end)
-        .toList();
+    final innerEdits = <ValueEdit>[
+      for (final e in valueResult.edits)
+        if (identical(valueEditOwner[e], node)) e,
+      for (final child in wrapChildren[node] ?? const <Expression>[])
+        ValueEdit(child.offset, child.end, wrapReplacements[child]!),
+    ];
     final rewrittenInner = applyEditsToRange(
       innerOriginal,
-      innerValueEdits,
+      innerEdits,
       node.offset,
     );
-    final wrap = _signalBuilderWrap(rewrittenInner);
-    edits.add(SourceEdit(innerStart, innerEnd, wrap));
+    wrapReplacements[node] = _signalBuilderWrap(rewrittenInner);
   }
 
-  // Value edits NOT covered by a wrap land as standalone source edits. The
+  // Only emit edits for OUTERMOST wraps; inner wraps are already inlined
+  // into their containing outer wrap's replacement above.
+  for (final node in orderedWraps) {
+    if (wrapParent[node] != null) continue;
+    edits.add(
+      SourceEdit(
+        node.offset - methodStart,
+        node.end - methodStart,
+        wrapReplacements[node]!,
+      ),
+    );
+  }
+
+  // Value edits NOT owned by any wrap land as standalone source edits. The
   // `onPressed: () => counter++` case is typical — its `.value` edit lives
   // outside every wrapped subtree.
   for (final edit in valueResult.edits) {
-    final inside = wrapNodes.any(
-      (n) => edit.offset >= n.offset && edit.end <= n.end,
-    );
-    if (inside) continue;
+    if (valueEditOwner[edit] != null) continue;
     edits.add(
       SourceEdit(
         edit.offset - methodStart,
@@ -169,4 +214,27 @@ String _signalBuilderWrap(String inner) {
       '    return $inner;\n'
       '  },\n'
       ')';
+}
+
+/// Smallest wrap in [wraps] whose source range contains `[offset, end)`,
+/// or `null` if none does. When [strict] is true, exact-range matches
+/// (offset and end both equal) are excluded — used by the parent-of-wrap
+/// pass so a wrap cannot be its own parent.
+Expression? _smallestContaining(
+  List<Expression> wraps,
+  int offset,
+  int end, {
+  bool strict = false,
+}) {
+  Expression? smallest;
+  for (final w in wraps) {
+    if (w.offset > offset || end > w.end) continue;
+    if (strict && w.offset == offset && w.end == end) continue;
+    if (smallest == null ||
+        w.offset > smallest.offset ||
+        w.end < smallest.end) {
+      smallest = w;
+    }
+  }
+  return smallest;
 }

@@ -1,0 +1,37 @@
+include: package:very_good_analysis/analysis_options.yaml
+analyzer:
+  errors:
+    must_be_immutable: ignore
+    # `const Page({super.key})` with an `@SolidEnvironment() late Foo field;`
+    # is structurally non-const in source — but the generator splits the
+    # widget class so the field lives on State, making the lowered Widget
+    # const-eligible. Suppress so source LSP doesn't flood while keeping
+    # const ctors at call sites for the runtime const optimization.
+    const_constructor_with_non_final_field: ignore
+    # File-level `// ignore_for_file:` directives in source/ describe
+    # source-side type mismatches that don't fire in the lowered lib/ —
+    # the lib analyzer would otherwise flag those directives as
+    # unnecessary. Suppress to keep source/ and lib/ ignores symmetric.
+    unnecessary_ignore: ignore
+    always_put_required_named_parameters_first: ignore
+    invalid_annotation_target: ignore
+    avoid_print: ignore
+    unnecessary_statements: ignore
+    lines_longer_than_80_chars: ignore
+    specify_nonobvious_property_types: ignore
+    # Solid controllers expose state mutations as methods (`increment`,
+    # `setUserId`, …) rather than Dart setters so the method body stays
+    # inside the same-class `.value`-rewrite scope. A `set` accessor on the
+    # same name as a `@SolidState` field would also collide with the
+    # implicit setter the generator emits. Suppress at the example level.
+    use_setters_to_change_properties: ignore
+linter:
+  rules:
+    public_member_api_docs: false
+    # Source files must use relative imports for same-package siblings; the
+    # generator mirrors paths 1:1 into `lib/`, so the same rule must hold
+    # there. Turn off `very_good_analysis`'s default `always_use_package_imports`
+    # and enable its opposite as a tripwire for any future generator
+    # regression that leaks `package:<self>/...` into `lib/`.
+    always_use_package_imports: false
+    prefer_relative_imports: true

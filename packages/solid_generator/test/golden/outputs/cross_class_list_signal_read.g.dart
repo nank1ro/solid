@@ -4,7 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:solid_annotations/solid_annotations.dart';
 
 class Controller implements Disposable {
-  final todos = ListSignal<int>(const [], name: 'todos');
+  final todos = ListSignal<int>([], name: 'todos');
 
   @override
   void dispose() {
