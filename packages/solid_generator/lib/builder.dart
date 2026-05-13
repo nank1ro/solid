@@ -44,6 +44,16 @@ const String _solidAnnotationHint = '@Solid';
 const String _providerCallHint = 'Provider';
 const String _environmentCallHint = '.environment';
 
+/// Substrings that flag a file as a candidate for the call-site `const`
+/// promotion pass (§ SPEC 4.10). A file importing `flutter_solidart` or
+/// `solid_annotations` is on the Solid path even when it declares no
+/// annotations of its own — `main.dart` style entry points commonly fit
+/// this shape. The visitor uses the resolved analyzer to identify
+/// const-eligible constructors, so any `MaterialApp(home: …)` style call
+/// site whose arguments are themselves const-evaluable is promoted.
+const String _solidartImportHint = 'package:flutter_solidart/';
+const String _solidAnnotationsImportHint = 'package:solid_annotations/';
+
 /// Shared formatter; `DartFormatter` construction allocates non-trivial
 /// internal state, so hoisting out of `_renderOutput` avoids per-file cost.
 final DartFormatter _formatter = DartFormatter(
@@ -106,15 +116,18 @@ class _SolidBuilder implements Builder {
     );
 
     // Files without any @Solid* annotation pass through verbatim — UNLESS they
-    // contain a `Provider(...)` or `.environment<T>()` call site, which the
-    // auto-dispose pass must visit. A `source.contains` check is a cheap
-    // pre-parse guard — if neither marker is present the file cannot need
-    // transformation.
+    // contain a `Provider(...)` / `.environment<T>()` call site (auto-dispose
+    // pass) OR import `flutter_solidart` / `solid_annotations` (call-site
+    // `const` promotion pass — §4.10). A `source.contains` check is a cheap
+    // pre-parse guard; the visitors below still reject false positives.
     final hasSolidAnnotation = source.contains(_solidAnnotationHint);
     final hasProviderHint =
         source.contains(_providerCallHint) ||
         source.contains(_environmentCallHint);
-    if (!hasSolidAnnotation && !hasProviderHint) {
+    final hasSolidartImport =
+        source.contains(_solidartImportHint) ||
+        source.contains(_solidAnnotationsImportHint);
+    if (!hasSolidAnnotation && !hasProviderHint && !hasSolidartImport) {
       await buildStep.writeAsString(outputId, source);
       return;
     }
@@ -188,22 +201,33 @@ class _SolidBuilder implements Builder {
       sameFileCollections,
     );
     if (annotatedClasses.every((c) => c.hasNoAnnotations)) {
-      // No reactive annotations resolved. The file may still contain a
-      // `Provider(...)` or `.environment<T>()` call site that the auto-dispose
-      // pass must visit; otherwise pass through verbatim.
+      // No reactive annotations resolved. The file may still need the
+      // `Provider`/`.environment` auto-dispose pass and/or the call-site
+      // `const` promotion pass — both apply to files that import Solid /
+      // Flutter Solidart but declare no annotations of their own (`main.dart`
+      // style entry points are the typical shape).
+      var current = source;
       if (hasProviderHint) {
-        final withDispose = addProviderDisposeAtCallSites(
-          source,
-          unit: parsed.unit,
-        );
-        if (identical(withDispose, source)) {
-          await buildStep.writeAsString(outputId, source);
-          return;
+        current = addProviderDisposeAtCallSites(current, unit: parsed.unit);
+      }
+      if (hasSolidartImport) {
+        final (resolved, crossFileNames) = await (
+          _resolveOrNull(buildStep),
+          _collectCrossFileSolidConstCtorNames(buildStep, parsed.unit),
+        ).wait;
+        final names = <String>{
+          if (resolved != null) ...collectResolvedConstCtorNames(resolved),
+          ...crossFileNames,
+        };
+        if (names.isNotEmpty) {
+          current = addConstAtCallSites(current, names);
         }
-        await buildStep.writeAsString(outputId, _formatter.format(withDispose));
+      }
+      if (identical(current, source)) {
+        await buildStep.writeAsString(outputId, source);
         return;
       }
-      await buildStep.writeAsString(outputId, source);
+      await buildStep.writeAsString(outputId, _formatter.format(current));
       return;
     }
 
@@ -211,15 +235,96 @@ class _SolidBuilder implements Builder {
     // (rather than rebuilding from `annotatedClasses`) — they encode the
     // same data but the prescan version is the authority because the
     // reader pipeline already consumed it.
+    final (resolvedUnit, crossFileConstCtorNames) = await (
+      _resolveOrNull(buildStep),
+      _collectCrossFileSolidConstCtorNames(buildStep, parsed.unit),
+    ).wait;
     final transformed = _renderOutput(
       parsed.unit,
       annotatedClasses,
       sameFileRegistry,
       sameFileCollections,
       source,
+      resolvedUnit,
+      crossFileConstCtorNames,
     );
     await buildStep.writeAsString(outputId, transformed);
   }
+}
+
+/// Resolves [step]'s input to a fully-typed [CompilationUnit], returning
+/// `null` on any failure (missing transitive dep, parse error in an imported
+/// file, resolver crash). The call-site `const` pass (§ SPEC 4.10) tolerates
+/// a missing resolved unit by skipping promotion — the build still
+/// succeeds and the user's `prefer_const_constructors` lint simply fires
+/// until resolution is restored.
+///
+/// Resolved analysis is the only way to determine `ConstructorElement.isConst`
+/// for an arbitrary class invoked in source — unresolved parsing cannot tell
+/// `Foo()` (a constructor) from `Foo()` (a method call), and cannot reach
+/// `isConst` either way.
+Future<CompilationUnit?> _resolveOrNull(BuildStep step) async {
+  try {
+    final library = await step.resolver.libraryFor(
+      step.inputId,
+      allowSyntaxErrors: true,
+    );
+    final node = await step.resolver.astNodeFor(
+      library.firstFragment,
+      resolve: true,
+    );
+    return node is CompilationUnit ? node : null;
+  } on Object {
+    return null;
+  }
+}
+
+/// Walks every relative / same-package import of [unit] and returns the
+/// names of every `@Solid*`-annotated class whose lowered constructor will
+/// gain `const` (per Section 14 item 7 — `projectedConstCtorNames`).
+///
+/// Resolved analysis of the current file sees imported source classes
+/// without `const` on their ctors — the lowering adds it. This scan replays
+/// `_emitCtors`'s eligibility check against the SOURCE file's class
+/// declarations to project the name set, so a consumer like
+/// `runApp(MaterialApp(home: CounterPage()))` can recognize the inner
+/// `CounterPage()` as const-evaluable and promote the outer `MaterialApp`.
+///
+/// Cross-package imports (`package:flutter/...`, third-party) are skipped —
+/// those types come from outside the Solid pipeline and never gain ctor
+/// `const` through lowering. Their const-eligibility is detected by the
+/// separate resolved-source pass in [collectResolvedConstCtorNames].
+Future<Set<String>> _collectCrossFileSolidConstCtorNames(
+  BuildStep step,
+  CompilationUnit unit,
+) async {
+  final names = <String>{};
+  for (final directive in unit.directives.whereType<ImportDirective>()) {
+    final uri = directive.uri.stringValue;
+    if (uri == null) continue;
+    if (uri.startsWith('dart:')) continue;
+    final assetId = _resolveImportToSourceAsset(uri, step.inputId);
+    if (assetId == null) continue;
+    if (!assetId.path.endsWith('.dart')) continue;
+    bool exists;
+    try {
+      exists = await step.canRead(assetId);
+    } on Object {
+      continue;
+    }
+    if (!exists) continue;
+    final CompilationUnit imported;
+    try {
+      imported = await step.resolver.compilationUnitFor(assetId);
+    } on Object {
+      continue;
+    }
+    for (final decl in imported.declarations) {
+      if (decl is! ClassDeclaration) continue;
+      names.addAll(projectedConstCtorNames(decl));
+    }
+  }
+  return names;
 }
 
 /// Pre-scans every `ClassDeclaration` in [unit] and returns the cross-class
@@ -516,6 +621,8 @@ String _renderOutput(
   Map<String, Set<String>> classRegistry,
   Map<String, Set<String>> classCollectionFields,
   String source,
+  CompilationUnit? resolvedUnit,
+  Set<String> crossFileConstCtorNames,
 ) {
   // Walk `unit.declarations` in source order. Class declarations are paired
   // with `annotatedClasses` (which `_collectAnnotatedClasses` populates in
@@ -582,12 +689,12 @@ String _renderOutput(
   // closure (a `FunctionExpression`, never const-eligible) is part of the
   // argument list when const promotion evaluates const-eligibility.
   final withDispose = addProviderDisposeAtCallSites(combined);
-  // The const-ctor pass adds `const` to widget-ctor declarations; this pass
-  // adds `const` to call sites of those declarations elsewhere in the assembled
-  // output (top-level `main()`, rewritten `build` bodies, passthrough classes
-  // — every scope), so `prefer_const_constructors` lint stays silent.
+  // Three-source union — see SPEC §4.10 and [_resolveOrNull] /
+  // [_collectCrossFileSolidConstCtorNames] doc-comments.
   final constCtorNames = <String>{
     for (final r in results) ...r.constCtorNames,
+    if (resolvedUnit != null) ...collectResolvedConstCtorNames(resolvedUnit),
+    ...crossFileConstCtorNames,
   };
   final withConst = addConstAtCallSites(withDispose, constCtorNames);
   return _formatter.format(withConst);

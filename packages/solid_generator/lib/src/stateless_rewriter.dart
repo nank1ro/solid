@@ -1,5 +1,7 @@
 import 'package:analyzer/dart/ast/ast.dart';
+import 'package:solid_generator/src/annotation_reader.dart';
 import 'package:solid_generator/src/build_rewriter.dart';
+import 'package:solid_generator/src/class_kind.dart';
 import 'package:solid_generator/src/effect_model.dart';
 import 'package:solid_generator/src/environment_model.dart';
 import 'package:solid_generator/src/field_model.dart';
@@ -574,3 +576,82 @@ $fieldsPrefix$reactiveFieldsText
 $initStateBlock$disposeBlock  $buildMethodText
 }''';
 }
+
+/// Returns the names of every constructor on [decl] that the stateless
+/// rewriter would emit with `const` — `"$className"` for the unnamed ctor,
+/// `"$className.<name>"` for named ctors. Returns the shared empty set when
+/// the class would not be lowered through the stateless rewriter.
+///
+/// Used by the builder's cross-file scan: resolved analysis of the consumer
+/// file sees imported source classes without `const` on their ctors — only
+/// this projection knows the lowering will add it (Section 14 item 7).
+/// Eligibility mirrors [_emitCtors] / [_isConstEligibleCtor] /
+/// [_classFieldsAreConstSafe]; see those for the rule set.
+Set<String> projectedConstCtorNames(ClassDeclaration decl) {
+  if (classKindOf(decl) != ClassKind.statelessWidget) return const {};
+
+  final fields = decl.members.whereType<FieldDeclaration>().toList();
+  final ctors = decl.members.whereType<ConstructorDeclaration>().toList();
+  if (ctors.isEmpty) return const {};
+
+  // A class with no `@Solid*` annotation is copied verbatim — no `const`
+  // added by lowering.
+  if (!_hasAnySolidAnnotation(decl)) return const {};
+
+  // `@SolidState` field/getter names plus `@SolidEnvironment` field names
+  // leave the widget half (see `partitionExcludeNames` in
+  // `rewriteStatelessWidget`) and are skipped by the const-safety check.
+  final excludeNames = <String>{};
+  for (final f in fields) {
+    if (findAnnotationByName(solidStateName, f.metadata) != null ||
+        findAnnotationByName(solidEnvironmentName, f.metadata) != null) {
+      excludeNames.add(f.fields.variables.first.name.lexeme);
+    }
+  }
+  for (final m in decl.members) {
+    if (m is MethodDeclaration && m.isGetter) {
+      if (findAnnotationByName(solidStateName, m.metadata) != null) {
+        excludeNames.add(m.name.lexeme);
+      }
+    }
+  }
+
+  // The cross-file projection has no partition data, so we conservatively
+  // check every retained instance field instead of restricting to
+  // `widgetBoundNames` as `_classFieldsAreConstSafe` does.
+  for (final f in fields) {
+    final name = f.fields.variables.first.name.lexeme;
+    if (excludeNames.contains(name)) continue;
+    if (f.isStatic) continue;
+    if (f.fields.isFinal) continue;
+    if (f.fields.isConst) continue;
+    return const {};
+  }
+
+  final names = <String>{};
+  final className = decl.name.lexeme;
+  for (final c in ctors) {
+    if (!_isConstEligibleCtor(c)) continue;
+    final n = c.name?.lexeme;
+    names.add(n == null ? className : '$className.$n');
+  }
+  return names;
+}
+
+/// True when [decl] or any of its members carries a `@SolidState`,
+/// `@SolidEffect`, `@SolidQuery`, or `@SolidEnvironment` annotation — i.e.,
+/// the class triggers the lowering pipeline.
+bool _hasAnySolidAnnotation(ClassDeclaration decl) {
+  if (_anySolidMetadata(decl.metadata)) return true;
+  for (final m in decl.members) {
+    if (m is FieldDeclaration && _anySolidMetadata(m.metadata)) return true;
+    if (m is MethodDeclaration && _anySolidMetadata(m.metadata)) return true;
+  }
+  return false;
+}
+
+bool _anySolidMetadata(NodeList<Annotation> metadata) =>
+    findAnnotationByName(solidStateName, metadata) != null ||
+    findAnnotationByName(solidEffectName, metadata) != null ||
+    findAnnotationByName(solidQueryName, metadata) != null ||
+    findAnnotationByName(solidEnvironmentName, metadata) != null;
