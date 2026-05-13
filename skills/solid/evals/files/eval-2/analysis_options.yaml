@@ -1,0 +1,9 @@
+include: package:flutter_lints/flutter.yaml
+analyzer:
+  errors:
+    must_be_immutable: ignore
+linter:
+  rules:
+    public_member_api_docs: false
+    always_use_package_imports: false
+    prefer_relative_imports: true

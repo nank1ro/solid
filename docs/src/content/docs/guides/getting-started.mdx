@@ -136,6 +136,25 @@ dart run build_runner watch --delete-conflicting-outputs
 - Press `r` in the `flutter run` terminal after `build_runner` emits.
 - Use [`dashmonx`](https://pub.dev/packages/dashmonx), which wraps `flutter run` and triggers hot reload automatically when files under `lib/` change. Any `flutter run` flag passes through, e.g. `dashmonx -d chrome` for a web target.
 
+### Clean up after generation
+
+Solid prioritises producing correct, runnable code over polishing it. The generated `lib/` output may miss some `const` opportunities, leave unused imports, or pick a non-preferred import form. Run `dart fix` after `build_runner` to apply the lint-driven fixes (`prefer_const_constructors`, `unnecessary_import`, `prefer_relative_imports`, …):
+
+```bash
+dart fix --apply
+```
+
+In CI, chain the two commands so the generated output is always lint-clean:
+
+```bash
+dart run build_runner build --delete-conflicting-outputs
+dart fix --apply
+```
+
+<Aside>
+The Solid skill (installed via the AI assistant setup above) ships a `verify.sh` helper that runs both in one shot and reports PASS/FAIL.
+</Aside>
+
 <Aside>
 The next chapters assume you have set up Solid in your Flutter project, created the `source` folder, and are running `dart run build_runner watch --delete-conflicting-outputs` to regenerate `lib/` on every change.
 </Aside>

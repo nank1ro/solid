@@ -1,6 +1,6 @@
 # Solid annotation contract
 
-Per-annotation valid/invalid targets. Distilled from the user docs at <https://solid.mariuti.com>.
+Per-annotation valid/invalid targets and rationale. Distilled from the user docs at <https://solid.mariuti.com>.
 
 ## `@SolidState()` — reactive state
 
@@ -23,7 +23,7 @@ Docs: <https://solid.mariuti.com/guides/state>.
 | `static` field | State is per-widget-instance, not per-class. |
 | Setter | A `@SolidState` write goes through the generated setter; you don't write your own. |
 | Method | Use `@SolidEffect` for side effects or `@SolidQuery` for async values. |
-| Top-level / library variable | Annotation only applies to class members. |
+| Top-level / library variable | The annotation only applies to class members. |
 
 ## `@SolidEffect()` — side effect
 
@@ -43,7 +43,7 @@ The body's reads of `@SolidState` fields are tracked automatically. The effect r
 - Methods with parameters.
 - Static or top-level functions.
 
-## `@SolidQuery()` — async/stream resource
+## `@SolidQuery()` — async / stream resource
 
 Docs: <https://solid.mariuti.com/guides/query>.
 
@@ -60,7 +60,7 @@ Docs: <https://solid.mariuti.com/guides/query>.
 - Return type must be `Future<T>` or `Stream<T>`.
 - The call site `fetchData()` does **not** return a `Future`/`Stream` — it returns a `Resource<T>` exposing:
   - `.when(ready: ..., loading: ..., error: ...)`
-  - `.maybeWhen(...orElse: ...)`
+  - `.maybeWhen(..., orElse: ...)`
   - `.isRefreshing` (true while a re-execution is in flight)
   - `.refresh()` to manually re-run
 
@@ -69,7 +69,7 @@ Docs: <https://solid.mariuti.com/guides/query>.
 | Option | Effect |
 | --- | --- |
 | `debounce: Duration(...)` | Wait this long after the last input change before re-running. |
-| `useRefreshing` (default `true`) | On re-execution from a dependency change, the resource stays on the current value while refetching, and `.isRefreshing` becomes `true` (smoother UX, no loading flash). Pass `useRefreshing: false` to drop back into the `loading` state on each re-execution instead. |
+| `useRefreshing` (default `true`) | On re-execution from a dependency change, the resource stays on the current value while refetching, and `.isRefreshing` becomes `true` (smoother UX, no loading flash). Pass `useRefreshing: false` to drop back into the `loading` state on each re-execution. |
 
 ## `@SolidEnvironment()` — inject from widget tree
 
@@ -84,13 +84,13 @@ Docs: <https://solid.mariuti.com/guides/environment>.
 ### Behavior
 
 - Lookup is lazy: the field initializer runs the first time the field is read.
-- Resolves the nearest ancestor `Provider<T>` where `T` is the field's declared type.
+- Resolves the nearest ancestor `Provider<T>` where `T` is the declared type.
 - Reading a `@SolidState` member of the injected instance stays reactive — fine-grained reactivity is preserved across the boundary.
 - Works inside `build`, `@SolidEffect`, `@SolidQuery` bodies, or any other context.
 
 ### Providing the instance
 
-Two equivalent ways:
+Two equivalent forms:
 
 ```dart
 // 1. .environment<T>() extension shipped by solid_annotations
@@ -100,7 +100,7 @@ home: CounterDisplay().environment((_) => Counter()),
 home: Provider(create: (_) => Counter(), child: CounterDisplay()),
 ```
 
-For multiple providers chain `.environment(...)` calls or use `MultiProvider` from `package:provider`.
+For multiple providers, chain `.environment(...)` calls or use `MultiProvider` from `package:provider`.
 
 The type argument is inferred from the closure's return type. Pass it explicitly only when consumers should read by a supertype: `.environment<AuthService>((_) => RealAuthService())`.
 
@@ -121,7 +121,7 @@ extension UntrackedExtension<T> on T {
 }
 ```
 
-`counter.untracked` typechecks identically to `counter` and is a no-op at runtime. The generator detects the pattern at source level and rewrites it to the underlying `untrackedValue` primitive and excludes the read from the dependency set — `SignalBuilder` doesn't wrap it inside `build`, and an enclosing `@SolidEffect` / `@SolidQuery` won't re-fire on changes to it.
+`counter.untracked` typechecks identically to `counter` and is a no-op at runtime. The generator detects the pattern at source level and rewrites it to the underlying `untrackedValue` primitive, excluding the read from the dependency set — `SignalBuilder` doesn't wrap it inside `build`, and an enclosing `@SolidEffect` / `@SolidQuery` won't re-fire on changes to it.
 
 ### Two ways reads become untracked
 
@@ -132,9 +132,9 @@ extension UntrackedExtension<T> on T {
 
 ### Hard rules
 
-- **String interpolation form**: only `'${counter.untracked}'` works. The short form `'$counter.untracked'` parses as `${counter}` followed by a literal `.untracked` suffix and is still a tracked read.
+- **String interpolation form**: only `'${counter.untracked}'` works. The short form `'$counter.untracked'` parses as `${counter}` followed by a literal `.untracked` suffix (still tracked).
 - **Shadowing**: a local variable that shadows the field disables the rewrite for that scope (the analyzer's identifier resolution wins).
-- **No-op on non-reactive types**: applied to a non-`@SolidState` value the extension is identity at compile time *and* runtime — safe to leave in code that may or may not target a reactive field.
+- **No-op on non-reactive types**: applied to a non-`@SolidState` value, the extension is identity at compile time and at runtime — safe to leave in code that may or may not target a reactive field.
 
 ### When to reach for it
 

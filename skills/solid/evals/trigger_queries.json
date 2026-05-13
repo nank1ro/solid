@@ -1,0 +1,82 @@
+[
+  {
+    "query": "In my flutter app i need to add a counter widget — tap + and it counts up. I have solid_annotations in my pubspec.yaml. give me a fresh page for it",
+    "should_trigger": true
+  },
+  {
+    "query": "ok so im trying to fetch user posts whenever the selected user id changes, with a 500ms debounce so we dont hammer the api. this is the flutter app where i'm already using @SolidQuery elsewhere",
+    "should_trigger": true
+  },
+  {
+    "query": "weird bug — i keep editing lib/counter.dart to change a string and it keeps reverting after a few seconds. why?? my pubspec has build_runner and solid_generator listed",
+    "should_trigger": true
+  },
+  {
+    "query": "i want to add go_router to this flutter app and set up 2 routes (/ and /settings). just looked at pubspec and we already use solid_annotations so i'm not sure where router.dart should go",
+    "should_trigger": true
+  },
+  {
+    "query": "Add a SolidEffect that prints to console whenever the counter changes. The widget is in source/counter_page.dart and the counter is an @SolidState int field",
+    "should_trigger": true
+  },
+  {
+    "query": "the build_runner is failing with 'requires assignable target' on my @SolidState field. heres the snippet: @SolidState() final int counter = 0;",
+    "should_trigger": true
+  },
+  {
+    "query": "Make this widget reactive — when toggle is true the colour changes, when it's false the colour reverts. the file is at source/colour_picker.dart in a flutter project with solid_generator in dev_deps",
+    "should_trigger": true
+  },
+  {
+    "query": "scaffold a new page that fetches `/api/profile` and shows a loading spinner while it resolves. flutter project, solid_annotations is in pubspec already",
+    "should_trigger": true
+  },
+  {
+    "query": "I want to inject an AuthService into a bunch of widgets via @SolidEnvironment. how do I provide it from main()? this is a Flutter app already set up with the Solid build_runner",
+    "should_trigger": true
+  },
+  {
+    "query": "Help me wire up freezed in this flutter project — i need a User model with email, name, age. pubspec already has solid_generator so i'm not sure if i write the model under source/ or lib/",
+    "should_trigger": true
+  },
+  {
+    "query": "fix this Solid.js component — when the signal changes the JSX doesn't re-render properly. it's a vite + typescript project",
+    "should_trigger": false
+  },
+  {
+    "query": "explain how Riverpod scoping works in flutter. when does a Provider get re-created? this is a pure riverpod app, no codegen",
+    "should_trigger": false
+  },
+  {
+    "query": "im setting up GitHub Actions for my Flutter project. how do i make `flutter test` run on PRs? pubspec is a vanilla flutter app, no solid",
+    "should_trigger": false
+  },
+  {
+    "query": "json_serializable is throwing 'no JsonKey for field email'. where do i put the @JsonKey annotation? this is a standard flutter project, no solid_annotations",
+    "should_trigger": false
+  },
+  {
+    "query": "in vanilla flutter, when should I use ChangeNotifier vs ValueListenable for state management? we're not using any codegen libs",
+    "should_trigger": false
+  },
+  {
+    "query": "what's the difference between StatefulWidget and StatelessWidget? im new to flutter and starting a fresh project, pubspec is empty besides flutter",
+    "should_trigger": false
+  },
+  {
+    "query": "convert this React class component to React hooks. its a Next.js page using class component lifecycle methods",
+    "should_trigger": false
+  },
+  {
+    "query": "explain how to use setState properly to avoid extra rebuilds in flutter. our codebase is standard flutter, no codegen libs in pubspec",
+    "should_trigger": false
+  },
+  {
+    "query": "I keep getting 'Provider not found' in my flutter app — pubspec has `provider: ^6.0` and i wrapped in Provider<Foo>. what am i missing? no other state libs",
+    "should_trigger": false
+  },
+  {
+    "query": "configure my flutter project's launch.json in VS Code to start with --device web-server. flutter app, no solid packages installed",
+    "should_trigger": false
+  }
+]

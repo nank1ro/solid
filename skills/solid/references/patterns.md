@@ -1,6 +1,6 @@
 # Solid patterns
 
-Six canonical idioms, each with a complete `source/` snippet. All examples lifted from the user docs at <https://solid.mariuti.com>.
+Canonical idioms, each with a complete `source/` snippet. All examples lifted from the user docs at <https://solid.mariuti.com>.
 
 ## 1. Counter with `@SolidState` field
 
@@ -211,7 +211,7 @@ import 'package:provider/provider.dart';
 home: Provider(create: (_) => Counter(), child: CounterDisplay()),
 ```
 
-For multiple providers chain `.environment(...)` calls or use `MultiProvider`:
+For multiple providers, chain `.environment(...)` calls or use `MultiProvider`:
 
 ```dart
 HomePage()
@@ -251,8 +251,8 @@ List<int> history = [];
 
 @SolidEffect()
 void recordHistory() {
-  history = [...history.untracked, counter]; // counter is tracked, history is not
+  history = [...history.untracked, counter]; // counter tracked, history not
 }
 ```
 
-Reads inside `on*` callback parameters (`onPressed`, `onTap`, `onChanged`, …) are auto-untracked — no `.untracked` needed. In string interpolations only the long form `'${counter.untracked}'` works; `'$counter.untracked'` is still tracked.
+Reads inside `on*` callback parameters (`onPressed`, `onTap`, `onChanged`, …) are auto-untracked — no `.untracked` needed. In string interpolations, only the long form `'${counter.untracked}'` works; `'$counter.untracked'` is still tracked.
