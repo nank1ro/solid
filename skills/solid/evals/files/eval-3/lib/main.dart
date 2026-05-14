@@ -1,7 +1,7 @@
+// GENERATED FILE — DO NOT EDIT BY HAND.
+// Source: source/main.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
-
-import 'home_page.dart';
 
 void main() {
   SolidartConfig.autoDispose = false;
@@ -13,6 +13,12 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const MaterialApp(title: 'My App', home: HomePage());
+    return MaterialApp(
+      title: 'My App',
+      home: Scaffold(
+        appBar: AppBar(title: const Text('My App')),
+        body: const Center(child: Text('Hello, world!')),
+      ),
+    );
   }
 }

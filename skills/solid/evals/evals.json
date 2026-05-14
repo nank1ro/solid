@@ -28,10 +28,11 @@
         "evals/files/eval-2/pubspec.yaml",
         "evals/files/eval-2/build.yaml",
         "evals/files/eval-2/analysis_options.yaml",
-        "evals/files/eval-2/source/main.dart"
+        "evals/files/eval-2/source/main.dart",
+        "evals/files/eval-2/source/posts_page.dart"
       ],
       "expectations": [
-        "The new or modified widget is under source/, not lib/.",
+        "The agent extends source/posts_page.dart (or replaces it) so the displayed posts react to the dropdown's selected userId.",
         "The widget declares a @SolidState field (typically String? userId or similar) that the query reads from its body.",
         "The query method is annotated @SolidQuery(...) with debounce: Duration(milliseconds: 500).",
         "The @SolidQuery method takes no parameters (the body reads @SolidState fields directly).",
@@ -49,6 +50,7 @@
         "evals/files/eval-3/analysis_options.yaml",
         "evals/files/eval-3/source/main.dart",
         "evals/files/eval-3/source/counter.dart",
+        "evals/files/eval-3/lib/main.dart",
         "evals/files/eval-3/lib/counter.dart"
       ],
       "expectations": [
@@ -61,18 +63,21 @@
     {
       "id": 4,
       "prompt": "Add go_router and set up two routes: `/` → HomePage, `/settings` → SettingsPage. Keep my existing app structure.",
-      "expected_output": "go_router added to pubspec.yaml. A new source/router.dart created with the GoRouter configuration. source/main.dart edited to use MaterialApp.router with the new router config. source/home_page.dart and source/settings_page.dart created (or stub equivalents). NO lib/ files created or edited by the agent — even though the go_router README would normally direct the agent to create lib/router.dart.",
+      "expected_output": "go_router added to pubspec.yaml. A new source/router.dart created with the GoRouter configuration referencing the existing source/home_page.dart and source/settings_page.dart. source/main.dart edited to use MaterialApp.router with the new router config. NO lib/ files created or edited by the agent — even though the go_router README would normally direct the agent to create lib/router.dart.",
       "files": [
         "evals/files/eval-4/pubspec.yaml",
         "evals/files/eval-4/build.yaml",
         "evals/files/eval-4/analysis_options.yaml",
-        "evals/files/eval-4/source/main.dart"
+        "evals/files/eval-4/source/main.dart",
+        "evals/files/eval-4/source/home_page.dart",
+        "evals/files/eval-4/source/settings_page.dart"
       ],
       "expectations": [
         "go_router was added as a dependency in pubspec.yaml.",
-        "A new file `source/router.dart` (or similar under source/) exists and contains a `GoRouter` configuration declaring the `/` and `/settings` routes.",
+        "A new file `source/router.dart` (or similar under source/) exists and contains a `GoRouter` configuration declaring the `/` and `/settings` routes that point to the existing HomePage and SettingsPage classes.",
         "source/main.dart was edited to use `MaterialApp.router` (or equivalent) wired to the GoRouter config.",
         "Any imports between source/ files use relative paths (e.g. `import 'router.dart';`), NOT `package:<app_name>/router.dart`.",
+        "The agent did NOT recreate or overwrite source/home_page.dart or source/settings_page.dart — they already existed.",
         "No file under lib/ was created or modified by the agent — even though go_router's README normally instructs creating lib/router.dart.",
         "The agent recommends running build_runner (or `scripts/verify.sh`) after the source/ edits so lib/ is regenerated."
       ]
