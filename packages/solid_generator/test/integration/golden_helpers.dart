@@ -103,6 +103,16 @@ const List<String> goldenNames = <String>[
   'late_hasvalue_chain',
   'cross_class_hasvalue_chain',
   'query_when_with_inner_state_reads',
+  'computed_reads_widget_ctor_field',
+  'effect_reads_widget_ctor_field',
+  'query_reads_widget_ctor_field',
+  'query_future_arrow_body',
+  'query_with_one_env_signal_dep',
+  'query_with_multi_env_signal_deps',
+  'query_with_mixed_signal_deps',
+  'query_with_two_env_receivers',
+  'query_with_cross_class_signal_unimported_type',
+  'query_with_cross_class_signal_already_imported_type',
 ];
 
 /// Memoized golden directory resolution. Resolved relative to the package

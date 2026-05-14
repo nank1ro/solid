@@ -8,9 +8,9 @@ Common errors and fixes. Source: <https://solid.mariuti.com/faq> plus the "commo
 | --- | --- | --- |
 | Edits to a file under `lib/` keep disappearing on save | `lib/` is generated; `build_runner watch` rewrites it from `source/`. | Move the change to the matching `source/<x>.dart`. |
 | `lib/<x>.dart` not produced | `source/**` not in `build.yaml` `targets.$default.sources`. | Add `- source/**` to the sources list. |
-| Generator errors complain about stale outputs | Old `.g.dart` / `lib/` files conflict with regeneration. | `dart run build_runner build --delete-conflicting-outputs` (or `watch ...`). Or run `scripts/verify.sh`. |
+| Generator errors complain about stale outputs | Old `.g.dart` / `lib/` files conflict with regeneration. | `dart run build_runner build` (or `watch`) deletes conflicting outputs automatically. Or run `scripts/verify.sh`. |
 | `flutter run` doesn't pick up a `build_runner` rewrite | No IDE save event fires for filesystem changes. | Press `r` in the `flutter run` terminal, or use [`dashmonx`](https://pub.dev/packages/dashmonx) (`dashmonx -d chrome` etc.). |
-| Working with another generator (`freezed`, `json_serializable`, …) and only Solid runs | `build.yaml` `sources` list missing `lib/**` or `$package$`. | Use the full block: `- lib/**`, `- $package$`, `- source/**`. Run `dart run build_runner watch --delete-conflicting-outputs` once. |
+| Working with another generator (`freezed`, `json_serializable`, …) and only Solid runs | `build.yaml` `sources` list missing `lib/**` or `$package$`. | Use the full block: `- lib/**`, `- $package$`, `- source/**`. Run `dart run build_runner watch` once. |
 | Generated `lib/` files are missing `const`, have unused imports, or use absolute `package:` imports | The generator prioritises correctness over polish; lint-driven fixes aren't applied. | Run `dart fix --apply` after `build_runner` — or use `scripts/verify.sh` which chains them. Apply in CI too. |
 
 ## Annotation rejections

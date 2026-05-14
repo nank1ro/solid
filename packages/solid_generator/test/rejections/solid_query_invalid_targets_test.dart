@@ -1,10 +1,14 @@
 // Rejection suite for invalid `@SolidQuery` placements.
 //
-// Cases ordered to mirror the bullet list: non-Future/Stream return
-// → Future-without-async body → parameterized → static → abstract/external →
-// getter → setter → top-level function. Class fields are NOT rejected: a
-// field initializer expression (e.g. `Future.value(0)`) is a valid fetcher
-// shape — the lowering wraps it as `Resource<T>(fetcher: () => <init>)`.
+// Cases ordered to mirror the bullet list: non-Future/Stream return →
+// parameterized → static → abstract/external → getter → setter → top-level
+// function. Class fields are NOT rejected: a field initializer expression
+// (e.g. `Future.value(0)`) is a valid fetcher shape — the lowering wraps it
+// as `Resource<T>(fetcher: () => <init>)`. Body-keyword/return-type mismatch
+// is also NOT rejected: a `Future<T>` method with an arrow body that
+// returns a Future is valid Dart and is preserved by the emitter; Dart's
+// own analyzer reports `await_in_non_async_function` when `await` is used
+// without `async`, so the generator does not duplicate that check.
 
 import '../integration/golden_helpers.dart';
 
@@ -13,12 +17,6 @@ const List<({String name, String errorContains})> _cases = [
     name: 'non_future_return',
     errorContains:
         '@SolidQuery cannot be applied to a non-Future/Stream method',
-  ),
-  (
-    name: 'future_without_async',
-    errorContains:
-        '@SolidQuery cannot be applied to a method whose body keyword '
-        'does not match the return type',
   ),
   (
     name: 'solid_query_parameterized',

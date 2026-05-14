@@ -27,6 +27,7 @@ RewriteResult rewriteStatelessWidget(
   List<EnvironmentModel> solidEnvironments,
   Map<String, Set<String>> classRegistry,
   Map<String, Set<String>> classCollectionFields,
+  Map<String, Map<String, String>> classFieldTypes,
   String source,
 ) {
   final className = classDecl.name.lexeme;
@@ -59,7 +60,7 @@ RewriteResult rewriteStatelessWidget(
   };
 
   final members = _splitMembers(classDecl);
-  final widgetBoundNames = _collectWidgetBoundNames(members.ctors);
+  final widgetBoundNames = collectWidgetBoundNames(members.ctors);
   final partition = _partitionFields(
     members.fields,
     partitionExcludeNames,
@@ -108,6 +109,8 @@ RewriteResult rewriteStatelessWidget(
     solidEffects,
     solidQueries,
     solidEnvironments,
+    environmentFields,
+    classFieldTypes,
   );
 
   final widgetClass = _emitWidgetClass(
@@ -216,6 +219,8 @@ _emitReactiveBlock(
   List<EffectModel> solidEffects,
   List<QueryModel> solidQueries,
   List<EnvironmentModel> solidEnvironments,
+  Map<String, String> environmentFields,
+  Map<String, Map<String, String>> classFieldTypes,
 ) {
   final fieldByName = {for (final f in solidFields) f.fieldName: f};
   final envByName = {for (final e in solidEnvironments) e.fieldName: e};
@@ -274,6 +279,8 @@ _emitReactiveBlock(
             q,
             reactiveTypeTexts,
             queryInnerTypeTexts,
+            environmentFields,
+            classFieldTypes,
             lines,
             disposeNames,
           );
@@ -329,7 +336,7 @@ _splitMembers(ClassDeclaration classDecl) {
 /// directly to a parameter. (`ConstructorDeclaration` exposes only
 /// `factoryKeyword` in the public analyzer API; there is no `isFactory`
 /// getter, hence the null-check.)
-Set<String> _collectWidgetBoundNames(List<ConstructorDeclaration> ctors) {
+Set<String> collectWidgetBoundNames(Iterable<ConstructorDeclaration> ctors) {
   final names = <String>{};
   for (final ctor in ctors) {
     if (ctor.factoryKeyword != null) continue;

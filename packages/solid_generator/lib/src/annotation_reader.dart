@@ -128,6 +128,7 @@ GetterModel? readSolidStateGetter(
   Map<String, Set<String>> classCollectionFields = const {},
   Map<String, String> environmentFields = const {},
   Set<String> collectionFields = const {},
+  Set<String> widgetBoundFields = const {},
 }) {
   if (!decl.isGetter || decl.isStatic) return null;
   final annotation = findAnnotationByName(solidStateName, decl.metadata);
@@ -149,6 +150,7 @@ GetterModel? readSolidStateGetter(
     :isBlockBody,
     trackedNames: _,
     trackedQueryNames: _,
+    trackedCrossClassNames: _,
     selfCycleFound: _,
   ) = _readReactiveBody(
     body,
@@ -166,6 +168,7 @@ GetterModel? readSolidStateGetter(
     classCollectionFields: classCollectionFields,
     environmentFields: environmentFields,
     collectionFields: collectionFields,
+    widgetBoundFields: widgetBoundFields,
   );
 
   return GetterModel(
@@ -204,6 +207,7 @@ GetterModel? readSolidStateGetter(
   bool isBlockBody,
   List<String> trackedNames,
   List<String> trackedQueryNames,
+  List<CrossClassDep> trackedCrossClassNames,
   bool selfCycleFound,
 })
 _readReactiveBody(
@@ -219,6 +223,7 @@ _readReactiveBody(
   Map<String, Set<String>> classCollectionFields = const {},
   Map<String, String> environmentFields = const {},
   Set<String> collectionFields = const {},
+  Set<String> widgetBoundFields = const {},
 }) {
   final AstNode node;
   final bool isBlockBody;
@@ -241,6 +246,7 @@ _readReactiveBody(
     classCollectionFields: classCollectionFields,
     environmentFields: environmentFields,
     collectionFields: collectionFields,
+    widgetBoundFields: widgetBoundFields,
   );
   // Zero-deps Effect / Computed are rejected. A reactive dep is either a
   // `.value`-rewritten state read, a tracked query-call invocation, OR a
@@ -263,6 +269,7 @@ _readReactiveBody(
     isBlockBody: isBlockBody,
     trackedNames: result.trackedReadNames,
     trackedQueryNames: result.trackedQueryNames,
+    trackedCrossClassNames: result.trackedCrossClassReadNames,
     selfCycleFound: result.selfCycleFound,
   );
 }
@@ -291,6 +298,7 @@ EffectModel? readSolidEffectMethod(
   Map<String, Set<String>> classCollectionFields = const {},
   Map<String, String> environmentFields = const {},
   Set<String> collectionFields = const {},
+  Set<String> widgetBoundFields = const {},
 }) {
   if (decl.isGetter || decl.isSetter || decl.isStatic) return null;
   final annotation = findAnnotationByName(solidEffectName, decl.metadata);
@@ -305,6 +313,7 @@ EffectModel? readSolidEffectMethod(
     :isBlockBody,
     trackedNames: _,
     trackedQueryNames: _,
+    trackedCrossClassNames: _,
     selfCycleFound: _,
   ) = _readReactiveBody(
     decl.body,
@@ -323,6 +332,7 @@ EffectModel? readSolidEffectMethod(
     classCollectionFields: classCollectionFields,
     environmentFields: environmentFields,
     collectionFields: collectionFields,
+    widgetBoundFields: widgetBoundFields,
   );
 
   return EffectModel(
@@ -357,6 +367,7 @@ QueryModel? readSolidQueryMethod(
   Map<String, Set<String>> classRegistry = const {},
   Map<String, Set<String>> classCollectionFields = const {},
   Map<String, String> environmentFields = const {},
+  Set<String> widgetBoundFields = const {},
   Set<String> collectionFields = const {},
 }) {
   if (decl.isGetter || decl.isSetter || decl.isStatic) return null;
@@ -383,6 +394,7 @@ QueryModel? readSolidQueryMethod(
     :isBlockBody,
     :trackedNames,
     :trackedQueryNames,
+    :trackedCrossClassNames,
     :selfCycleFound,
   ) = _readReactiveBody(
     decl.body,
@@ -399,6 +411,7 @@ QueryModel? readSolidQueryMethod(
     classCollectionFields: classCollectionFields,
     environmentFields: environmentFields,
     collectionFields: collectionFields,
+    widgetBoundFields: widgetBoundFields,
   );
 
   // A self-cycle is rejected at codegen — solidart would re-run
@@ -424,6 +437,7 @@ QueryModel? readSolidQueryMethod(
     isStream: returnTypeName == streamLexeme,
     trackedSignalNames: trackedNames,
     trackedQueryNames: trackedQueryNames,
+    trackedCrossClassSignalNames: trackedCrossClassNames,
     annotationName: extractNameArgument(annotation),
     debounce: extractDebounceArgument(annotation, source),
     useRefreshing: extractUseRefreshingArgument(annotation),

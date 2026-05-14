@@ -59,6 +59,7 @@ RewriteResult rewritePlainClass(
   List<EnvironmentModel> solidEnvironments,
   Map<String, Set<String>> classRegistry,
   Map<String, Set<String>> classCollectionFields,
+  Map<String, Map<String, String>> classFieldTypes,
   String source,
 ) {
   final className = classDecl.name.lexeme;
@@ -97,6 +98,11 @@ RewriteResult rewritePlainClass(
   final queryInnerTypeTexts = solidQueries.isEmpty
       ? const <String, String>{}
       : {for (final q in solidQueries) q.methodName: q.innerTypeText};
+  // Plain classes cannot host `@SolidEnvironment` fields (the target
+  // validator rejects them upstream), so cross-class signal deps in a
+  // `@SolidQuery` body cannot reach a same-host env-receiver — pass the
+  // empty default so the emitter's cross-class branches are no-ops.
+  const environmentFields = <String, String>{};
   final reactiveNames = <String>{
     ...fieldByName.keys,
     ...getterByName.keys,
@@ -174,6 +180,8 @@ RewriteResult rewritePlainClass(
           query,
           reactiveTypeTexts,
           queryInnerTypeTexts,
+          environmentFields,
+          classFieldTypes,
           pieces,
           disposeNames,
         );

@@ -1,5 +1,11 @@
 import 'package:meta/meta.dart';
 
+/// One cross-class signal dependency reached through an `@SolidEnvironment`
+/// receiver — `<envField>.<name>` shape. Shared by [QueryModel] and
+/// `ValueRewriteResult.trackedCrossClassReadNames` so both layers carry the
+/// same shape end-to-end.
+typedef CrossClassDep = ({String envField, String name});
+
 /// Parsed description of one `@SolidQuery`-annotated method.
 ///
 /// Populated by `annotation_reader.dart` from unresolved AST and consumed by
@@ -27,6 +33,7 @@ class QueryModel {
     this.isStream = false,
     this.trackedSignalNames = const [],
     this.trackedQueryNames = const [],
+    this.trackedCrossClassSignalNames = const [],
     this.debounce,
     this.useRefreshing,
     this.annotationName,
@@ -105,10 +112,26 @@ class QueryModel {
   /// rejects self-cycles upstream with a clear error.
   final List<String> trackedQueryNames;
 
-  /// Combined dep count: sum of state and query reads in tracked position.
-  /// Drives the wiring branches (zero / one / many).
+  /// Cross-class `@SolidState` dependencies read in the query body via an
+  /// `@SolidEnvironment` receiver — `(envField, signalName)` pairs in
+  /// source-first-appearance order, deduplicated. Drives `Resource.source:`
+  /// synthesis the same way [trackedSignalNames] does: a single dep is passed
+  /// directly as `source: <envField>.<signalName>`; two or more deps (of any
+  /// mix across the three tracked-name lists) synthesize the Record-Computed
+  /// source where this entry contributes element type
+  /// `classFieldTypes[environmentFields[envField]][signalName]` and read
+  /// expression `<envField>.<signalName>.value`.
+  ///
+  /// Populated by `readSolidQueryMethod` from
+  /// [`ValueRewriteResult.trackedCrossClassReadNames`].
+  final List<CrossClassDep> trackedCrossClassSignalNames;
+
+  /// Combined dep count: sum of state, query, and cross-class reads in
+  /// tracked position. Drives the wiring branches (zero / one / many).
   int get totalTrackedDeps =>
-      trackedSignalNames.length + trackedQueryNames.length;
+      trackedSignalNames.length +
+      trackedQueryNames.length +
+      trackedCrossClassSignalNames.length;
 
   /// True when [totalTrackedDeps] is two or more — i.e. the rewriter must
   /// synthesize a Record-Computed `source:` field. Single-dep queries pass
