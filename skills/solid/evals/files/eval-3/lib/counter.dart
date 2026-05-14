@@ -24,7 +24,9 @@ class _CounterPageState extends State<CounterPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('My Counter')), // user's mis-edit, will be overwritten
+      appBar: AppBar(
+        title: const Text('My Counter'),
+      ), // user's mis-edit, will be overwritten
       body: Center(
         child: SignalBuilder(
           builder: (context, _) => Text('Counter is ${counter.value}'),
