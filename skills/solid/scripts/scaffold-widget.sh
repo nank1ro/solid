@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Scaffold a starter Solid widget under source/<snake_case>.dart.
+#
 # Usage: scaffold-widget.sh <PascalCaseName> [--state|--query|--env]
+#
 # Run from the package root. Refuses to overwrite an existing file.
 
 set -eu
@@ -34,7 +36,7 @@ fi
 
 mkdir -p source
 
-# PascalCase -> snake_case (e.g. CounterPage -> counter_page)
+# PascalCase -> snake_case (CounterPage -> counter_page).
 snake="$(printf '%s' "$name" \
   | sed -E 's/([a-z0-9])([A-Z])/\1_\2/g; s/([A-Z]+)([A-Z][a-z])/\1_\2/g' \
   | tr '[:upper:]' '[:lower:]')"

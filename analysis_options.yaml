@@ -1,5 +1,10 @@
 include: package:very_good_analysis/analysis_options.yaml
 analyzer:
+  exclude:
+    # Solid skill eval fixtures: template project skeletons used by
+    # skill-creator's eval runner. They reference flutter_lints, which the
+    # workspace doesn't resolve, and they aren't real source to be analyzed.
+    - skills/solid/evals/files/**
   errors:
     always_put_required_named_parameters_first: ignore
     package_names: ignore

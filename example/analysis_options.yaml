@@ -6,6 +6,7 @@ analyzer:
     invalid_annotation_target: ignore
     avoid_print: ignore
     unnecessary_statements: ignore
+    always_use_package_imports: ignore
 linter:
   rules:
     public_member_api_docs: false

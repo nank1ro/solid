@@ -8,9 +8,10 @@ Common errors and fixes. Source: <https://solid.mariuti.com/faq> plus the "commo
 | --- | --- | --- |
 | Edits to a file under `lib/` keep disappearing on save | `lib/` is generated; `build_runner watch` rewrites it from `source/`. | Move the change to the matching `source/<x>.dart`. |
 | `lib/<x>.dart` not produced | `source/**` not in `build.yaml` `targets.$default.sources`. | Add `- source/**` to the sources list. |
-| Generator errors complain about stale outputs | Old `.g.dart` / `lib/` files conflict with regeneration. | `dart run build_runner build --delete-conflicting-outputs` (or `watch ...`). |
+| Generator errors complain about stale outputs | Old `.g.dart` / `lib/` files conflict with regeneration. | `dart run build_runner build --delete-conflicting-outputs` (or `watch ...`). Or run `scripts/verify.sh`. |
 | `flutter run` doesn't pick up a `build_runner` rewrite | No IDE save event fires for filesystem changes. | Press `r` in the `flutter run` terminal, or use [`dashmonx`](https://pub.dev/packages/dashmonx) (`dashmonx -d chrome` etc.). |
 | Working with another generator (`freezed`, `json_serializable`, …) and only Solid runs | `build.yaml` `sources` list missing `lib/**` or `$package$`. | Use the full block: `- lib/**`, `- $package$`, `- source/**`. Run `dart run build_runner watch --delete-conflicting-outputs` once. |
+| Generated `lib/` files are missing `const`, have unused imports, or use absolute `package:` imports | The generator prioritises correctness over polish; lint-driven fixes aren't applied. | Run `dart fix --apply` after `build_runner` — or use `scripts/verify.sh` which chains them. Apply in CI too. |
 
 ## Annotation rejections
 
@@ -21,6 +22,7 @@ Common errors and fixes. Source: <https://solid.mariuti.com/faq> plus the "commo
 | `late` field with `@SolidState` never gets a value | A `late` `@SolidState` field needs an initializer site (or to be assigned before first read). | Either initialize at declaration or assign before read; or make the type nullable. |
 | `@SolidQuery() Future<String> fetchData(int id) async {...}` rejected | Queries cannot have parameters. | Move the input into a `@SolidState` field; the query auto-re-runs when it changes. See `references/patterns.md` §5. |
 | `@SolidEnvironment() Counter counter;` errors at first read | Lookup is lazy and needs `late`. | Mark the field `late`: `@SolidEnvironment() late Counter counter;`. |
+| Generator rejects `import 'package:<self>/foo.dart';` from a `source/` file | Same-package imports inside `source/` must be relative — `package:` resolves to the generated `lib/` realm. | Use a relative import: `import '../path/to/foo.dart';`. |
 
 ## Runtime
 
@@ -37,3 +39,4 @@ Common errors and fixes. Source: <https://solid.mariuti.com/faq> plus the "commo
 | --- | --- | --- |
 | `must_be_immutable` lint fires on every Solid widget | The `StatelessWidget` you write holds mutable fields. The generated widget is immutable. | In `analysis_options.yaml`: `analyzer.errors.must_be_immutable: ignore`. |
 | `public_member_api_docs` lint fires everywhere in `source/` | Solid's recommended setup disables it. | In `analysis_options.yaml`: `linter.rules.public_member_api_docs: false`. |
+| Lints complain about `package:<self>/...` imports inside `source/` | Same-package imports must be relative. | Set `linter.rules.always_use_package_imports: false` and `linter.rules.prefer_relative_imports: true`. |
