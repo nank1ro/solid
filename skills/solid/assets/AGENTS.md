@@ -22,7 +22,7 @@ You write a `StatelessWidget` with these annotations on members; the generator r
 
 - `@SolidState()` — reactive field, getter (derived state). **Not** valid on `final`, `static`, or methods.
 - `@SolidEffect()` — `void` method that re-runs when its tracked reads change.
-- `@SolidQuery()` — `Future<T>` / `Stream<T>` method. **No parameters** — read `@SolidState` fields from the body to make it react. Optional `debounce: Duration(...)`.
+- `@SolidQuery()` — `Future<T>` / `Stream<T>` method. **No parameters** — read `@SolidState` fields from the body to make it react. Options: `debounce: Duration(...)` waits N after the last input change before re-running; `useRefreshing: true` (default) keeps the resource on its previous value while refetching with `.isRefreshing == true` for smoother UX, `useRefreshing: false` drops back to the `loading` state on every re-execution.
 - `@SolidEnvironment()` — `late` field bound to the nearest ancestor `Provider<T>`. **`late` is required.**
 - `.untracked` — read a `@SolidState` field without registering a dependency. In string interpolation, only `'${x.untracked}'` works (not `'$x.untracked'`).
 
