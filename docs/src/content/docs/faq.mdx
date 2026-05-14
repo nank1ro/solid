@@ -83,6 +83,6 @@ targets:
 
 This way, other generators will also consider the `source` directory as input.
 
-Then run `dart run build_runner watch --delete-conflicting-outputs` once — `build_runner` invokes every registered builder, so Solid runs alongside `freezed`, `json_serializable`, etc. in the same process.
+Then run `dart run build_runner watch` once — `build_runner` invokes every registered builder, so Solid runs alongside `freezed`, `json_serializable`, etc. in the same process.
 
 Write your code in the `source` directory, using `part` statements or whatever the other generators need.

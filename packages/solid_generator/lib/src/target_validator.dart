@@ -274,20 +274,8 @@ void _validateQueryMethod(MethodDeclaration method, String className) {
   if (returnName != futureLexeme && returnName != streamLexeme) {
     _rejectQuery('non-Future/Stream method', location);
   }
-  // Future<T> requires `async`. A null body keyword (expression body without
-  // `async`, e.g. `=> Future.value(0)`) is intentionally caught here —
-  // `?.lexeme` returns `null`, and `null != 'async'` is `true`. Mirrors
-  // `annotation_reader.dart`'s `?.lexeme ?? ''` pattern. Stream-form
-  // mismatches are out of scope (Stream has two valid shapes: sync-return or
-  // async*); they are exercised positively by the simple_query_with_stream
-  // golden.
-  final bodyKeyword = method.body.keyword?.lexeme;
-  if (returnName == futureLexeme && bodyKeyword != 'async') {
-    _rejectQuery(
-      'method whose body keyword does not match the return type',
-      location,
-    );
-  }
+  // Body-keyword/return-type mismatch is intentionally NOT validated; see
+  // the rejection-suite header for the rationale.
 }
 
 /// Rejects `@SolidQuery` on top-level declarations.

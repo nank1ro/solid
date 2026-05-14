@@ -21,7 +21,7 @@ log="$(mktemp -t solid-verify.XXXXXX)"
 trap 'rm -f "$log"' EXIT
 
 # Step 1: build_runner. This is the hard requirement.
-if ! dart run build_runner build --delete-conflicting-outputs >"$log" 2>&1; then
+if ! dart run build_runner build >"$log" 2>&1; then
   echo "FAIL: build_runner returned non-zero." >&2
   first_severe="$(grep -m1 '\[SEVERE\]' "$log" || true)"
   if [[ -n "$first_severe" ]]; then

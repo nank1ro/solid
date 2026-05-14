@@ -1,0 +1,22 @@
+include: package:very_good_analysis/analysis_options.yaml
+analyzer:
+  errors:
+    must_be_immutable: ignore
+    const_constructor_with_non_final_field: ignore
+    const_with_non_const: ignore
+    unnecessary_ignore: ignore
+    always_put_required_named_parameters_first: ignore
+    invalid_annotation_target: ignore
+    avoid_print: ignore
+    unnecessary_statements: ignore
+    lines_longer_than_80_chars: ignore
+    specify_nonobvious_property_types: ignore
+    discarded_futures: ignore
+    use_setters_to_change_properties: ignore
+    deprecated_member_use: ignore
+    avoid_equals_and_hash_code_on_mutable_classes: ignore
+linter:
+  rules:
+    public_member_api_docs: false
+    always_use_package_imports: false
+    prefer_relative_imports: true

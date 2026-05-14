@@ -41,7 +41,7 @@ When you install a pub package whose docs say "create `lib/<x>.dart`" (go_router
 After editing anything under `source/`:
 
 ```bash
-dart run build_runner build --delete-conflicting-outputs
+dart run build_runner build
 dart fix --apply
 ```
 

@@ -132,13 +132,13 @@ If `pubspec.yaml` doesn't yet declare Solid, install it:
    ```
 4. In `source/main.dart`, set `SolidartConfig.autoDispose = false;` before `runApp(...)`. (Temporary — will become the default in a future `flutter_solidart` major release.)
 5. In `analysis_options.yaml`, add `analyzer.errors.must_be_immutable: ignore` (your source widgets are mutable; the generated ones are immutable).
-6. Run `dart run build_runner watch --delete-conflicting-outputs` during development.
+6. Run `dart run build_runner watch` during development.
 
 ## Verify your changes
 
 After writing or editing `source/`, regenerate `lib/` and apply lint fixes:
 
-- **`scripts/verify.sh`** — run from any package root. Runs `dart run build_runner build --delete-conflicting-outputs`, then `dart fix --apply` on the package (adds `const`, removes unused imports, applies relative-import lints). Prints PASS/FAIL plus the first `[SEVERE]` error on failure. Exit code reflects build_runner success; `dart fix` failure is non-fatal.
+- **`scripts/verify.sh`** — run from any package root. Runs `dart run build_runner build`, then `dart fix --apply` on the package (adds `const`, removes unused imports, applies relative-import lints). Prints PASS/FAIL plus the first `[SEVERE]` error on failure. Exit code reflects build_runner success; `dart fix` failure is non-fatal.
 
 Why `dart fix --apply` matters: the generator prioritises correct, runnable code over polish. The emitted `lib/` may miss `const` opportunities, leave unused imports, or pick a non-preferred import form. `dart fix --apply` cleans this up using the project's lint rules (`prefer_const_constructors`, `unnecessary_import`, `prefer_relative_imports`, …). Always run it after generation — in CI too.
 

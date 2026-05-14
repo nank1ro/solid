@@ -376,6 +376,7 @@ List<_AnnotatedClass> _collectAnnotatedClasses(
     // set independent of source order (a query A can call a query B declared
     // later).
     final queryNames = _collectClassQueryNames(decl);
+    final widgetBoundCtorNames = _collectWidgetBoundCtorNames(decl);
     for (final member in decl.members) {
       if (member is FieldDeclaration) {
         final model = readSolidStateField(member, source);
@@ -406,6 +407,7 @@ List<_AnnotatedClass> _collectAnnotatedClasses(
           classCollectionFields: crossClassCollections,
           environmentFields: environmentFieldsForBody,
           collectionFields: collectionFieldsSeen,
+          widgetBoundFields: widgetBoundCtorNames,
         );
         if (getter != null) {
           getters.add(getter);
@@ -427,6 +429,7 @@ List<_AnnotatedClass> _collectAnnotatedClasses(
           classCollectionFields: crossClassCollections,
           environmentFields: environmentFieldsForBody,
           collectionFields: collectionFieldsSeen,
+          widgetBoundFields: widgetBoundCtorNames,
         );
         if (effect != null) {
           effects.add(effect);
@@ -441,6 +444,7 @@ List<_AnnotatedClass> _collectAnnotatedClasses(
           classCollectionFields: crossClassCollections,
           environmentFields: environmentFieldsForBody,
           collectionFields: collectionFieldsSeen,
+          widgetBoundFields: widgetBoundCtorNames,
         );
         if (query != null) {
           queries.add(query);
@@ -499,6 +503,18 @@ Set<String> _collectClassQueryNames(ClassDeclaration decl) {
     (names ??= <String>{}).add(member.name.lexeme);
   }
   return names ?? const <String>{};
+}
+
+/// Per-class widget-bound ctor field names — the names that must be rewritten
+/// from `field` to `widget.field` inside reactive-member bodies that move from
+/// the source `StatelessWidget` into the lowered `State<X>`. Only meaningful
+/// for `StatelessWidget` classes; plain classes and existing `State<X>`
+/// subclasses have no Widget/State split and pass the empty default through.
+Set<String> _collectWidgetBoundCtorNames(ClassDeclaration decl) {
+  if (classKindOf(decl) != ClassKind.statelessWidget) return const <String>{};
+  return collectWidgetBoundNames(
+    decl.members.whereType<ConstructorDeclaration>(),
+  );
 }
 
 /// Renders the full `lib/` output for a file that has at least one annotated

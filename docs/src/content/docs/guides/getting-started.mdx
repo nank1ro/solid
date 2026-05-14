@@ -151,10 +151,10 @@ Run the generator with `build_runner`:
 
 ```bash
 # one-shot build
-dart run build_runner build --delete-conflicting-outputs
+dart run build_runner build
 
 # watch mode (recommended during development)
-dart run build_runner watch --delete-conflicting-outputs
+dart run build_runner watch
 ```
 
 ### Hot reload
@@ -175,7 +175,7 @@ dart fix --apply
 In CI, chain the two commands so the generated output is always lint-clean:
 
 ```bash
-dart run build_runner build --delete-conflicting-outputs
+dart run build_runner build
 dart fix --apply
 ```
 
@@ -184,5 +184,5 @@ The Solid skill (installed via the AI assistant setup above) ships a `verify.sh`
 </Aside>
 
 <Aside>
-The next chapters assume you have set up Solid in your Flutter project, created the `source` folder, and are running `dart run build_runner watch --delete-conflicting-outputs` to regenerate `lib/` on every change.
+The next chapters assume you have set up Solid in your Flutter project, created the `source` folder, and are running `dart run build_runner watch` to regenerate `lib/` on every change.
 </Aside>
