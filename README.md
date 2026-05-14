@@ -83,7 +83,11 @@ Solid ships four annotations:
 
 ## AI assistants
 
-Solid ships an agent skill at [`skills/solid/`](./skills/solid/) that teaches Claude Code, Cursor, Codex, GitHub Copilot, and other [skills.sh](https://skills.sh)-compatible agents how to write idiomatic Solid code — most importantly, that `source/` is the source of truth and `lib/` is generated. Install it with:
+Solid inverts a few Flutter conventions (most importantly, you write `source/` and `lib/` is generated), so AI tools need a heads-up to write idiomatic Solid.
+
+**Quickest path — drop in `AGENTS.md`.** Copy [`skills/solid/assets/AGENTS.md`](./skills/solid/assets/AGENTS.md) to the root of your Flutter app. Most AI coding tools (Claude Code, Cursor, Codex, GitHub Copilot, Amp, …) auto-load `AGENTS.md` at session start. Tools that look for `CLAUDE.md` instead can symlink: `ln -s AGENTS.md CLAUDE.md`.
+
+**Deeper guidance — install the full skill.** Solid also ships an agent skill at [`skills/solid/`](./skills/solid/) for [skills.sh](https://skills.sh)-compatible agents, with verify scripts and richer examples:
 
 ```bash
 npx skills add nank1ro/solid
