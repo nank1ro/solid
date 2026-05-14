@@ -27,6 +27,7 @@ RewriteResult rewriteStatelessWidget(
   List<EnvironmentModel> solidEnvironments,
   Map<String, Set<String>> classRegistry,
   Map<String, Set<String>> classCollectionFields,
+  Map<String, Map<String, String>> classFieldTypes,
   String source,
 ) {
   final className = classDecl.name.lexeme;
@@ -108,6 +109,8 @@ RewriteResult rewriteStatelessWidget(
     solidEffects,
     solidQueries,
     solidEnvironments,
+    environmentFields,
+    classFieldTypes,
   );
 
   final widgetClass = _emitWidgetClass(
@@ -216,6 +219,8 @@ _emitReactiveBlock(
   List<EffectModel> solidEffects,
   List<QueryModel> solidQueries,
   List<EnvironmentModel> solidEnvironments,
+  Map<String, String> environmentFields,
+  Map<String, Map<String, String>> classFieldTypes,
 ) {
   final fieldByName = {for (final f in solidFields) f.fieldName: f};
   final envByName = {for (final e in solidEnvironments) e.fieldName: e};
@@ -274,6 +279,8 @@ _emitReactiveBlock(
             q,
             reactiveTypeTexts,
             queryInnerTypeTexts,
+            environmentFields,
+            classFieldTypes,
             lines,
             disposeNames,
           );

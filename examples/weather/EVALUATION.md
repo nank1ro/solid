@@ -281,17 +281,33 @@ shorthand — both are removed and print a warning if passed. Six docs/script fi
 were updated to drop the flag; the user's auto-memory was updated to match. Output
 deletion happens implicitly.
 
+### Cross-class type imports (Fix 4 landed)
+
+When a `@SolidQuery` body reads a cross-class signal via an `@SolidEnvironment`
+receiver (e.g. `units.tempUnit`), the synthesized Record-Computed names the
+field's declared type (`TempUnit`) textually in `lib/`:
+
+```dart
+late final _weatherSource = Computed<(TempUnit, WindUnit)>(...);
+```
+
+In v1 of the cross-class fix the user had to import `domain/units.dart` in
+the source file with `// ignore: unused_import`, because the source body
+never spelled the type. The generator now auto-injects the missing import
+into the consumer's lib output during the cross-file resolution pass —
+relative form, deduped against existing source-side imports by resolved
+`AssetId`. The source files have no extra imports and no ignores. Verified
+via two regression goldens:
+`packages/solid_generator/test/golden/inputs/query_with_cross_class_signal_unimported_type/`
+and `…_already_imported_type/`.
+
 ### `flutter analyze` flagged numerous post-build infos that needed file-level ignores
 
 To get a clean `dart analyze --fatal-infos` (CI's strictness), the following had to
-be added to `analysis_options.yaml` beyond what `examples/todos` already specifies
-(the `document_ignores: ignore` originally needed for the Fix 1 workaround was
-removed after the fix landed):
+be added to `analysis_options.yaml` beyond what `examples/todos` already specifies:
 
 - `discarded_futures: ignore` — for `current.refresh(); hourly.refresh();` inside
   sync `onPressed` callbacks.
-- `document_ignores: ignore` — for the `// ignore: undefined_identifier` lines
-  applied as the `widget.city` workaround.
 - `use_setters_to_change_properties: ignore` — for `void setTempUnit(TempUnit unit) => tempUnit = unit;` in `UnitsController`.
 - `deprecated_member_use: ignore` — `RadioListTile.groupValue` is deprecated post
   Flutter 3.32 in favour of `RadioGroup`. Suppressed rather than migrated to keep

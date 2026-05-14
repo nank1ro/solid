@@ -6,6 +6,7 @@ import '../controllers/units_controller.dart';
 import '../domain/city.dart';
 import '../domain/current_weather.dart';
 import '../domain/forecast.dart';
+import '../domain/units.dart';
 import '../widgets/weather_icon.dart';
 
 class CityDetailPage extends StatefulWidget {
@@ -20,6 +21,10 @@ class CityDetailPage extends StatefulWidget {
 class _CityDetailPageState extends State<CityDetailPage> {
   late final api = context.read<WeatherApi>();
   late final units = context.read<UnitsController>();
+  late final _currentSource = Computed<(TempUnit, WindUnit)>(
+    () => (units.tempUnit.value, units.windUnit.value),
+    name: '_currentSource',
+  );
   late final current = Resource<CurrentWeather>(
     () => api.currentWeather(
       lat: widget.city.lat,
@@ -27,6 +32,7 @@ class _CityDetailPageState extends State<CityDetailPage> {
       tempUnit: units.tempUnit.value,
       windUnit: units.windUnit.value,
     ),
+    source: _currentSource,
     name: 'current',
   );
   late final hourly = Resource<Forecast>(
@@ -35,6 +41,7 @@ class _CityDetailPageState extends State<CityDetailPage> {
       lon: widget.city.lon,
       tempUnit: units.tempUnit.value,
     ),
+    source: units.tempUnit,
     name: 'hourly',
   );
 
@@ -42,6 +49,7 @@ class _CityDetailPageState extends State<CityDetailPage> {
   void dispose() {
     hourly.dispose();
     current.dispose();
+    _currentSource.dispose();
     super.dispose();
   }
 
@@ -130,6 +138,10 @@ class _CurrentSection extends StatefulWidget {
 class __CurrentSectionState extends State<_CurrentSection> {
   late final units = context.read<UnitsController>();
   late final api = context.read<WeatherApi>();
+  late final _currentSource = Computed<(TempUnit, WindUnit)>(
+    () => (units.tempUnit.value, units.windUnit.value),
+    name: '_currentSource',
+  );
   late final current = Resource<CurrentWeather>(
     () => api.currentWeather(
       lat: widget.city.lat,
@@ -137,12 +149,14 @@ class __CurrentSectionState extends State<_CurrentSection> {
       tempUnit: units.tempUnit.value,
       windUnit: units.windUnit.value,
     ),
+    source: _currentSource,
     name: 'current',
   );
 
   @override
   void dispose() {
     current.dispose();
+    _currentSource.dispose();
     super.dispose();
   }
 

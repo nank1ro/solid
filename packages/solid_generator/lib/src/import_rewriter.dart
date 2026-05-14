@@ -94,6 +94,7 @@ List<String> computeOutputImports(
   required bool addSolidart,
   required bool referencesSolidAnnotations,
   bool addProvider = false,
+  Iterable<String> extraImports = const [],
 }) {
   final result = [
     for (final uri in sourceImports)
@@ -106,6 +107,9 @@ List<String> computeOutputImports(
   }
   if (addProvider && !result.contains(providerUri)) {
     result.add(providerUri);
+  }
+  for (final uri in extraImports) {
+    if (!result.contains(uri)) result.add(uri);
   }
   result.sort(_compareImportUris);
   return result;

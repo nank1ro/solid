@@ -854,6 +854,54 @@ late final scaledTick = Resource<double>(
 );
 ```
 
+Input (Future form, body reads cross-class signals through an `@SolidEnvironment` receiver — direct source for one, synthesized Record-Computed source for two or more):
+
+```dart
+class Settings {
+  @SolidState() int factor = 1;
+  @SolidState() String? prefix;
+}
+
+class ValueCard extends StatelessWidget {
+  ValueCard({super.key});
+
+  @SolidEnvironment()
+  late Settings settings;
+
+  @SolidQuery()
+  Future<String> fetchValue() async =>
+      '${settings.prefix ?? ''}${10 * settings.factor}';
+
+  @override
+  Widget build(BuildContext context) => const Placeholder();
+}
+```
+
+Output:
+
+```dart
+late final settings = context.read<Settings>();
+late final _fetchValueSource = Computed<(String?, int)>(
+  () => (settings.prefix.value, settings.factor.value),
+  name: '_fetchValueSource',
+);
+late final fetchValue = Resource<String>(
+  () async => '${settings.prefix.value ?? ''}${10 * settings.factor.value}',
+  source: _fetchValueSource,
+  name: 'fetchValue',
+);
+```
+
+For a single cross-class signal dep the `source:` is emitted directly as `<envField>.<signalName>` — no Computed wrapper:
+
+```dart
+@SolidQuery()
+Future<int> fetchValue() async => 10 * settings.factor;
+// → source: settings.factor
+```
+
+The cross-class field's declared type (e.g. `int`, `String?`) appears textually in the synthesized Computed Record. The generator auto-injects the matching import into the consumer's lib output (in relative form), so the user's source file does not need to import the type or add any `// ignore: unused_import` directive — see rule 5 above for the synthesis details.
+
 Stream form:
 
 ```dart
@@ -915,20 +963,24 @@ Rules:
 
 4. **Body rewrite.** The original method's body is wrapped in a parameterless function expression preserving the `async` / `async*` keyword (or returning a `Stream<T>` directly for the synchronous Stream form). Section 5.1 type-driven `.value` rewrite applies inside the body so any `@SolidState` field / getter reads are correctly unboxed.
 
-5. **Auto-tracking — direct source for one dep, synthesized Record-Computed for multiple.** The body's tracked reads determine the Resource's `source:` argument. Two read kinds participate, accumulated in source-first-appearance order:
+5. **Auto-tracking — direct source for one dep, synthesized Record-Computed for multiple.** The body's tracked reads determine the Resource's `source:` argument. Three read kinds participate, each accumulated in source-first-appearance order in its own list; the three lists are concatenated as `[state, query, cross-class]` to form the merged tuple:
 
-   - **Reactive identifier reads** — bare identifiers (or chains) whose resolved static type is `SignalBase<T>`: same-class `@SolidState` fields and getters (M1 / Section 4.5).
-   - **Query-call reads** — zero-argument `MethodInvocation`s whose target is a bare `SimpleIdentifier` matching another `@SolidQuery` method on the same class, not shadowed by a local. Tear-offs (`<queryName>.refresh()`) and untracked reads (`<queryName>().untracked` — Section 6.4) are excluded.
+   - **Same-class reactive identifier reads** — bare identifiers (or chains) whose resolved static type is `SignalBase<T>`: same-class `@SolidState` fields and getters (M1 / Section 4.5).
+   - **Same-class query-call reads** — zero-argument `MethodInvocation`s whose target is a bare `SimpleIdentifier` matching another `@SolidQuery` method on the same class, not shadowed by a local. Tear-offs (`<queryName>.refresh()`) and untracked reads (`<queryName>().untracked` — Section 6.4) are excluded.
+   - **Cross-class signal reads through an `@SolidEnvironment` receiver** — `<envField>.<signalName>` chains where `<envField>` is an `@SolidEnvironment` field on the enclosing class and `<signalName>` is a `@SolidState` field/getter on the env-field's declared type. The Signal lives on the injected instance; the Resource needs a stable reference to it as `source:` to re-fetch on changes. Collection-typed cross-class signals (`ListSignal` / `SetSignal` / `MapSignal`) are excluded — their mutation-notification model is mixin-driven, not `source:`-driven; queries that depend on collection contents must read a scalar signal that re-emits on collection change, or call `.refresh()` explicitly.
 
-   Wiring depends on the count of accumulated tracked reads:
+   Wiring depends on the total count of accumulated tracked reads across all three kinds:
 
    - **Zero tracked reads**: no `source:` argument emitted; the Resource only refreshes via explicit `.refresh()` calls.
-   - **One tracked read**: the read identifier is passed directly as `source: <name>`. No synthesized field is emitted — wrapping a single observable in a Computed that just returns its `.value` would be a no-op, so the generator skips it. The upstream `Resource<T>` constructor accepts any `SignalBase<dynamic>` as `source:`; `Signal<T>` / `Computed<T>` qualify, and `Resource<T>` qualifies because `Resource<T>` extends `Signal<ResourceState<T>>`.
+   - **One tracked read**: the read is passed directly as `source: <expr>` with no synthesized wrapper Computed (a single-observable Computed wrapper would be a no-op). For a same-class state or query dep, `<expr>` is the bare identifier; for a cross-class signal dep, `<expr>` is the dotted form `<envField>.<signalName>` — that expression evaluates to the Signal object reachable through the env-injected receiver. The upstream `Resource<T>` constructor accepts any `SignalBase<dynamic>` as `source:`; `Signal<T>` / `Computed<T>` qualify, and `Resource<T>` qualifies because `Resource<T>` extends `Signal<ResourceState<T>>`.
    - **Two or more tracked reads**: the generator synthesizes a `late final _<name>Source = Computed<(E1, E2, …)>(() => (e1, e2, …), name: '<name>_source')` field whose value is a `Record` combining all tracked values. The Computed is passed as `source: _<name>Source`. For each tracked read:
-     - A reactive identifier read of type `Signal<X>` / `Computed<X>` contributes element type `X` and read expression `<name>.value`.
-     - A query-call read of inner type `X` contributes element type `ResourceState<X>` and read expression `<queryName>.state`. (`Resource<X>.state` is the canonical accessor; reading it inside a `Computed` closure subscribes to the upstream Resource's emissions because `Resource<X>` extends `Signal<ResourceState<X>>`.)
+     - A same-class reactive identifier read of type `Signal<X>` / `Computed<X>` contributes element type `X` and read expression `<name>.value`.
+     - A same-class query-call read of inner type `X` contributes element type `ResourceState<X>` and read expression `<queryName>.state`. (`Resource<X>.state` is the canonical accessor; reading it inside a `Computed` closure subscribes to the upstream Resource's emissions because `Resource<X>` extends `Signal<ResourceState<X>>`.)
+     - A cross-class signal read `<envField>.<signalName>` of type `Signal<X>` / `Computed<X>` contributes element type `X` (resolved through the env-field's declared type and the cross-class registry) and read expression `<envField>.<signalName>.value`.
 
      Records compare by value-equality, so changing ANY tracked observable flips the Record's identity, the Resource sees its source change, and the fetcher re-runs (subject to any `debounce:` delay). The synthesized field is the only reason an underscore-prefixed Resource-related declaration ever appears in lowered output.
+
+   Cross-class signal types named in the synthesized Record (`X` in `Computed<(…, X, …)>`) become visible in `lib/` automatically. During the cross-file resolution pass the generator scans the env-field class's own imports; for each `@SolidState` field on the cross-class whose declared type is not declared in that same file, it captures the file's same-package import URIs as candidate origins. When emitting the consumer's lib output, the generator injects each captured URI (rewritten to the relative form from the consumer's lib location, so `prefer_relative_imports` stays satisfied) directly into the import block. The user's `source/` file does NOT import the type and does NOT need any `// ignore: unused_import` directives. Imports already declared on the source side are deduped by resolved `AssetId`, so adding an explicit import in source remains valid and never produces a duplicate. Cross-package types (declared in a third-party package) are out of scope for the auto-injection pass — those still require the developer to import the type explicitly.
 
    A self-cycle — a query whose body invokes itself — is rejected at codegen time with a clear error. Inter-query cycles (A reads B, B reads A) are not validated at codegen time; they surface as a runtime error from `flutter_solidart`.
 

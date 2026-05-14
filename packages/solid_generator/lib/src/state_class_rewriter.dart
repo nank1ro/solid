@@ -41,6 +41,7 @@ RewriteResult rewriteStateClass(
   List<EnvironmentModel> solidEnvironments,
   Map<String, Set<String>> classRegistry,
   Map<String, Set<String>> classCollectionFields,
+  Map<String, Map<String, String>> classFieldTypes,
   String source,
 ) {
   final className = classDecl.name.lexeme;
@@ -176,6 +177,8 @@ RewriteResult rewriteStateClass(
           query,
           reactiveTypeTexts,
           queryInnerTypeTexts,
+          environmentFields,
+          classFieldTypes,
           pieces,
           disposeNames,
         );

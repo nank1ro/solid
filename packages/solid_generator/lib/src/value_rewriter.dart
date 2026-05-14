@@ -1,5 +1,6 @@
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/dart/ast/visitor.dart';
+import 'package:solid_generator/src/query_model.dart';
 import 'package:solid_generator/src/transformation_error.dart';
 
 /// A single value-level edit emitted by [collectValueEdits].
@@ -28,12 +29,14 @@ class ValueEdit {
 /// callbacks or `<field>.untracked` reads are excluded.
 class ValueRewriteResult {
   /// Creates a result holding [edits], [trackedReadNamesByOffset],
-  /// [trackedReadNames], [trackedQueryNames], and [selfCycleFound].
+  /// [trackedReadNames], [trackedQueryNames], [trackedCrossClassReadNames],
+  /// and [selfCycleFound].
   const ValueRewriteResult(
     this.edits,
     this.trackedReadNamesByOffset,
     this.trackedReadNames,
     this.trackedQueryNames,
+    this.trackedCrossClassReadNames,
     // Positional to keep the constructor signature consistent with the
     // list/map-typed args above; the field is single-use sentinel data.
     // ignore: avoid_positional_boolean_parameters
@@ -61,6 +64,17 @@ class ValueRewriteResult {
   /// `ResourceState<T>` (read via `<name>.state`) to the synthesized
   /// Record-Computed source.
   final List<String> trackedQueryNames;
+
+  /// Cross-class `@SolidState` reads — `<envField>.<signalName>` shapes where
+  /// `<envField>` is an `@SolidEnvironment` field on the enclosing class and
+  /// `<signalName>` is a `@SolidState` field/getter on the env-field's type.
+  /// Source-first-appearance order, deduplicated. Drives `Resource.source:`
+  /// synthesis for `@SolidQuery` bodies that depend on cross-class signals;
+  /// the same Signal would otherwise be read via `.value` (subscribing
+  /// `Computed`/`Effect` bodies at runtime) but a Resource needs an explicit
+  /// `source:` to re-fetch on dependency changes. Disjoint from
+  /// [trackedReadNames] (which is same-class only).
+  final List<CrossClassDep> trackedCrossClassReadNames;
 
   /// True if the visitor saw a zero-arg call to its own [collectValueEdits]
   /// `currentMember` — i.e. a `@SolidQuery` body invokes itself. Consumed
@@ -168,6 +182,7 @@ ValueRewriteResult collectValueEdits(
     visitor.trackedReadNamesByOffset,
     visitor.trackedReadNames,
     visitor.trackedQueryNames,
+    visitor.trackedCrossClassReadNames,
     visitor.selfCycleFound,
   );
 }
@@ -308,6 +323,13 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
   /// Same-class `@SolidQuery` method names invoked as tracked zero-arg
   /// calls. Source-first-appearance order, deduplicated.
   final List<String> trackedQueryNames = [];
+
+  /// Cross-class `@SolidState` reads in tracked position —
+  /// `<envField>.<signalName>` pairs where the prefix is an
+  /// `@SolidEnvironment` field on the enclosing class and the property is a
+  /// `@SolidState` field/getter on the env-field's declared type.
+  /// Source-first-appearance order, deduplicated by pair.
+  final List<CrossClassDep> trackedCrossClassReadNames = [];
 
   /// Set true when the body invokes [_currentMember] as a zero-arg tracked
   /// call — a self-cycle. The reader checks this and throws.
@@ -508,12 +530,19 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
     // record an offset so SignalBuilder placement wraps the surrounding
     // subtree (see [_trackedSignalApiGetters]).
     final outerParent = node.parent;
+    final isEnvReceiver = _environmentFields.containsKey(node.prefix.name);
     if (outerParent is PropertyAccess &&
         outerParent.target == node &&
         _signalApiGetters.contains(outerParent.propertyName.name)) {
       if (_trackedSignalApiGetters.contains(outerParent.propertyName.name) &&
           _untrackedDepth == 0) {
         _recordTrackedRead(node.offset, node.identifier.name);
+        if (isEnvReceiver) {
+          _recordTrackedCrossClassRead(
+            node.prefix.name,
+            node.identifier.name,
+          );
+        }
       }
       return;
     }
@@ -534,6 +563,19 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
     }
     if (_untrackedDepth == 0) {
       _recordTrackedRead(node.offset, node.identifier.name);
+      // Cross-class scalar signal reads through an `@SolidEnvironment`
+      // receiver feed `Resource.source:` synthesis for enclosing `@SolidQuery`
+      // bodies. Collection-typed signals are intentionally excluded: their
+      // mutations notify via the mixin's own listeners — a Resource that
+      // depends on a ListSignal's contents would need a deeper dep model
+      // than the `source:` Signal-reference path can express, and is
+      // deferred until a real example exercises it.
+      if (isEnvReceiver && !isCollection) {
+        _recordTrackedCrossClassRead(
+          node.prefix.name,
+          node.identifier.name,
+        );
+      }
     }
   }
 
@@ -748,6 +790,17 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
   /// exactly once to the synthesized source-Computed tuple.
   void _recordTrackedQueryName(String name) {
     if (!trackedQueryNames.contains(name)) trackedQueryNames.add(name);
+  }
+
+  /// Appends the `(envField, name)` pair to [trackedCrossClassReadNames] iff
+  /// not already present, preserving source-first-appearance order. A query
+  /// body reading the same cross-class signal at multiple offsets contributes
+  /// the pair exactly once to the synthesized source-Computed tuple.
+  void _recordTrackedCrossClassRead(String envField, String name) {
+    for (final p in trackedCrossClassReadNames) {
+      if (p.envField == envField && p.name == name) return;
+    }
+    trackedCrossClassReadNames.add((envField: envField, name: name));
   }
 
   /// True if [id] sits in receiver position of a chain access whose property

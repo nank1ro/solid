@@ -6,6 +6,7 @@ import '../controllers/cities_controller.dart';
 import '../controllers/units_controller.dart';
 import '../domain/city.dart';
 import '../domain/current_weather.dart';
+import '../domain/units.dart';
 import '../pages/city_detail_page.dart';
 import 'weather_icon.dart';
 
@@ -22,6 +23,10 @@ class _CityCardState extends State<CityCard> {
   late final api = context.read<WeatherApi>();
   late final units = context.read<UnitsController>();
   late final citiesController = context.read<CitiesController>();
+  late final _weatherSource = Computed<(TempUnit, WindUnit)>(
+    () => (units.tempUnit.value, units.windUnit.value),
+    name: '_weatherSource',
+  );
   late final weather = Resource<CurrentWeather>(
     () => api.currentWeather(
       lat: widget.city.lat,
@@ -29,12 +34,14 @@ class _CityCardState extends State<CityCard> {
       tempUnit: units.tempUnit.value,
       windUnit: units.windUnit.value,
     ),
+    source: _weatherSource,
     name: 'weather',
   );
 
   @override
   void dispose() {
     weather.dispose();
+    _weatherSource.dispose();
     super.dispose();
   }
 

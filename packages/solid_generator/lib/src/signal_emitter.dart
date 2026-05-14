@@ -212,18 +212,25 @@ String emitResourceField(QueryModel q) {
       ? 'Resource<${q.innerTypeText}>.stream'
       : 'Resource<${q.innerTypeText}>';
   // A single-observable Computed wrapper would be a no-op, so the one-dep
-  // case (whether a state Signal or an upstream Resource) passes the
-  // observable directly as `source:`. State deps come from
-  // `trackedSignalNames`; query deps come from `trackedQueryNames` and pass
-  // the upstream `Resource<T>` field directly (Resource extends Signal so it
-  // qualifies as a `SignalBase<dynamic>` source — auto-tracking of upstream
-  // queries).
+  // case (whether a state Signal, an upstream Resource, or a cross-class
+  // env-injected Signal) passes the observable directly as `source:`.
+  // State deps come from `trackedSignalNames`; query deps come from
+  // `trackedQueryNames` and pass the upstream `Resource<T>` field directly
+  // (Resource extends Signal so it qualifies as a `SignalBase<dynamic>`
+  // source — auto-tracking of upstream queries); cross-class deps come from
+  // `trackedCrossClassSignalNames` and pass `<envField>.<signalName>`,
+  // which is the Signal object reachable through the env-injected receiver.
   // `useRefreshing: true` is the upstream default and is omitted from emitted
   // output to keep generated lines short.
-  final source = switch ((q.trackedSignalNames, q.trackedQueryNames)) {
-    ([], []) => null,
-    ([final only], []) => only,
-    ([], [final only]) => only,
+  final source = switch ((
+    q.trackedSignalNames,
+    q.trackedQueryNames,
+    q.trackedCrossClassSignalNames,
+  )) {
+    ([], [], []) => null,
+    ([final only], [], []) => only,
+    ([], [final only], []) => only,
+    ([], [], [final only]) => '${only.envField}.${only.name}',
     _ => q.sourceFieldName,
   };
   final args = [
@@ -281,13 +288,17 @@ String? emitQuerySourceField(
   QueryModel q,
   Map<String, String> reactiveTypeTexts,
   Map<String, String> queryInnerTypeTexts,
+  Map<String, String> environmentFields,
+  Map<String, Map<String, String>> classFieldTypes,
 ) {
   if (!q.needsSourceComputed) return null;
   // State deps contribute element type `T` and read expression `<name>.value`;
   // query deps contribute element type `ResourceState<T>` and read expression
-  // `<name>.state`. Source order is preserved across the merged list (state
-  // names first per body appearance, then query names per body appearance —
-  // matches the visitor's two parallel name lists).
+  // `<name>.state`; cross-class deps contribute element type `T` looked up
+  // through the env-field's class registry and read expression
+  // `<envField>.<name>.value`. Source order is preserved within each list;
+  // the three lists are concatenated state → query → cross-class, matching
+  // the visitor's three parallel name lists.
   final stateTypes = q.trackedSignalNames.map((n) {
     final t = reactiveTypeTexts[n];
     if (t == null || t.isEmpty) {
@@ -316,10 +327,32 @@ String? emitQuerySourceField(
     }
     return 'ResourceState<$t>';
   }).toList();
-  final tupleType = '(${[...stateTypes, ...queryTypes].join(', ')})';
+  final crossTypes = q.trackedCrossClassSignalNames.map((p) {
+    final receiverType = environmentFields[p.envField];
+    final t = receiverType == null
+        ? null
+        : classFieldTypes[receiverType]?[p.name];
+    if (t == null || t.isEmpty) {
+      throw CodeGenerationError(
+        "@SolidQuery '${q.methodName}' depends on cross-class reactive "
+        "'${p.envField}.${p.name}' which has no explicit type annotation; "
+        'add a type to the @SolidState declaration so the synthesized '
+        'source-Computed Record type can be emitted',
+        null,
+        q.methodName,
+      );
+    }
+    return t;
+  }).toList();
+  final tupleType =
+      '(${[...stateTypes, ...queryTypes, ...crossTypes].join(', ')})';
   final stateReads = q.trackedSignalNames.map((n) => '$n.value');
   final queryReads = q.trackedQueryNames.map((n) => '$n.state');
-  final tupleExpr = '(${[...stateReads, ...queryReads].join(', ')})';
+  final crossReads = q.trackedCrossClassSignalNames.map(
+    (p) => '${p.envField}.${p.name}.value',
+  );
+  final tupleExpr =
+      '(${[...stateReads, ...queryReads, ...crossReads].join(', ')})';
   final fieldName = q.sourceFieldName;
   return '  late final $fieldName = '
       "Computed<$tupleType>(() => $tupleExpr, name: '$fieldName');";
@@ -340,6 +373,8 @@ void emitQueryFields(
   QueryModel q,
   Map<String, String> reactiveTypeTexts,
   Map<String, String> queryInnerTypeTexts,
+  Map<String, String> environmentFields,
+  Map<String, Map<String, String>> classFieldTypes,
   List<String> output,
   List<String> disposeNames,
 ) {
@@ -347,6 +382,8 @@ void emitQueryFields(
     q,
     reactiveTypeTexts,
     queryInnerTypeTexts,
+    environmentFields,
+    classFieldTypes,
   );
   if (sourceField != null) {
     output.add(sourceField);

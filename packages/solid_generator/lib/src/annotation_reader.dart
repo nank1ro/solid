@@ -150,6 +150,7 @@ GetterModel? readSolidStateGetter(
     :isBlockBody,
     trackedNames: _,
     trackedQueryNames: _,
+    trackedCrossClassNames: _,
     selfCycleFound: _,
   ) = _readReactiveBody(
     body,
@@ -206,6 +207,7 @@ GetterModel? readSolidStateGetter(
   bool isBlockBody,
   List<String> trackedNames,
   List<String> trackedQueryNames,
+  List<CrossClassDep> trackedCrossClassNames,
   bool selfCycleFound,
 })
 _readReactiveBody(
@@ -267,6 +269,7 @@ _readReactiveBody(
     isBlockBody: isBlockBody,
     trackedNames: result.trackedReadNames,
     trackedQueryNames: result.trackedQueryNames,
+    trackedCrossClassNames: result.trackedCrossClassReadNames,
     selfCycleFound: result.selfCycleFound,
   );
 }
@@ -310,6 +313,7 @@ EffectModel? readSolidEffectMethod(
     :isBlockBody,
     trackedNames: _,
     trackedQueryNames: _,
+    trackedCrossClassNames: _,
     selfCycleFound: _,
   ) = _readReactiveBody(
     decl.body,
@@ -390,6 +394,7 @@ QueryModel? readSolidQueryMethod(
     :isBlockBody,
     :trackedNames,
     :trackedQueryNames,
+    :trackedCrossClassNames,
     :selfCycleFound,
   ) = _readReactiveBody(
     decl.body,
@@ -432,6 +437,7 @@ QueryModel? readSolidQueryMethod(
     isStream: returnTypeName == streamLexeme,
     trackedSignalNames: trackedNames,
     trackedQueryNames: trackedQueryNames,
+    trackedCrossClassSignalNames: trackedCrossClassNames,
     annotationName: extractNameArgument(annotation),
     debounce: extractDebounceArgument(annotation, source),
     useRefreshing: extractUseRefreshingArgument(annotation),

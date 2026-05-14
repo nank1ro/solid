@@ -169,6 +169,13 @@ class _SolidBuilder implements Builder {
     // `@SolidQuery` on a sibling class in the same file.
     final sameFileRegistry = _prescanClassRegistry(parsed.unit);
     final sameFileCollections = _prescanClassCollectionFields(parsed.unit);
+    final sameFileFieldTypes = _prescanClassFieldTypes(parsed.unit);
+    // Captures, per cross-class `@SolidState` field type text, the
+    // `package:<self>/<lib-relative>` URIs that bring that type into scope
+    // on the env-field's class file. Used by [_renderOutput] to inject the
+    // import into the consumer's lib output so the synthesized
+    // `Computed<(…, T, …)>` Record-Computed resolves at lib-time.
+    final crossClassFieldTypeOriginUris = <String, Set<String>>{};
     // Cross-file resolver: walks every `package:`/relative import of the
     // current source file, redirecting same-package imports from `lib/` to
     // `source/`, and pulls in `@SolidState` member names for every class
@@ -179,6 +186,8 @@ class _SolidBuilder implements Builder {
       buildStep,
       sameFileRegistry,
       sameFileCollections,
+      sameFileFieldTypes,
+      crossClassFieldTypeOriginUris,
     );
 
     final annotatedClasses = _collectAnnotatedClasses(
@@ -216,6 +225,9 @@ class _SolidBuilder implements Builder {
       annotatedClasses,
       sameFileRegistry,
       sameFileCollections,
+      sameFileFieldTypes,
+      crossClassFieldTypeOriginUris,
+      buildStep.inputId,
       source,
     );
     await buildStep.writeAsString(outputId, transformed);
@@ -251,6 +263,44 @@ Map<String, Set<String>> _prescanClassRegistry(CompilationUnit unit) {
       }
     }
     if (names.isNotEmpty) registry[decl.name.lexeme] = names;
+  }
+  return registry;
+}
+
+/// Pre-scans every `ClassDeclaration` in [unit] and returns the cross-class
+/// **type-text** map (class name → field/getter name → declared type text).
+/// Parallel to [_prescanClassRegistry] — the same scan but with the
+/// declared type peeled out. Consumed by `emitQuerySourceField` to emit the
+/// Record element type for a `@SolidQuery` cross-class dep that reaches a
+/// sibling class's `@SolidState` field/getter through an `@SolidEnvironment`
+/// receiver.
+///
+/// Type-less declarations (no annotation on a field, no return type on a
+/// getter) are stored as the empty string — the emitter throws a clear
+/// `CodeGenerationError` at use time so the offending member can be named in
+/// the diagnostic.
+Map<String, Map<String, String>> _prescanClassFieldTypes(
+  CompilationUnit unit,
+) {
+  final registry = <String, Map<String, String>>{};
+  for (final decl in unit.declarations) {
+    if (decl is! ClassDeclaration) continue;
+    final types = <String, String>{};
+    for (final member in decl.members) {
+      if (member is FieldDeclaration) {
+        if (!member.metadata.any((a) => a.name.name == solidStateName)) {
+          continue;
+        }
+        final name = member.fields.variables.first.name.lexeme;
+        types[name] = member.fields.type?.toSource() ?? '';
+      } else if (member is MethodDeclaration && member.isGetter) {
+        if (!member.metadata.any((a) => a.name.name == solidStateName)) {
+          continue;
+        }
+        types[member.name.lexeme] = member.returnType?.toSource() ?? '';
+      }
+    }
+    if (types.isNotEmpty) registry[decl.name.lexeme] = types;
   }
   return registry;
 }
@@ -531,6 +581,9 @@ String _renderOutput(
   List<_AnnotatedClass> annotatedClasses,
   Map<String, Set<String>> classRegistry,
   Map<String, Set<String>> classCollectionFields,
+  Map<String, Map<String, String>> classFieldTypes,
+  Map<String, Set<String>> crossClassFieldTypeOriginUris,
+  AssetId inputId,
   String source,
 ) {
   // Walk `unit.declarations` in source order. Class declarations are paired
@@ -547,6 +600,7 @@ String _renderOutput(
           annotatedClasses[classIdx++],
           classRegistry,
           classCollectionFields,
+          classFieldTypes,
           source,
         )
       else
@@ -579,6 +633,29 @@ String _renderOutput(
     sourceUris.add(uri);
     sourceDirectives[uri] = directive.toSource();
   }
+  // Synthesize imports for cross-class signal types named in
+  // `@SolidQuery`-synthesized Record-Computed sources. Dedup against
+  // source-side imports by resolved `AssetId` — a relative `'types.dart'`
+  // and the synthesized `package:<self>/.../types.dart` refer to the
+  // same asset and must collapse to one import.
+  final sourceImportAssets = <AssetId>{
+    for (final uri in sourceDirectives.keys)
+      ?_resolveImportToSourceAsset(uri, inputId),
+  };
+  final extraImports = <String>{
+    for (final annotated in annotatedClasses)
+      if (annotated.queries.any(
+        (q) => q.trackedCrossClassSignalNames.isNotEmpty,
+      ))
+        ..._synthesizeExtraImports(
+          annotated,
+          classFieldTypes,
+          crossClassFieldTypeOriginUris,
+          sourceDirectives,
+          sourceImportAssets,
+          inputId,
+        ),
+  };
   final imports = computeOutputImports(
     sourceUris,
     addSolidart: results.any(
@@ -586,6 +663,7 @@ String _renderOutput(
     ),
     addProvider: annotatedClasses.any((c) => c.environments.isNotEmpty),
     referencesSolidAnnotations: referencesSolidAnnotations,
+    extraImports: extraImports,
   );
   final importBlock = imports
       .map((u) => sourceDirectives[u] ?? "import '$u';")
@@ -615,6 +693,7 @@ RewriteResult _resultForClass(
   _AnnotatedClass c,
   Map<String, Set<String>> classRegistry,
   Map<String, Set<String>> classCollectionFields,
+  Map<String, Map<String, String>> classFieldTypes,
   String source,
 ) {
   if (c.hasNoAnnotations) return _passthroughResult(c.decl, source);
@@ -627,6 +706,7 @@ RewriteResult _resultForClass(
     c.environments,
     classRegistry,
     classCollectionFields,
+    classFieldTypes,
     source,
   );
 }
@@ -657,6 +737,7 @@ RewriteResult _rewriteClass(
   List<EnvironmentModel> environments,
   Map<String, Set<String>> classRegistry,
   Map<String, Set<String>> classCollectionFields,
+  Map<String, Map<String, String>> classFieldTypes,
   String source,
 ) {
   final kind = classKindOf(decl);
@@ -672,6 +753,7 @@ RewriteResult _rewriteClass(
         environments,
         classRegistry,
         classCollectionFields,
+        classFieldTypes,
         source,
       );
     case ClassKind.plainClass:
@@ -684,6 +766,7 @@ RewriteResult _rewriteClass(
         environments,
         classRegistry,
         classCollectionFields,
+        classFieldTypes,
         source,
       );
     case ClassKind.stateClass:
@@ -696,6 +779,7 @@ RewriteResult _rewriteClass(
         environments,
         classRegistry,
         classCollectionFields,
+        classFieldTypes,
         source,
       );
     case ClassKind.statefulWidget:
@@ -732,6 +816,8 @@ Future<void> _populateCrossFileTypes(
   BuildStep step,
   Map<String, Set<String>> classRegistry,
   Map<String, Set<String>> classCollectionFields,
+  Map<String, Map<String, String>> classFieldTypes,
+  Map<String, Set<String>> crossClassFieldTypeOriginUris,
 ) async {
   // Walk every `@SolidEnvironment` field declaration in the unit. The
   // builder pre-scan does NOT pre-build env-field models — the readers do
@@ -787,6 +873,7 @@ Future<void> _populateCrossFileTypes(
       if (!wantedTypes.contains(className)) continue;
       final scalarNames = <String>{};
       final collectionNames = <String>{};
+      final fieldTypeTexts = <String, String>{};
       for (final member in decl.members) {
         if (member is FieldDeclaration) {
           final isSolidState = member.metadata.any(
@@ -796,6 +883,7 @@ Future<void> _populateCrossFileTypes(
           final variable = member.fields.variables.first;
           final fieldName = variable.name.lexeme;
           scalarNames.add(fieldName);
+          fieldTypeTexts[fieldName] = member.fields.type?.toSource() ?? '';
           // Mirror the collection-detection rule in signal_emitter.dart so
           // the cross-file collection set agrees with the same-file one:
           // collection signals are emitted for any non-nullable `List<T>`
@@ -810,7 +898,11 @@ Future<void> _populateCrossFileTypes(
           final isSolidState = member.metadata.any(
             (a) => a.name.name == solidStateName,
           );
-          if (isSolidState) scalarNames.add(member.name.lexeme);
+          if (isSolidState) {
+            scalarNames.add(member.name.lexeme);
+            fieldTypeTexts[member.name.lexeme] =
+                member.returnType?.toSource() ?? '';
+          }
         }
       }
       if (scalarNames.isNotEmpty) {
@@ -818,10 +910,132 @@ Future<void> _populateCrossFileTypes(
         if (collectionNames.isNotEmpty) {
           classCollectionFields[className] = collectionNames;
         }
+        if (fieldTypeTexts.isNotEmpty) {
+          classFieldTypes[className] = fieldTypeTexts;
+        }
+        // For each `@SolidState` field whose declared type is NOT declared
+        // inside the same class file, capture the file's same-package import
+        // URIs as candidate origins. The consumer's lib output will inject
+        // these so the synthesized Record-Computed `Computed<(…, T, …)>`
+        // resolves at lib-time even when the consumer's source never
+        // textually references `T`.
+        final declaredHere = _collectDeclaredTypeNames(imported);
+        final localCandidateUris = <String>{};
+        for (final directive
+            in imported.directives.whereType<ImportDirective>()) {
+          final uri = directive.uri.stringValue;
+          if (uri == null) continue;
+          final importedAsset = _resolveImportToSourceAsset(uri, assetId);
+          if (importedAsset == null) continue;
+          if (importedAsset.package != step.inputId.package) continue;
+          if (!importedAsset.path.startsWith('source/')) continue;
+          localCandidateUris.add(
+            _sourceToLibAsset(importedAsset).uri.toString(),
+          );
+        }
+        if (localCandidateUris.isNotEmpty) {
+          for (final entry in fieldTypeTexts.entries) {
+            final typeText = entry.value;
+            if (typeText.isEmpty) continue;
+            if (declaredHere.contains(typeText)) continue;
+            (crossClassFieldTypeOriginUris[typeText] ??= <String>{}).addAll(
+              localCandidateUris,
+            );
+          }
+        }
       }
       wantedTypes.remove(className);
     }
   }
+}
+
+/// Computes the `extraImports` contribution from a single annotated class —
+/// the cross-class signal types its `@SolidQuery` bodies name in their
+/// synthesized Record-Computed sources. Imports are returned in
+/// relative-lib form (so `prefer_relative_imports` stays satisfied) and
+/// dedup'd against the consumer's source-side imports by resolved AssetId.
+Iterable<String> _synthesizeExtraImports(
+  _AnnotatedClass annotated,
+  Map<String, Map<String, String>> classFieldTypes,
+  Map<String, Set<String>> crossClassFieldTypeOriginUris,
+  Map<String, String> sourceDirectives,
+  Set<AssetId> sourceImportAssets,
+  AssetId inputId,
+) sync* {
+  final envTypeByField = {
+    for (final env in annotated.environments) env.fieldName: env.typeText,
+  };
+  for (final query in annotated.queries) {
+    for (final dep in query.trackedCrossClassSignalNames) {
+      final envType = envTypeByField[dep.envField];
+      if (envType == null) continue;
+      final typeText = classFieldTypes[envType]?[dep.name];
+      if (typeText == null || typeText.isEmpty) continue;
+      final uris = crossClassFieldTypeOriginUris[typeText];
+      if (uris == null) continue;
+      for (final u in uris) {
+        if (sourceDirectives.containsKey(u)) continue;
+        final asset = _resolveImportToSourceAsset(u, inputId);
+        if (asset != null && sourceImportAssets.contains(asset)) continue;
+        yield asset != null && asset.package == inputId.package
+            ? _relativeLibImportFrom(inputId, asset)
+            : u;
+      }
+    }
+  }
+}
+
+/// Returns the set of top-level type names declared in [unit] — classes,
+/// enums, mixins, typedefs, extensions. Used by [_populateCrossFileTypes] to
+/// distinguish "this type lives in the same file I'm scanning (no import
+/// needed downstream)" from "this type comes from one of the file's imports
+/// and the downstream consumer must import it to resolve `Computed<(…, T,
+/// …)>` in lib".
+Set<String> _collectDeclaredTypeNames(CompilationUnit unit) {
+  final names = <String>{};
+  for (final decl in unit.declarations) {
+    if (decl is ClassDeclaration) names.add(decl.name.lexeme);
+    if (decl is EnumDeclaration) names.add(decl.name.lexeme);
+    if (decl is MixinDeclaration) names.add(decl.name.lexeme);
+    if (decl is ExtensionDeclaration) {
+      final n = decl.name?.lexeme;
+      if (n != null) names.add(n);
+    }
+    if (decl is FunctionTypeAlias) names.add(decl.name.lexeme);
+    if (decl is GenericTypeAlias) names.add(decl.name.lexeme);
+  }
+  return names;
+}
+
+/// Translates a `source/<rel>` AssetId to its `lib/<rel>` sibling. The
+/// inverse of [_resolveImportToSourceAsset]'s `lib/` → `source/` redirect.
+/// Passes non-`source/` AssetIds through unchanged.
+AssetId _sourceToLibAsset(AssetId asset) => asset.path.startsWith('source/')
+    ? AssetId(asset.package, 'lib/${asset.path.substring('source/'.length)}')
+    : asset;
+
+/// Returns the relative URI from the lib-path of [fromSource] to the
+/// lib-path of [toSource]. Both AssetIds must be same-package; both paths are
+/// expected under `source/`. The result is the relative form (`'../foo.dart'`
+/// or `'foo.dart'`) suitable for emission inside `lib/`, satisfying the
+/// project-wide `prefer_relative_imports` convention.
+String _relativeLibImportFrom(AssetId fromSource, AssetId toSource) {
+  final fromLib = _sourceToLibAsset(fromSource).path;
+  final toLib = _sourceToLibAsset(toSource).path;
+  // Drop the consumer's own filename — relative path is computed from the
+  // containing directory, not from the file itself.
+  final fromDirSegs = fromLib.split('/')..removeLast();
+  final toSegs = toLib.split('/');
+  var common = 0;
+  while (common < fromDirSegs.length &&
+      common < toSegs.length - 1 &&
+      fromDirSegs[common] == toSegs[common]) {
+    common++;
+  }
+  final ups = List<String>.filled(fromDirSegs.length - common, '..');
+  final downs = toSegs.sublist(common);
+  final combined = [...ups, ...downs].join('/');
+  return combined.isEmpty ? toSegs.last : combined;
 }
 
 /// Maps an `import '<uri>';` URI to the `AssetId` of its source-side input,
