@@ -70,19 +70,39 @@ import { Steps } from '@astrojs/starlight/components';
    ```
 </Steps>
 
-<Aside title="AI assistant setup (recommended)">
-**Step 1 — Drop `AGENTS.md` at your app root.** Most AI coding tools (Claude Code, Cursor, Codex, GitHub Copilot, Amp, OpenHands, …) auto-load `AGENTS.md` at session start. It teaches every agent the inverted `source/` vs `lib/` rule **without depending on skill triggering** — so the rule applies to every interaction, even short or routine-looking ones. Copy the template:
+## AI assistant setup
 
-```bash
-curl -o AGENTS.md https://raw.githubusercontent.com/nank1ro/solid/main/skills/solid/assets/AGENTS.md
-# If your tool only looks for CLAUDE.md, symlink:
-ln -s AGENTS.md CLAUDE.md
-```
+If you're using an AI coding assistant (Claude Code, Cursor, Codex, GitHub Copilot, Amp, OpenHands, etc.), these three steps teach it the inverted `source/`-vs-`lib/` rule and Solid's annotation contract — so it stops trying to edit `lib/` and silently losing your work.
 
-**Step 2 — Install the Solid skill.** `npx skills add nank1ro/solid`, or copy `skills/solid/` from the [Solid repo](https://github.com/nank1ro/solid) into your editor's skill location. The skill gives the agent deeper guidance (full annotation contract, scripts, troubleshooting) when it triggers on Solid-related work. The two layers complement each other: `AGENTS.md` is the always-loaded baseline, the skill is the on-demand reference.
+<Steps>
 
-**Step 3 — HTTP docs (optional).** If your tool fetches documentation over HTTP (Cursor `@docs`, ChatGPT custom GPTs, claude.ai web search, …), point it at [`/llms-full.txt`](https://solid.mariuti.com/llms-full.txt) — the full docs as a single LLM-friendly file. A short index lives at [`/llms.txt`](https://solid.mariuti.com/llms.txt).
-</Aside>
+1. Drop `AGENTS.md` at your app root.
+
+   Most AI coding tools auto-load `AGENTS.md` at session start, so the rule applies to every interaction — even short or routine-looking ones — without depending on skill triggering.
+
+   ```bash
+   curl -o AGENTS.md https://raw.githubusercontent.com/nank1ro/solid/main/skills/solid/assets/AGENTS.md
+   ```
+
+   If your tool only looks for `CLAUDE.md`, symlink it:
+
+   ```bash
+   ln -s AGENTS.md CLAUDE.md
+   ```
+
+2. Install the Solid skill.
+
+   ```bash
+   npx skills add nank1ro/solid
+   ```
+
+   Or copy `skills/solid/` from the [Solid repo](https://github.com/nank1ro/solid) into your editor's skill location. The skill gives the agent deeper guidance (full annotation contract, scripts, troubleshooting) when it triggers on Solid-related work. `AGENTS.md` is the always-loaded baseline; the skill is the on-demand reference.
+
+3. Point HTTP-docs tools at the LLM-friendly bundle (optional).
+
+   If your tool fetches documentation over HTTP (Cursor `@docs`, ChatGPT custom GPTs, claude.ai web search, …), point it at [`/llms-full.txt`](https://solid.mariuti.com/llms-full.txt) — the full docs as a single LLM-friendly file. A short index lives at [`/llms.txt`](https://solid.mariuti.com/llms.txt).
+
+</Steps>
 
 ## How it works
 
