@@ -37,9 +37,10 @@ class SourceEdit {
 ///      wrapped in `SignalBuilder`. Untracked-context rules suppress tracking.
 ///
 /// [reactiveFields] is the set of field names declared `@SolidState` on the
-/// enclosing class. The match is name-based; a future type-driven rule will
-/// eventually upgrade to resolved-element analysis, at which point the call
-/// site swaps to a resolved predicate without restructuring this file.
+/// enclosing class. Matching is name-based; cross-class receiver resolution
+/// uses `staticType` in
+/// `value_rewriter._resolveReceiverTypeName` and falls back to AST
+/// parameter inspection when the resolver hasn't run.
 ///
 /// [queryNames] is the set of `@SolidQuery` method names declared on the
 /// enclosing class. Their zero-arg call sites in the build body are recorded

@@ -2,9 +2,9 @@ import 'package:meta/meta.dart';
 
 /// Parsed description of one `@SolidState`-annotated field.
 ///
-/// Populated by `annotation_reader.dart` from unresolved AST and consumed by
-/// the rewriters (currently `stateless_rewriter.dart`). All string members are
-/// the raw source text of the corresponding AST node — no normalization.
+/// Populated by `annotation_reader.dart` and consumed by the rewriters
+/// (currently `stateless_rewriter.dart`). All string members are the raw
+/// source text of the corresponding AST node — no normalization.
 @immutable
 class FieldModel {
   /// Creates a [FieldModel] describing an annotated field.

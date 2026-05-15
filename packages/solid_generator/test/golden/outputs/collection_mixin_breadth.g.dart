@@ -71,4 +71,21 @@ class _BreadthState extends State<Breadth> {
       },
     );
   }
+
+  void mutate() {
+    // Mutation methods — direct calls on the signal (no `.value`),
+    // because the single-call shape is `MethodInvocation` with
+    // target=identifier, which `_isChainPrefix` catches.
+    xs.add(1);
+    xs.insert(0, 5);
+    xs.removeAt(0);
+    xs.removeWhere((i) => i.isOdd);
+    xs.sort();
+    xs[0] = 99;
+    tags.add(2);
+    tags.remove(2);
+    counts['a'] = 1;
+    counts.remove('a');
+    counts.putIfAbsent('b', () => 0);
+  }
 }

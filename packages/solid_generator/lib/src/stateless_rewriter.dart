@@ -8,6 +8,7 @@ import 'package:solid_generator/src/import_rewriter.dart';
 import 'package:solid_generator/src/query_model.dart';
 import 'package:solid_generator/src/signal_emitter.dart';
 import 'package:solid_generator/src/transformation_error.dart';
+import 'package:solid_generator/src/value_rewriter.dart';
 
 /// Rewrites a `StatelessWidget` class containing `@SolidState` fields,
 /// `@SolidState` getters, `@SolidEffect` methods, and/or `@SolidQuery`
@@ -59,7 +60,15 @@ RewriteResult rewriteStatelessWidget(
     ...solidEnvironments.map((e) => e.fieldName),
   };
 
-  final members = _splitMembers(classDecl);
+  // Annotated methods are emitted by `_emitReactiveBlock` from their model
+  // lists; the verbatim member walk in `_splitMembers` must NOT echo them
+  // back as "other methods" or they would appear twice in the output.
+  final annotatedMethodNames = <String>{
+    ...solidEffects.map((e) => e.methodName),
+    ...solidQueries.map((q) => q.methodName),
+    ...solidGetters.map((g) => g.getterName),
+  };
+  final members = _splitMembers(classDecl, annotatedMethodNames);
   final widgetBoundNames = collectWidgetBoundNames(members.ctors);
   final partition = _partitionFields(
     members.fields,
@@ -113,6 +122,47 @@ RewriteResult rewriteStatelessWidget(
     classFieldTypes,
   );
 
+  // Lifecycle merge (F-3): if the source `StatelessWidget` declared a
+  // user-authored `dispose()` or `initState()`, route those through the same
+  // merge helpers that `state_class_rewriter` uses for pre-existing
+  // `State<X>` classes. The user's block-body statements are spliced AFTER
+  // the synthesized reactive teardowns/materializations, so e.g. a Timer
+  // cancel or StreamSubscription cancel in the user body runs after
+  // generated `Effect.dispose()` / `Resource.dispose()` calls.
+  final disposeText = _emitDisposeText(
+    userDispose: members.userDispose,
+    disposeNamesInDeclarationOrder:
+        reactiveBlock.disposeNamesInDeclarationOrder,
+    source: source,
+    className: className,
+  );
+  final initStateText = _emitInitStateText(
+    userInitState: members.userInitState,
+    effectNamesInDeclarationOrder: reactiveBlock.effectNamesInDeclarationOrder,
+    source: source,
+    className: className,
+  );
+  // Non-`build`/`dispose`/`initState` user methods are preserved on the
+  // synthesized `_FooState` so helpers (`_send`, `_format`, …) survive the
+  // lift. Bodies run through `rewriteUserMethod` so cross-class signal reads
+  // and same-class `@SolidState` writes get the same `.value` treatment they
+  // already receive on `plain_class` and `state_class` rewriters.
+  final environmentFieldsMap = environmentFields;
+  final otherMethodsText = members.otherMethods
+      .map(
+        (m) =>
+            '  ${rewriteUserMethod(
+              m,
+              reactiveNames,
+              classRegistry,
+              source,
+              environmentFields: environmentFieldsMap,
+              collectionFields: collectionNames,
+              classCollectionFields: classCollectionFields,
+            )}',
+      )
+      .join('\n\n');
+
   final widgetClass = _emitWidgetClass(
     className,
     stateClassName,
@@ -128,6 +178,9 @@ RewriteResult rewriteStatelessWidget(
     effectNamesInDeclarationOrder: reactiveBlock.effectNamesInDeclarationOrder,
     stateFieldsText: partition.stateFieldsText,
     buildMethodText: buildMethodText,
+    initStateText: initStateText,
+    disposeText: disposeText,
+    otherMethodsText: otherMethodsText,
   );
 
   // `Signal` and `SignalBuilder` are emitted when EITHER the class has its
@@ -305,18 +358,37 @@ _emitReactiveBlock(
   List<ConstructorDeclaration> ctors,
   List<FieldDeclaration> fields,
   MethodDeclaration buildMethod,
+  MethodDeclaration? userInitState,
+  MethodDeclaration? userDispose,
+  List<MethodDeclaration> otherMethods,
 })
-_splitMembers(ClassDeclaration classDecl) {
+_splitMembers(ClassDeclaration classDecl, Set<String> annotatedMethodNames) {
   final ctors = <ConstructorDeclaration>[];
   final fields = <FieldDeclaration>[];
+  final otherMethods = <MethodDeclaration>[];
   MethodDeclaration? buildMethod;
+  MethodDeclaration? userInitState;
+  MethodDeclaration? userDispose;
   for (final member in classDecl.members) {
     if (member is ConstructorDeclaration) {
       ctors.add(member);
     } else if (member is FieldDeclaration) {
       fields.add(member);
-    } else if (member is MethodDeclaration && member.name.lexeme == 'build') {
-      buildMethod = member;
+    } else if (member is MethodDeclaration) {
+      final name = member.name.lexeme;
+      if (name == 'build') {
+        buildMethod = member;
+      } else if (name == 'initState') {
+        userInitState = member;
+      } else if (name == 'dispose') {
+        userDispose = member;
+      } else if (annotatedMethodNames.contains(name)) {
+        // @SolidEffect / @SolidQuery / @SolidState getter — emitted from
+        // its model in `_emitReactiveBlock`. Skip here to avoid duplication.
+        continue;
+      } else {
+        otherMethods.add(member);
+      }
     }
   }
   if (buildMethod == null) {
@@ -326,7 +398,14 @@ _splitMembers(ClassDeclaration classDecl) {
       classDecl.name.lexeme,
     );
   }
-  return (ctors: ctors, fields: fields, buildMethod: buildMethod);
+  return (
+    ctors: ctors,
+    fields: fields,
+    buildMethod: buildMethod,
+    userInitState: userInitState,
+    userDispose: userDispose,
+    otherMethods: otherMethods,
+  );
 }
 
 /// Union of field names bound by any **generative** constructor in [ctors] —
@@ -532,6 +611,113 @@ String _emitWidgetClass(
       '}';
 }
 
+/// Returns the `dispose()` text to splice into the synthesized `State<X>`.
+///
+/// Three cases:
+/// 1. User wrote a `dispose()` AND there are reactive disposables → merge
+///    via [mergeDispose] (reactive teardowns prepended to user body),
+///    then append `super.dispose();` (the source-side `StatelessWidget` has
+///    no `dispose` to invoke as super, so the user can't write it; the
+///    lifted `State<X>` requires it).
+/// 2. User wrote a `dispose()` AND no reactive disposables → preserve user
+///    body verbatim and append `super.dispose();` for the same reason.
+/// 3. No user `dispose()` AND there are reactive disposables → synthesize
+///    via [emitDispose] with super-call appended.
+/// 4. No user `dispose()` AND no reactive disposables → no `dispose()`
+///    override; the inherited `State<T>.dispose()` runs unchanged.
+String _emitDisposeText({
+  required MethodDeclaration? userDispose,
+  required List<String> disposeNamesInDeclarationOrder,
+  required String source,
+  required String className,
+}) {
+  if (userDispose != null) {
+    final body = disposeNamesInDeclarationOrder.isEmpty
+        ? source.substring(userDispose.offset, userDispose.end)
+        : mergeDispose(
+            userDispose,
+            disposeNamesInDeclarationOrder,
+            source,
+            className,
+          );
+    return '  ${_appendSuperDispose(body)}';
+  }
+  if (disposeNamesInDeclarationOrder.isEmpty) return '';
+  return emitDispose(
+    disposeNamesInDeclarationOrder,
+    emitOverride: true,
+    emitSuperCall: true,
+  );
+}
+
+/// Returns [methodText] with `    super.dispose();` spliced in immediately
+/// before its closing brace. The input is assumed to be the source text of
+/// a block-body `void dispose() { ... }` method (the post-merge or
+/// pre-merge form). The brace search walks from the end backwards — robust
+/// against trailing whitespace.
+String _appendSuperDispose(String methodText) {
+  final closeIdx = methodText.lastIndexOf('}');
+  return '${methodText.substring(0, closeIdx)}'
+      '  super.dispose();\n  '
+      '${methodText.substring(closeIdx)}';
+}
+
+/// Returns the `initState()` text to splice into the synthesized `State<X>`.
+///
+/// Same four-case structure as [_emitDisposeText], but with [mergeInitState]
+/// and [emitInitState] in the reactive/synthesized branches.
+String _emitInitStateText({
+  required MethodDeclaration? userInitState,
+  required List<String> effectNamesInDeclarationOrder,
+  required String source,
+  required String className,
+}) {
+  if (userInitState != null) {
+    final body = effectNamesInDeclarationOrder.isEmpty
+        ? source.substring(userInitState.offset, userInitState.end)
+        : mergeInitState(
+            userInitState,
+            effectNamesInDeclarationOrder,
+            source,
+            className,
+          );
+    return '  ${_prependSuperInitState(body, userInitState)}';
+  }
+  if (effectNamesInDeclarationOrder.isEmpty) return '';
+  return emitInitState(effectNamesInDeclarationOrder);
+}
+
+/// Returns [methodText] with `super.initState();` ensured as the first
+/// statement in the block. The source-side `StatelessWidget` cannot legally
+/// invoke `super.initState();` (no such method exists on `StatelessWidget`),
+/// so the lift path inserts it on the user's behalf. If the user's source
+/// already started with `super.initState();` (a non-conforming shape that
+/// the source compiler would have rejected, but kept here as a defence),
+/// no second copy is added.
+String _prependSuperInitState(String methodText, MethodDeclaration userMethod) {
+  final body = userMethod.body;
+  if (body is! BlockFunctionBody) return methodText;
+  final stmts = body.block.statements;
+  if (stmts.isNotEmpty && _isSuperInitStateCall(stmts.first)) {
+    return methodText;
+  }
+  // Insert `super.initState();` immediately after the first `{` in the
+  // merged/preserved method text. The brace search is bounded to the first
+  // occurrence, which is always the body's opening brace (method headers
+  // never contain `{`).
+  final openIdx = methodText.indexOf('{');
+  return '${methodText.substring(0, openIdx + 1)}'
+      '\n    super.initState();'
+      '${methodText.substring(openIdx + 1)}';
+}
+
+bool _isSuperInitStateCall(Statement stmt) {
+  if (stmt is! ExpressionStatement) return false;
+  final expr = stmt.expression;
+  if (expr is! MethodInvocation) return false;
+  return expr.target is SuperExpression && expr.methodName.name == 'initState';
+}
+
 /// Emits the private `State<X>` half of the class split.
 ///
 /// `State<T>` has `dispose()` in its supertype chain, so the synthesized
@@ -543,16 +729,15 @@ String _emitWidgetClass(
 /// declaration (Signal field + Computed getter + Effect method +
 /// `@SolidEnvironment` env field) on the original class.
 ///
-/// [effectNamesInDeclarationOrder] is the Effect-only subset of
-/// [disposeNamesInDeclarationOrder]. When non-empty, this method emits a
-/// synthesized `initState()` that materializes each `late final` Effect field
-/// at mount time so its autorun fires. When empty, no `initState` is emitted
-/// — preserving byte-equality with every golden that has no Effects.
+/// [initStateText] and [disposeText] are precomputed by [_emitInitStateText]
+/// and [_emitDisposeText] respectively — either synthesized from the
+/// declaration-order name lists or merged with the user's source method.
+/// They are empty strings when no `initState`/`dispose` override should be
+/// emitted (no reactive disposables AND no user-written method).
 ///
-/// `dispose()` is similarly gated on [disposeNamesInDeclarationOrder] being
-/// non-empty: an env-only host class has no reactive declarations to dispose,
-/// so no `dispose()` override is emitted — the inherited `State<T>.dispose()`
-/// runs unchanged.
+/// [otherMethodsText] is the post-`rewriteUserMethod` form of every non-
+/// `build`/`dispose`/`initState`/annotated method, joined as a single
+/// indented block appended after the `build` method.
 String _emitStateClass({
   required String className,
   required String stateClassName,
@@ -561,23 +746,21 @@ String _emitStateClass({
   required List<String> effectNamesInDeclarationOrder,
   required String stateFieldsText,
   required String buildMethodText,
+  required String initStateText,
+  required String disposeText,
+  required String otherMethodsText,
 }) {
   final fieldsPrefix = stateFieldsText.isNotEmpty ? '$stateFieldsText\n\n' : '';
-  final initStateBlock = effectNamesInDeclarationOrder.isEmpty
+  final initStateBlock = initStateText.isEmpty ? '' : '$initStateText\n\n';
+  final disposeBlock = disposeText.isEmpty ? '' : '$disposeText\n\n';
+  final otherMethodsBlock = otherMethodsText.isEmpty
       ? ''
-      : '${emitInitState(effectNamesInDeclarationOrder)}\n\n';
-  final disposeBlock = disposeNamesInDeclarationOrder.isEmpty
-      ? ''
-      : '${emitDispose(
-          disposeNamesInDeclarationOrder,
-          emitOverride: true,
-          emitSuperCall: true,
-        )}\n\n';
+      : '\n\n$otherMethodsText';
 
   return '''
 class $stateClassName extends State<$className> {
 $fieldsPrefix$reactiveFieldsText
 
-$initStateBlock$disposeBlock  $buildMethodText
+$initStateBlock$disposeBlock  $buildMethodText$otherMethodsBlock
 }''';
 }

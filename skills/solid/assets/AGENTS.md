@@ -26,6 +26,19 @@ You write a `StatelessWidget` with these annotations on members; the generator r
 - `@SolidEnvironment()` — `late` field bound to the nearest ancestor `Provider<T>`. **`late` is required.**
 - `.untracked` — read a `@SolidState` field without registering a dependency. In string interpolation, only `'${x.untracked}'` works (not `'$x.untracked'`).
 
+## Helper methods, `dispose()`, and `initState()` on a lifted `StatelessWidget`
+
+A `StatelessWidget` carrying any `@Solid*` annotation is lifted to a `StatefulWidget` + `State<X>` pair. The lift preserves:
+
+- Every non-`build` instance method on the class (helpers like `_send`, `_format`, …) — they are emitted verbatim on the synthesized `State<X>` so call sites in `build` work.
+- A user-authored `void dispose() { ... }` block-body method — reactive teardowns for synthesized signals/effects/resources are prepended; the user's statements (e.g. `Timer.cancel()`, `StreamSubscription.cancel()`, `TextEditingController.dispose()`) run after. The lift adds `@override` and `super.dispose();` automatically.
+- A user-authored `void initState() { ... }` block-body method — Effect-materialization reads are spliced in; the user's statements run after. The lift adds `@override` and `super.initState();` automatically.
+
+Source-side notes:
+- Do NOT write `super.dispose()` or `super.initState()` in your `StatelessWidget` source — `StatelessWidget` has no such methods, so the source won't compile. The lift inserts the super call for you.
+- Reactive `.value` rewrites apply inside your helper methods too: `@SolidState int counter = 0;` plus `void increment() { counter++; }` lowers to `counter.value++` in the helper body.
+- If you need a hook like `didChangeDependencies` or `didUpdateWidget`, author the class as `StatefulWidget` + `State<X>` directly — that path also supports every `@Solid*` annotation and gives you the full `State<X>` API.
+
 ## Same-package imports inside `source/` must be relative
 
 `import 'package:<your_app>/foo.dart'` inside a `source/` file resolves to `lib/` (the generated realm) and is rejected by the generator. Use relative paths: `import '../path/to/foo.dart'`.
