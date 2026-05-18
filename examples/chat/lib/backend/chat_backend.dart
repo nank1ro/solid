@@ -13,6 +13,31 @@ class ChatBackend {
   final Random _rng;
   int _msgCounter = 0;
 
+  /// Per-channel broadcast controller for the typing-users stream. The
+  /// stream is written to from two sources: the background "noise" loop in
+  /// [typingUsers] (random users start typing then stop, even when no
+  /// message follows) and the [incomingMessages] coroutine (every incoming
+  /// message is preceded by ~1.5s of the sender's typing state, so the
+  /// "X is typing…" indicator always shows before the message lands).
+  final Map<String, StreamController<Set<String>>> _typingControllers = {};
+
+  /// Last published typing-users snapshot per channel. Used to merge the
+  /// "noise" loop and the message-precursor typing without losing state
+  /// when both fire close together.
+  final Map<String, Set<String>> _typingState = {};
+
+  StreamController<Set<String>> _typingControllerFor(String channelId) {
+    return _typingControllers.putIfAbsent(
+      channelId,
+      StreamController<Set<String>>.broadcast,
+    );
+  }
+
+  void _publishTyping(String channelId, Set<String> ids) {
+    _typingState[channelId] = ids;
+    _typingControllerFor(channelId).add(ids);
+  }
+
   static const seedChannels = <Channel>[
     Channel(id: 'general', name: '#general'),
     Channel(id: 'random', name: '#random'),
@@ -49,6 +74,15 @@ class ChatBackend {
       final wait = Duration(seconds: 4 + _rng.nextInt(5));
       await Future<void>.delayed(wait);
       final sender = seedUsers[_rng.nextInt(seedUsers.length)];
+      // Announce the sender as "typing" BEFORE yielding the message so the
+      // UI always shows "<name> is typing…" right before the new bubble
+      // appears. Merge into the existing typing set so concurrent noise
+      // events (from [typingUsers]) survive.
+      final priorTyping = _typingState[channelId] ?? const <String>{};
+      _publishTyping(channelId, {...priorTyping, sender.id});
+      await Future<void>.delayed(
+        Duration(milliseconds: 1200 + _rng.nextInt(600)),
+      );
       yield Message(
         id: 'srv-${_msgCounter++}',
         channelId: channelId,
@@ -56,21 +90,22 @@ class ChatBackend {
         text: _botUtterances[_rng.nextInt(_botUtterances.length)],
         timestamp: DateTime.now(),
       );
+      // Clear ONLY this sender from the typing set; leave any other
+      // concurrently-typing users in place.
+      final after = {..._typingState[channelId] ?? const <String>{}}
+        ..remove(sender.id);
+      _publishTyping(channelId, after);
     }
   }
 
-  Stream<Set<String>> typingUsers(String channelId) async* {
-    while (true) {
-      await Future<void>.delayed(Duration(seconds: 3 + _rng.nextInt(7)));
-      final typing = <String>{};
-      final count = _rng.nextInt(3);
-      for (var i = 0; i < count; i++) {
-        typing.add(seedUsers[_rng.nextInt(seedUsers.length)].id);
-      }
-      yield typing;
-      await Future<void>.delayed(Duration(seconds: 2 + _rng.nextInt(2)));
-      yield <String>{};
-    }
+  /// Per-channel typing stream. The ONLY writer is [incomingMessages],
+  /// which publishes the sender as "typing" ~1.5s before yielding the
+  /// message. There's no background-noise typing — every typing label the
+  /// UI shows must be followed by a real message in the same channel,
+  /// otherwise the user gets the confusing "X is typing… but no message
+  /// arrives" effect.
+  Stream<Set<String>> typingUsers(String channelId) {
+    return _typingControllerFor(channelId).stream;
   }
 
   Stream<Map<String, Presence>> presence() async* {
@@ -123,5 +158,11 @@ class ChatBackend {
     // the source-side Effect+Timer pattern regardless.
   }
 
-  void dispose() {}
+  void dispose() {
+    for (final c in _typingControllers.values) {
+      c.close();
+    }
+    _typingControllers.clear();
+    _typingState.clear();
+  }
 }

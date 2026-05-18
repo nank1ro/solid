@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../controllers/navigation_controller.dart';
 import 'message_composer.dart';
 import 'message_list.dart';
+import 'typing_indicator.dart';
 
 class MessagePane extends StatefulWidget {
   const MessagePane({super.key});
@@ -56,6 +57,10 @@ class _MessagePaneState extends State<MessagePane> {
             ),
             MessageComposer(
               key: ValueKey('composer-${channel.id}'),
+              channelId: channel.id,
+            ),
+            TypingIndicator(
+              key: ValueKey('typing-${channel.id}'),
               channelId: channel.id,
             ),
           ],

@@ -4,6 +4,7 @@ import 'package:solid_annotations/solid_annotations.dart';
 import '../controllers/navigation_controller.dart';
 import 'message_composer.dart';
 import 'message_list.dart';
+import 'typing_indicator.dart';
 
 class MessagePane extends StatelessWidget {
   const MessagePane({super.key});
@@ -50,6 +51,10 @@ class MessagePane extends StatelessWidget {
         ),
         MessageComposer(
           key: ValueKey('composer-${channel.id}'),
+          channelId: channel.id,
+        ),
+        TypingIndicator(
+          key: ValueKey('typing-${channel.id}'),
           channelId: channel.id,
         ),
       ],
