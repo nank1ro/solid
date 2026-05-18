@@ -34,7 +34,13 @@ Builder solidBuilder(BuilderOptions options) => _SolidBuilder();
 /// A file without this substring cannot possibly need transformation and is
 /// skipped before `parseString` — the hot-path short-circuit for the typical
 /// unannotated file.
-const String _solidAnnotationHint = '@Solid';
+///
+/// `solid_annotations` (the package name) is the chosen hint because every
+/// file that uses any `@Solid*` annotation must import this package — both
+/// the canonical (`@SolidState int x = 0;`) and aliased
+/// (`import '…' as sa; @sa.SolidState() int x = 0;`) shapes carry the
+/// substring. The earlier `@Solid` hint missed the aliased form.
+const String _solidAnnotationHint = 'solid_annotations';
 
 /// Substrings that flag a file as a candidate for the `Provider` /
 /// `.environment<T>()` auto-dispose pass. The presence of either substring
@@ -130,12 +136,30 @@ class _SolidBuilder implements Builder {
         '(offset ${diagnostic.offset})',
       );
     }
+    // Acquire a TYPE-RESOLVED CompilationUnit when possible. Path:
+    //   1. `libraryFor(inputId)` returns a fully-resolved `LibraryElement`
+    //      (analyzer 8.x forces full type resolution at this step).
+    //   2. `astNodeFor(anyElement, resolve: true)` returns that element's
+    //      resolved declaration node — `Expression.staticType` is populated
+    //      on every node beneath it.
+    //   3. Navigate up to the enclosing `CompilationUnit` once.
+    //
+    // `compilationUnitFor` alone returns a parsed-but-unresolved unit (every
+    // `staticType` is `null`), which doesn't satisfy the type-aware
+    // predicates downstream (B-2 strict wrap, future shadowing, full chains).
+    //
+    // Fallback: when the library has no anchor element (no classes, no
+    // top-level functions, etc.), there is nothing to call `astNodeFor` on,
+    // so we use the parsed AST. Such files almost never carry `@Solid*`
+    // annotations — annotations live on classes — so type-aware predicates
+    // are a no-op there.
+    final unit = await _resolveUnit(buildStep, parsed.unit);
 
     // AST-precise re-check of the same-package-import rule. Redundant with
     // the pre-parse text scan above but produces precise URI text in the
     // error message; one extra `whereType` walk per parsed file.
     validateSourceImportsFromAst(
-      parsed.unit,
+      unit,
       buildStep.inputId.package,
       buildStep.inputId.path,
       source,
@@ -143,33 +167,33 @@ class _SolidBuilder implements Builder {
 
     // Reserved-annotation guard. Currently a no-op; preserved as a regression
     // fence for future revisions.
-    validateReservedAnnotations(parsed.unit);
+    validateReservedAnnotations(unit);
     // Invalid-target guard for `@SolidState`. Must run before
     // `_collectAnnotatedClasses`; rejected targets (final / const / static
     // fields, setters, top-level vars, methods, …) never reach the readers.
-    validateSolidStateTargets(parsed.unit);
+    validateSolidStateTargets(unit);
     // Invalid-target guard for `@SolidEffect`. Same contract as the line
     // above: rejected targets (getters, setters, static/abstract methods,
     // parameterized methods, non-void methods, top-level functions, fields)
     // never reach `readSolidEffectMethod`.
-    validateSolidEffectTargets(parsed.unit);
+    validateSolidEffectTargets(unit);
     // Invalid-target guard for `@SolidQuery`. Same contract as the lines
     // above: rejected targets (non-Future/Stream returns, Future-without-async
     // bodies, parameterized/static/abstract methods, getters/setters,
     // top-level functions, fields) never reach `readSolidQueryMethod`.
-    validateSolidQueryTargets(parsed.unit);
+    validateSolidQueryTargets(unit);
     // Invalid-target guard for `@SolidEnvironment` — mirrors the validators
     // above.
-    validateSolidEnvironmentTargets(parsed.unit);
+    validateSolidEnvironmentTargets(unit);
 
     // Same-file class registry, built from a fast member-scan before any
     // body rewrites run. The body-rewriter relies on it to recognise
     // cross-class `.value` chains (`controller.todos`) even when the body
     // being rewritten is a `@SolidState` getter / `@SolidEffect` /
     // `@SolidQuery` on a sibling class in the same file.
-    final sameFileRegistry = _prescanClassRegistry(parsed.unit);
-    final sameFileCollections = _prescanClassCollectionFields(parsed.unit);
-    final sameFileFieldTypes = _prescanClassFieldTypes(parsed.unit);
+    final sameFileRegistry = _prescanClassRegistry(unit);
+    final sameFileCollections = _prescanClassCollectionFields(unit);
+    final sameFileFieldTypes = _prescanClassFieldTypes(unit);
     // Captures, per cross-class `@SolidState` field type text, the
     // `package:<self>/<lib-relative>` URIs that bring that type into scope
     // on the env-field's class file. Used by [_renderOutput] to inject the
@@ -182,7 +206,7 @@ class _SolidBuilder implements Builder {
     // referenced by a `@SolidEnvironment` field type — same contract as the
     // same-file pass, but for types declared in other source files.
     await _populateCrossFileTypes(
-      parsed.unit,
+      unit,
       buildStep,
       sameFileRegistry,
       sameFileCollections,
@@ -191,7 +215,7 @@ class _SolidBuilder implements Builder {
     );
 
     final annotatedClasses = _collectAnnotatedClasses(
-      parsed.unit,
+      unit,
       source,
       sameFileRegistry,
       sameFileCollections,
@@ -203,7 +227,7 @@ class _SolidBuilder implements Builder {
       if (hasProviderHint) {
         final withDispose = addProviderDisposeAtCallSites(
           source,
-          unit: parsed.unit,
+          unit: unit,
         );
         if (identical(withDispose, source)) {
           await buildStep.writeAsString(outputId, source);
@@ -221,7 +245,7 @@ class _SolidBuilder implements Builder {
     // same data but the prescan version is the authority because the
     // reader pipeline already consumed it.
     final transformed = _renderOutput(
-      parsed.unit,
+      unit,
       annotatedClasses,
       sameFileRegistry,
       sameFileCollections,
@@ -253,11 +277,11 @@ Map<String, Set<String>> _prescanClassRegistry(CompilationUnit unit) {
     final names = <String>{};
     for (final member in decl.members) {
       if (member is FieldDeclaration) {
-        if (member.metadata.any((a) => a.name.name == solidStateName)) {
+        if (hasAnnotation(solidStateName, member.metadata)) {
           names.add(member.fields.variables.first.name.lexeme);
         }
       } else if (member is MethodDeclaration && member.isGetter) {
-        if (member.metadata.any((a) => a.name.name == solidStateName)) {
+        if (hasAnnotation(solidStateName, member.metadata)) {
           names.add(member.name.lexeme);
         }
       }
@@ -288,15 +312,11 @@ Map<String, Map<String, String>> _prescanClassFieldTypes(
     final types = <String, String>{};
     for (final member in decl.members) {
       if (member is FieldDeclaration) {
-        if (!member.metadata.any((a) => a.name.name == solidStateName)) {
-          continue;
-        }
+        if (!hasAnnotation(solidStateName, member.metadata)) continue;
         final name = member.fields.variables.first.name.lexeme;
         types[name] = member.fields.type?.toSource() ?? '';
       } else if (member is MethodDeclaration && member.isGetter) {
-        if (!member.metadata.any((a) => a.name.name == solidStateName)) {
-          continue;
-        }
+        if (!hasAnnotation(solidStateName, member.metadata)) continue;
         types[member.name.lexeme] = member.returnType?.toSource() ?? '';
       }
     }
@@ -323,7 +343,7 @@ Map<String, Set<String>> _prescanClassCollectionFields(CompilationUnit unit) {
     final names = <String>{};
     for (final member in decl.members) {
       if (member is! FieldDeclaration) continue;
-      if (!member.metadata.any((a) => a.name.name == solidStateName)) continue;
+      if (!hasAnnotation(solidStateName, member.metadata)) continue;
       final variable = member.fields.variables.first;
       final type = member.fields.type;
       if (type == null) continue;
@@ -524,9 +544,7 @@ Map<String, String> _collectEnvironmentFields(ClassDeclaration decl) {
   Map<String, String>? fields;
   for (final member in decl.members) {
     if (member is! FieldDeclaration) continue;
-    if (!member.metadata.any((a) => a.name.name == solidEnvironmentName)) {
-      continue;
-    }
+    if (!hasAnnotation(solidEnvironmentName, member.metadata)) continue;
     final type = member.fields.type;
     if (type == null) continue;
     final fieldName = member.fields.variables.first.name.lexeme;
@@ -565,6 +583,52 @@ Set<String> _collectWidgetBoundCtorNames(ClassDeclaration decl) {
   return collectWidgetBoundNames(
     decl.members.whereType<ConstructorDeclaration>(),
   );
+}
+
+/// Returns a TYPE-RESOLVED [CompilationUnit] for the build input when one
+/// can be obtained, falling back to [parsedFallback] otherwise.
+///
+/// `buildStep.resolver.libraryFor` returns a fully-resolved `LibraryElement`
+/// (analyzer forces type resolution at this call). `astNodeFor(anyElement,
+/// resolve: true)` on any element from that library yields a resolved
+/// declaration node whose enclosing `CompilationUnit` has `Expression.
+/// staticType` populated throughout. The first available anchor is used
+/// (classes are preferred — they almost always exist when `@Solid*`
+/// annotations are present); when none is available the function returns
+/// the [parsedFallback] AST unchanged.
+///
+/// `compilationUnitFor` alone is not equivalent: it calls
+/// `session.getParsedUnit` and returns a parsed-but-unresolved unit. The
+/// resolved variant is needed for type-driven predicates downstream.
+Future<CompilationUnit> _resolveUnit(
+  BuildStep buildStep,
+  CompilationUnit parsedFallback,
+) async {
+  try {
+    final library = await buildStep.resolver.libraryFor(
+      buildStep.inputId,
+      allowSyntaxErrors: true,
+    );
+    // analyzer 9 `astNodeFor` takes a `Fragment` (the per-file
+    // declaration-level element). The library's defining-file fragment is
+    // available as `library.firstFragment` (a `LibraryFragment`); passing
+    // it with `resolve: true` returns the resolved `CompilationUnit` for
+    // that file directly. Falls back to the parsed AST if the resolver
+    // returns null (rare; happens for elements sourced from summaries).
+    final node = await buildStep.resolver.astNodeFor(
+      library.firstFragment,
+      resolve: true,
+    );
+    if (node is CompilationUnit) return node;
+    final unit = node?.thisOrAncestorOfType<CompilationUnit>();
+    return unit ?? parsedFallback;
+  } on Object {
+    // Defensive: any resolver error (asset not readable, transitive
+    // analyzer failure on an import, …) falls back to the parsed AST. The
+    // surfaced effect is that type-aware predicates degrade to the
+    // pre-fix textual heuristics for this one file.
+    return parsedFallback;
+  }
 }
 
 /// Renders the full `lib/` output for a file that has at least one annotated
@@ -830,9 +894,7 @@ Future<void> _populateCrossFileTypes(
     if (decl is! ClassDeclaration) continue;
     for (final member in decl.members) {
       if (member is! FieldDeclaration) continue;
-      if (!member.metadata.any((a) => a.name.name == solidEnvironmentName)) {
-        continue;
-      }
+      if (!hasAnnotation(solidEnvironmentName, member.metadata)) continue;
       final type = member.fields.type;
       if (type == null) continue;
       final typeText = type.toSource();
@@ -876,10 +938,7 @@ Future<void> _populateCrossFileTypes(
       final fieldTypeTexts = <String, String>{};
       for (final member in decl.members) {
         if (member is FieldDeclaration) {
-          final isSolidState = member.metadata.any(
-            (a) => a.name.name == solidStateName,
-          );
-          if (!isSolidState) continue;
+          if (!hasAnnotation(solidStateName, member.metadata)) continue;
           final variable = member.fields.variables.first;
           final fieldName = variable.name.lexeme;
           scalarNames.add(fieldName);
@@ -895,14 +954,10 @@ Future<void> _populateCrossFileTypes(
             collectionNames.add(fieldName);
           }
         } else if (member is MethodDeclaration && member.isGetter) {
-          final isSolidState = member.metadata.any(
-            (a) => a.name.name == solidStateName,
-          );
-          if (isSolidState) {
-            scalarNames.add(member.name.lexeme);
-            fieldTypeTexts[member.name.lexeme] =
-                member.returnType?.toSource() ?? '';
-          }
+          if (!hasAnnotation(solidStateName, member.metadata)) continue;
+          scalarNames.add(member.name.lexeme);
+          fieldTypeTexts[member.name.lexeme] =
+              member.returnType?.toSource() ?? '';
         }
       }
       if (scalarNames.isNotEmpty) {

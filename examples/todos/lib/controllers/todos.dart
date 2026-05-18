@@ -7,7 +7,7 @@ class TodosController implements Disposable {
     todos.addAll(initialTodos);
   }
 
-  final todos = ListSignal<Todo>(const [], name: 'todos');
+  final todos = ListSignal<Todo>([], name: 'todos');
 
   late final completedTodos = Computed<List<Todo>>(
     () => todos.where((t) => t.completed).toList(),

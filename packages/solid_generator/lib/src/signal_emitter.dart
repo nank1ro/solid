@@ -519,6 +519,65 @@ String emitInitState(List<String> effectNamesInDeclarationOrder) {
   return buffer.toString();
 }
 
+/// Splices Effect-materialization reads (`<effectName>;`, in declaration
+/// order) into an existing `initState()` body immediately after the
+/// `super.initState();` call, so Effects subscribe to signals before any
+/// user code in `initState` runs.
+///
+/// Splice point: the end of the first statement when it is recognised as
+/// `super.initState();`; otherwise immediately after the opening brace.
+/// `super.initState()` must come first, so the fallback only fires for
+/// non-conforming user code — keeping the merge adjacent to where the super
+/// call would have been.
+///
+/// Throws [CodeGenerationError] if the existing `initState()` uses an
+/// expression body (`=> …`) — the merge is only well-defined for a block.
+String mergeInitState(
+  MethodDeclaration method,
+  List<String> effectNamesInDeclarationOrder,
+  String source,
+  String className,
+) {
+  final body = method.body;
+  if (body is! BlockFunctionBody) {
+    throw CodeGenerationError(
+      'existing initState() must have a block body for Effect merge',
+      null,
+      className,
+    );
+  }
+  final stmts = body.block.statements;
+  final int insertAt;
+  if (stmts.isNotEmpty && _isSuperInitStateCall(stmts.first)) {
+    insertAt = stmts.first.end;
+  } else {
+    insertAt = body.block.leftBracket.offset + 1;
+  }
+  final reads = effectNamesInDeclarationOrder
+      .map((name) => '    $name;')
+      .join('\n');
+  // Auto-add `@override` if the user omitted it — mirrors mergeDispose. The
+  // lift path (`StatelessWidget` source has no `initState` to override, so
+  // the user can't legally write `@override`) and the
+  // `existing-State<X>-without-@override` shape both rely on this insert.
+  final hasOverride = method.metadata.any((a) => a.name.name == 'override');
+  final overridePrefix = hasOverride ? '' : '@override\n  ';
+  return '$overridePrefix${source.substring(method.offset, insertAt)}'
+      '\n$reads'
+      '${source.substring(insertAt, method.end)}';
+}
+
+/// Returns `true` when [stmt] is exactly the expression statement
+/// `super.initState();`. Used by [mergeInitState] to decide whether to
+/// splice Effect reads after the user's super call (the expected case) or
+/// at the top of the body (fallback).
+bool _isSuperInitStateCall(Statement stmt) {
+  if (stmt is! ExpressionStatement) return false;
+  final expr = stmt.expression;
+  if (expr is! MethodInvocation) return false;
+  return expr.target is SuperExpression && expr.methodName.name == 'initState';
+}
+
 /// Emits a no-arg constructor whose body materializes every `late final`
 /// Effect field by reading it as a bare-identifier statement
 /// (`<effectName>;`), in source-declaration order.

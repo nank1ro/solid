@@ -3,12 +3,12 @@ import 'package:solid_generator/src/transformation_error.dart';
 
 /// Parsed description of one `@SolidEffect`-annotated method.
 ///
-/// Populated by `annotation_reader.dart` from unresolved AST and consumed by
-/// the rewriters (currently `stateless_rewriter.dart`). All string members are
-/// the raw source text of the corresponding AST node — except [bodyText],
-/// which is the source-substring of the method body with the `.value` rewrites
-/// already applied so the emitter can splice it directly into the `Effect(...)`
-/// closure.
+/// Populated by `annotation_reader.dart` and consumed by the rewriters
+/// (currently `stateless_rewriter.dart`). All string members are the raw
+/// source text of the corresponding AST node — except [bodyText], which is
+/// the source-substring of the method body with the `.value` rewrites
+/// already applied so the emitter can splice it directly into the
+/// `Effect(...)` closure.
 ///
 /// Mirrors `GetterModel` for the parallel `@SolidState` getter → `Computed`
 /// lowering. The two models share an identical body-rewrite contract; the only

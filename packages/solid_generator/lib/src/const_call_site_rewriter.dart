@@ -41,8 +41,14 @@ import 'package:solid_generator/src/value_rewriter.dart';
 /// the multi-constructor case (`Counter(title: 'count=$value')` — rejected
 /// because of string interpolation) and the const-call-site cases
 /// (`CounterDisplay()` / `Outer(child: Inner())` — accepted) without
-/// requiring resolved-AST analysis. Identifier-RHS, `AdjacentStrings`, and
-/// list/map literal const-evaluability are tractable future extensions.
+/// requiring resolved-AST analysis.
+///
+/// This pass intentionally re-parses [text] without resolution because it
+/// operates on assembled OUTPUT text (produced by upstream rewriters);
+/// resolving the post-rewrite text would require re-running the analyzer
+/// over a synthesized library. Identifier-RHS, `AdjacentStrings`, and
+/// list/map literal const-evaluability would benefit from resolved AST but
+/// remain deferred behind the pipeline constraint.
 String addConstAtCallSites(String text, Set<String> constCtorNames) {
   if (constCtorNames.isEmpty) return text;
 

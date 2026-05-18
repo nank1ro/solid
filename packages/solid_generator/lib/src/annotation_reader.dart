@@ -1,5 +1,7 @@
 import 'package:analyzer/dart/ast/ast.dart';
+import 'package:analyzer/dart/element/element.dart';
 import 'package:solid_generator/src/effect_model.dart';
+import 'package:solid_generator/src/element_utils.dart';
 import 'package:solid_generator/src/environment_model.dart';
 import 'package:solid_generator/src/field_model.dart';
 import 'package:solid_generator/src/getter_model.dart';
@@ -9,30 +11,36 @@ import 'package:solid_generator/src/value_rewriter.dart';
 
 /// Name of the `@SolidState` annotation class.
 ///
-/// Matching is textual on the unresolved AST — type resolution is required
-/// for `.value` rewriting, but annotation detection is acceptable on names
-/// because the user must import `solid_annotations` to use `@SolidState`
-/// at all.
+/// Matching is two-tier (see [findAnnotationByName]): Element-based via
+/// `Annotation.element` when the resolver has produced one, with a textual
+/// fallback on the lexical name. The textual path is the workhorse in test
+/// sandboxes that cannot resolve `package:solid_annotations` (because the
+/// package transitively imports Flutter, whose SDK isn't available in
+/// `testBuilder`); the Element path adds aliased-import support in real
+/// `build_runner` runs.
 ///
 /// Exposed package-publicly so the target validator can match the same
 /// identifier on non-field declarations.
 const String solidStateName = 'SolidState';
 
 /// Name of the `@SolidEffect` annotation class. Same matching contract as
-/// [solidStateName] (textual on unresolved AST).
+/// [solidStateName].
 const String solidEffectName = 'SolidEffect';
 
 /// Name of the `@SolidQuery` annotation class. Same matching contract as
-/// [solidStateName] (textual on unresolved AST).
+/// [solidStateName].
 const String solidQueryName = 'SolidQuery';
 
 /// Name of the `@SolidEnvironment` annotation class. Same matching contract
-/// as [solidStateName] (textual on unresolved AST).
+/// as [solidStateName].
 const String solidEnvironmentName = 'SolidEnvironment';
 
 /// Lexemes of the `flutter_solidart` types whose runtime classes extend
-/// `SignalBase<T>`. Matched textually on the unresolved AST per the
-/// [solidStateName] contract. Consumed by the target validator (rejecting
+/// `SignalBase<T>`. Matched against the type-annotation lexeme as the
+/// unresolved-AST fallback in
+/// `target_validator._isSignalBaseTyped`; the Element-based primary path
+/// walks `InterfaceType.allSupertypes` when the resolver populated the
+/// type. Consumed by the target validator (rejecting
 /// `@SolidEnvironment` fields typed as one of these) and by the
 /// cross-class `.value` rewrite. Excludes `SignalBuilder` /
 /// `SolidartConfig` (those are non-`SignalBase` solidart names).
@@ -44,9 +52,9 @@ const Set<String> signalBaseTypeNames = {
 };
 
 /// Lexeme of the `Future` return-type identifier on a `@SolidQuery` method.
-/// Matched textually on the unresolved AST per the same contract as
-/// [solidStateName] — the user must import `dart:async` (or its re-export via
-/// `dart:core`) to write the type at all.
+/// Matched textually on the return-type's [NamedType] lexeme — the user
+/// must import `dart:async` (or its re-export via `dart:core`) to write the
+/// type at all, so the lexical name is sufficient at the validator boundary.
 const String futureLexeme = 'Future';
 
 /// Lexeme of the `Stream` return-type identifier on a `@SolidQuery` method.
@@ -433,7 +441,7 @@ QueryModel? readSolidQueryMethod(
     bodyText: bodyText,
     isBlockBody: isBlockBody,
     innerTypeText: innerTypeText,
-    bodyKeyword: decl.body.keyword?.lexeme ?? '',
+    bodyKeyword: _bodyKeyword(decl.body),
     isStream: returnTypeName == streamLexeme,
     trackedSignalNames: trackedNames,
     trackedQueryNames: trackedQueryNames,
@@ -444,7 +452,39 @@ QueryModel? readSolidQueryMethod(
   );
 }
 
+/// Returns the source-faithful body keyword for [body] — `'async'`, `'sync'`,
+/// `'async*'`, `'sync*'`, or `''` for a synchronous block / arrow body.
+///
+/// The analyzer's AST splits the keyword and the optional star into two
+/// separate tokens (`body.keyword` and `body.star`). The naive
+/// `body.keyword?.lexeme ?? ''` drops the star, which is wrong for `async*` /
+/// `sync*` generator bodies. This helper rejoins the two tokens so the
+/// downstream `Resource<T>.stream(() $bodyKeyword { ... })` splice in
+/// `signal_emitter.emitResourceField` produces valid Dart.
+String _bodyKeyword(FunctionBody body) {
+  final keyword = body.keyword?.lexeme ?? '';
+  if (keyword.isEmpty) return '';
+  final star = switch (body) {
+    final BlockFunctionBody b => b.star?.lexeme ?? '',
+    final ExpressionFunctionBody b => b.star?.lexeme ?? '',
+    _ => '',
+  };
+  return '$keyword$star';
+}
+
 /// Returns the first `@<className>(...)` annotation in [metadata], or `null`.
+///
+/// Matching is two-tier:
+///
+///  1. **Element-based.** When the resolver has populated `Annotation.element`
+///     (the constructor of the annotation class), match by class name plus
+///     `package:solid_annotations/` library URI. This catches aliased imports
+///     (`import '…' as solid; @solid.SolidState()`) whose textual name is
+///     `'solid.SolidState'` and would miss the textual check below.
+///  2. **Textual fallback.** When the resolver hasn't run (parsed-AST
+///     fallback in `_resolveUnit`, or test sandboxes without the Flutter
+///     SDK), match on the lexical name. Still correct because users almost
+///     always import `solid_annotations` without an alias.
 ///
 /// Package-public so the target validator can reuse the same matcher on
 /// every declaration kind. Use the [solidStateName] or [solidEffectName]
@@ -454,9 +494,36 @@ Annotation? findAnnotationByName(
   NodeList<Annotation> metadata,
 ) {
   for (final ann in metadata) {
+    // Resolved annotation: the Element check is authoritative; skip the
+    // textual branch (its lexical name is dominated by the element's class
+    // name, so re-checking it is pure overhead).
+    if (ann.element != null) {
+      if (_annotationMatchesByElement(ann, className)) return ann;
+      continue;
+    }
     if (ann.name.name == className) return ann;
   }
   return null;
+}
+
+/// `true` iff [ann]'s resolved element is a constructor of a class named
+/// [className] declared in the `package:solid_annotations/` library. Returns
+/// `false` when the AST is unresolved (`ann.element` is `null`) or when the
+/// element is unrelated.
+bool _annotationMatchesByElement(Annotation ann, String className) {
+  final element = ann.element;
+  if (element is! ConstructorElement) return false;
+  final enclosing = element.enclosingElement;
+  if (enclosing.name != className) return false;
+  return isFromPackage(enclosing.library.uri, 'solid_annotations');
+}
+
+/// `true` iff [metadata] contains an annotation matching [className] under
+/// the same rules as [findAnnotationByName]. Helper for the pre-scan
+/// callers that only need presence detection (no extraction of the
+/// `Annotation` node).
+bool hasAnnotation(String className, NodeList<Annotation> metadata) {
+  return findAnnotationByName(className, metadata) != null;
 }
 
 /// Returns the [Expression] passed for `<label>: <expr>` on [annotation], or
@@ -484,13 +551,12 @@ String? extractNameArgument(Annotation annotation) {
 /// expression on `@SolidQuery(debounce: …)`, or `null` if the annotation has
 /// no `debounce:` argument.
 ///
-/// In the unresolved AST that the builder operates on, `Duration(...)` (no
-/// keyword) parses as a [MethodInvocation] because the parser cannot tell
-/// it's a constructor call without semantic resolution; `const Duration(...)`
-/// parses as an [InstanceCreationExpression] because the keyword
-/// disambiguates. Annotation argument context is implicit-const, so the
-/// canonical user shape lacks `const`; both no-keyword shapes therefore
-/// receive a `const ` prefix so the lowered
+/// `Duration(...)` (no keyword) parses as a [MethodInvocation] because the
+/// parser cannot tell it's a constructor call without semantic resolution;
+/// `const Duration(...)` parses as an [InstanceCreationExpression] because
+/// the keyword disambiguates. Annotation argument context is implicit-const,
+/// so the canonical user shape lacks `const`; both no-keyword shapes
+/// therefore receive a `const ` prefix so the lowered
 /// `Resource(... debounceDelay: <text>, ...)` arg compiles in its non-const
 /// constructor-arg context. Other shapes (`const Duration(...)`, identifier
 /// references like a const-declared `_myDebounce`) emit verbatim.

@@ -3,10 +3,10 @@ import 'package:solid_generator/src/transformation_error.dart';
 
 /// Parsed description of one `@SolidState`-annotated getter.
 ///
-/// Populated by `annotation_reader.dart` from unresolved AST and consumed by
-/// the rewriters (currently `stateless_rewriter.dart`). All string members are
-/// the raw source text of the corresponding AST node — except [bodyText],
-/// which is the source-substring of the getter body with the `.value` rewrites
+/// Populated by `annotation_reader.dart` and consumed by the rewriters
+/// (currently `stateless_rewriter.dart`). All string members are the raw
+/// source text of the corresponding AST node — except [bodyText], which is
+/// the source-substring of the getter body with the `.value` rewrites
 /// already applied so the emitter can splice it directly into the
 /// `Computed<T>(...)` closure.
 @immutable

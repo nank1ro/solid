@@ -2,11 +2,11 @@ import 'package:meta/meta.dart';
 
 /// Parsed description of one `@SolidEnvironment`-annotated field.
 ///
-/// Populated by `annotation_reader.dart` from unresolved AST and consumed by
-/// the rewriters (currently `stateless_rewriter.dart` and
-/// `state_class_rewriter.dart`). All string members are the raw source text of
-/// the corresponding AST node — no normalization. Mirror of `FieldModel` for
-/// the `@SolidEnvironment` field-synthesis path: every annotated field lowers
+/// Populated by `annotation_reader.dart` and consumed by the rewriters
+/// (currently `stateless_rewriter.dart` and `state_class_rewriter.dart`).
+/// All string members are the raw source text of the corresponding AST
+/// node — no normalization. Mirror of `FieldModel` for the
+/// `@SolidEnvironment` field-synthesis path: every annotated field lowers
 /// to a `late final <fieldName> = context.read<<typeText>>();` line on the
 /// host's synthesized (or in-place) `State<X>` subclass.
 ///

@@ -8,12 +8,12 @@ typedef CrossClassDep = ({String envField, String name});
 
 /// Parsed description of one `@SolidQuery`-annotated method.
 ///
-/// Populated by `annotation_reader.dart` from unresolved AST and consumed by
-/// the rewriters (currently `stateless_rewriter.dart`). All string members are
-/// the raw source text of the corresponding AST node — except [bodyText],
-/// which is the source-substring of the method body with the `.value`
-/// rewrites already applied so the emitter can splice it directly
-/// into the `Resource(...)` fetcher closure.
+/// Populated by `annotation_reader.dart` and consumed by the rewriters
+/// (currently `stateless_rewriter.dart`). All string members are the raw
+/// source text of the corresponding AST node — except [bodyText], which is
+/// the source-substring of the method body with the `.value` rewrites
+/// already applied so the emitter can splice it directly into the
+/// `Resource(...)` fetcher closure.
 ///
 /// Mirrors `EffectModel` for the parallel `@SolidEffect` method → `Effect`
 /// lowering. The two models share an identical body-rewrite

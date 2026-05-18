@@ -187,7 +187,7 @@ RewriteResult rewritePlainClass(
         );
       } else {
         pieces.add(
-          _rewriteUserMethod(
+          rewriteUserMethod(
             member,
             reactiveNames,
             classRegistry,
@@ -350,34 +350,4 @@ String _buildHeaderWithDisposable(ClassDeclaration classDecl, String source) {
   final spliceIdx = implementsClause.end - classStart;
   return '${base.substring(0, spliceIdx)}, $_disposableMarkerName'
       '${base.substring(spliceIdx)}';
-}
-
-/// Emits a non-annotated user method with the `.value` rewrite applied to
-/// its body — both the same-class branch (bare `SimpleIdentifier` reads of
-/// [reactiveFields]) and the cross-class single-level branch from
-/// [classRegistry] in one AST walk. [collectionFields] and
-/// [classCollectionFields] suppress `.value` insertion for collection-typed
-/// reactive fields (`ListSignal` / `SetSignal` / `MapSignal`) on the chain-
-/// access and bare-read paths.
-String _rewriteUserMethod(
-  MethodDeclaration method,
-  Set<String> reactiveFields,
-  Map<String, Set<String>> classRegistry,
-  String source, {
-  Set<String> collectionFields = const {},
-  Map<String, Set<String>> classCollectionFields = const {},
-}) {
-  final result = collectValueEdits(
-    method,
-    reactiveFields,
-    source,
-    classRegistry: classRegistry,
-    collectionFields: collectionFields,
-    classCollectionFields: classCollectionFields,
-  );
-  return applyEditsToRange(
-    source.substring(method.offset, method.end),
-    result.edits,
-    method.offset,
-  );
 }

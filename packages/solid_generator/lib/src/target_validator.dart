@@ -1,5 +1,7 @@
 import 'package:analyzer/dart/ast/ast.dart';
+import 'package:analyzer/dart/element/type.dart';
 import 'package:solid_generator/src/annotation_reader.dart';
+import 'package:solid_generator/src/element_utils.dart';
 import 'package:solid_generator/src/transformation_error.dart';
 
 /// Validates every `@SolidState` annotation in [unit] against the valid-target
@@ -350,13 +352,41 @@ void _validateEnvironmentField(FieldDeclaration field, String className) {
   if (variable.initializer != null) {
     _rejectEnvironment('field with initializer', location);
   }
-  // Textual `SignalBase` detection on the unresolved AST. The user must import
-  // `flutter_solidart` to write the type at all, so the lexeme prefix is
-  // sufficient at the validator boundary.
+  // `SignalBase`-typed environment field detection, two-tier:
+  //   1. Element-based: when the resolver populated the type, walk
+  //      `allSupertypes` for a `SignalBase` class anchored to the
+  //      `package:flutter_solidart/` library URI. Catches aliased imports
+  //      and user-defined subclasses of `SignalBase`.
+  //   2. Textual fallback: when the resolver hasn't run (parsed-AST
+  //      fallback or test sandboxes), match the type name's lexeme against
+  //      [signalBaseTypeNames]. The user-defined subclass case is missed
+  //      by this path but is harmless — runtime would still reject.
   final type = varList.type;
-  if (type is NamedType && signalBaseTypeNames.contains(type.name.lexeme)) {
+  if (type is NamedType && _isSignalBaseTyped(type)) {
     _rejectEnvironment('SignalBase-typed field', location);
   }
+}
+
+/// `true` iff [type]'s resolved supertype chain contains a `SignalBase`
+/// declared in `package:flutter_solidart/`, or — when the resolver hasn't
+/// produced a type — the type's lexeme is in [signalBaseTypeNames].
+bool _isSignalBaseTyped(NamedType type) {
+  final resolved = type.type;
+  if (resolved is InterfaceType) {
+    final element = resolved.element;
+    if (element.name == 'SignalBase' &&
+        isFromPackage(element.library.uri, 'flutter_solidart')) {
+      return true;
+    }
+    return supertypeChainContains(
+      resolved.allSupertypes,
+      'SignalBase',
+      packageName: 'flutter_solidart',
+    );
+  }
+  // Type unresolved (parsed-AST fallback / test sandbox). Fall back to
+  // lexeme match against the well-known set.
+  return signalBaseTypeNames.contains(type.name.lexeme);
 }
 
 /// Rejects `@SolidEnvironment` on a getter, setter, or method. Static
