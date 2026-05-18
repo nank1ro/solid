@@ -221,6 +221,50 @@ HomePage()
 
 Reads of `@SolidState` members on the injected instance stay reactive — only the dependent UI rebuilds.
 
+**Order matters when one provider's `create` reads another, and `.environment(...)` reads inverted.** `.environment(X)` wraps the receiver in `Provider<X>(child: receiver)`, so the LAST call in the chain is the OUTERMOST (top of the tree) — the chain reads bottom-up. `MultiProvider`'s `providers:` list is the natural top-down convention: list[0] is the outermost, list[last] is the innermost (just above `child:`), matching the equivalent nested `Provider(child: Provider(child: …))` form line-for-line.
+
+For a Provider's `create` callback to find a dependency via `ctx.read<T>()`, the dependency must be ABOVE it. That means in a `.environment(...)` chain, dependencies go LAST; in a `MultiProvider` list, dependencies go FIRST. Get either backwards and the consumer's `create` throws `ProviderNotFoundException`.
+
+```dart title="source/main.dart — .environment(...) form (chain reads bottom-up)"
+runApp(
+  const HomePage()
+      // Consumers FIRST (innermost — bottom of the tree).
+      .environment(
+        (ctx) => MessagesController(backend: ctx.read<ChatBackend>()),
+      )
+      .environment(
+        (ctx) => NavigationController(channels: ctx.read<ChannelsController>()),
+      )
+      // Dependencies LAST (outermost — ABOVE the consumers).
+      .environment((_) => ChannelsController())
+      .environment((_) => ChatBackend()),
+);
+```
+
+```dart title="source/main.dart — MultiProvider form (list reads top-down)"
+runApp(
+  MultiProvider(
+    providers: [
+      // Dependencies FIRST (outermost — top of the tree).
+      Provider(create: (_) => ChatBackend()),
+      Provider(create: (_) => ChannelsController()),
+      // Consumers LAST (innermost).
+      Provider(
+        create: (ctx) =>
+            NavigationController(channels: ctx.read<ChannelsController>()),
+      ),
+      Provider(
+        create: (ctx) =>
+            MessagesController(backend: ctx.read<ChatBackend>()),
+      ),
+    ],
+    child: const HomePage(),
+  ),
+);
+```
+
+For non-interdependent providers (the original two-line `.environment` example above), order doesn't matter — there's no `ctx.read<T>()` from another provider in the chain.
+
 ## 7. Reading reactive state without subscribing — `.untracked`
 
 Docs: <https://solid.mariuti.com/guides/untracked>. Append `.untracked` to read the current value without registering a dependency on the surrounding `build`, effect, or query.
