@@ -4,8 +4,17 @@ import 'package:analyzer/dart/element/type.dart';
 import 'package:meta/meta.dart';
 import 'package:solid_generator/src/element_utils.dart';
 
-/// Computes the set of widget expressions that must be wrapped in
-/// `SignalBuilder`.
+/// Per-build wrap plan: the set of widget expressions that get an inner
+/// `SignalBuilder` wrap, plus the offsets of any tracked reads that have
+/// no enclosing widget candidate (the **unanchored** offsets). The
+/// `build_rewriter` consumes both — anchored wraps are emitted in-place,
+/// and a non-empty `unanchoredOffsets` triggers an outer SignalBuilder
+/// around the whole build method body so top-level statement reads (e.g.
+/// `final c = nav.currentChannel; …`) drive reactivity instead of being
+/// silently dropped.
+typedef WrapPlan = ({Set<Expression> wraps, List<int> unanchoredOffsets});
+
+/// Computes the [WrapPlan] for a `build` method.
 ///
 /// Algorithm:
 ///
@@ -26,7 +35,8 @@ import 'package:solid_generator/src/element_utils.dart';
 ///    cannot host a `SignalBuilder` wrapper (see `_isAtKeyPosition`).
 /// 2. For each tracked-read offset T (from `value_rewriter`), pick the
 ///    smallest (deepest) widget expression whose source range contains T —
-///    the minimum-subtree rule.
+///    the minimum-subtree rule. If no widget contains T, record T in
+///    `unanchoredOffsets` so the caller can emit an outer body wrap.
 /// 3. Prune ancestors: if both an outer and inner widget appear in the
 ///    wrap set, drop the outer (nested-reads rule).
 /// 4. Suppress any wrap whose ancestor chain already contains a
@@ -36,22 +46,24 @@ import 'package:solid_generator/src/element_utils.dart';
 /// consulted only to recognize the `<queryName>().when(...)` /
 /// `<queryName>().maybeWhen(...)` widget-shape; the recorded tracked-read
 /// offsets themselves come from `value_rewriter`.
-Set<Expression> computeWrapSet(
+WrapPlan computeWrapPlan(
   MethodDeclaration buildMethod,
   Map<int, String> trackedReadNamesByOffset, {
   Set<String> queryNames = const {},
 }) {
-  if (trackedReadNamesByOffset.isEmpty) return <Expression>{};
+  if (trackedReadNamesByOffset.isEmpty) {
+    return (wraps: <Expression>{}, unanchoredOffsets: const <int>[]);
+  }
 
   final collector = _WidgetCollector(queryNames);
   buildMethod.accept(collector);
   final widgets = collector.widgets;
-  if (widgets.isEmpty) return <Expression>{};
 
   // Per-wrap name-set drives the prune rule below: collapse nested wraps
   // whose underlying signal/query reads all read names the outer wrap
   // already subscribes to.
   final wrapNames = <Expression, Set<String>>{};
+  final unanchoredOffsets = <int>[];
   for (final entry in trackedReadNamesByOffset.entries) {
     final offset = entry.key;
     Expression? smallest;
@@ -62,19 +74,40 @@ Set<Expression> computeWrapSet(
     }
     if (smallest != null) {
       wrapNames.putIfAbsent(smallest, () => <String>{}).add(entry.value);
+    } else {
+      // No enclosing widget candidate — this is a top-level read at the
+      // build-method's statement scope (e.g. `final c = sig; if (c == null)
+      // return …`). `rewriteBuildMethod` synthesizes an outer SignalBuilder
+      // around the whole body so the read fires inside the tracking
+      // window. The `_WidgetCollector` filter (B-2 strict) keeps non-Widget
+      // method-invocation candidates from being picked here.
+      unanchoredOffsets.add(offset);
     }
-    // When `smallest == null` no enclosing Widget candidate exists for this
-    // tracked read. Historical behavior is to silently skip — the read
-    // remains live at the source level but won't drive a `SignalBuilder`.
-    // The `_WidgetCollector` filter (B-2 strict) prevents the *wrong* wrap:
-    // a `.maybeWhen` chain whose return type isn't a Widget no longer
-    // qualifies as a candidate, so the outer Widget gets picked instead.
   }
 
   final wrapSet = wrapNames.keys.toSet();
   _pruneAncestors(wrapSet, wrapNames);
   _suppressAlreadyWrapped(wrapSet);
-  return wrapSet;
+  // When the build method has unanchored reads, the synthesized outer body
+  // wrap (added by `build_rewriter._synthesizeOuterWrap`) covers every
+  // inner widget. Any anchored inner wrap whose name-set is a subset of
+  // the unanchored-read names sits inside the outer wrap's tracking
+  // window and would double-subscribe — same rule as the strict-contains
+  // nested-reads case in `_pruneAncestors`, applied against the virtual
+  // outer wrap.
+  if (unanchoredOffsets.isNotEmpty) {
+    final unanchoredNames = <String>{
+      for (final offset in unanchoredOffsets) trackedReadNamesByOffset[offset]!,
+    };
+    final toRemove = <Expression>{};
+    for (final inner in wrapSet) {
+      final innerNames = wrapNames[inner] ?? const <String>{};
+      if (innerNames.isEmpty) continue;
+      if (unanchoredNames.containsAll(innerNames)) toRemove.add(inner);
+    }
+    wrapSet.removeAll(toRemove);
+  }
+  return (wraps: wrapSet, unanchoredOffsets: unanchoredOffsets);
 }
 
 /// Drops an inner wrap when the strictly-containing outer wrap's name-set
@@ -185,8 +218,8 @@ class _WidgetCollector extends RecursiveAstVisitor<void> {
       // `_isQueryStateChain`), but its `.maybeWhen<R>` extension can return
       // any type. Reject the candidate when the resolved return type is not
       // a Widget — the smallest-widget rule then picks the next larger
-      // candidate, or `computeWrapSet` silently drops the read if no
-      // enclosing Widget exists.
+      // candidate, or the offset is recorded as unanchored and drives the
+      // outer body wrap if no enclosing Widget exists.
       if (!isWidgetTypedExpression(node)) return;
       widgets.add(node);
     }

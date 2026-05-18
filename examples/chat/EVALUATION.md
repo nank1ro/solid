@@ -339,3 +339,52 @@ tests), 11 integration tests pass. Cold
 (17s builder AOT + 5s of generator work for 15 files). Both
 `examples/chat/` and `examples/weather/` build cleanly with the
 natural authoring patterns (no workarounds for the original 7 bugs).
+
+## Post-script 2 — runtime reactivity bug (2026-05-15)
+
+After the close-out PR landed, running the chat at `flutter run -d chrome`
+surfaced two new runtime bugs the build-step CI couldn't catch:
+
+- **`ProviderNotFoundException` and a `Null is not a subtype` cast**
+  triggered by misordered `.environment(...)` chaining in `main.dart`
+  (consumer Provider's `create` ran before its dep Provider was above
+  it) and by signal writes in controller constructors (re-entering
+  `Provider.create` mid-flight). Fixes: reorder the chain so deps come
+  AFTER consumers; replace constructor-body `addAll(...)` /
+  `users[id] = u` with collection-literal field initializers
+  (`List<Channel> channels = [...ChatBackend.seedChannels];`).
+
+- **Tapping a channel didn't update the UI.** Generator bug:
+  `placement_visitor.computeWrapSet` silently dropped tracked reads that
+  had no enclosing widget — the natural authoring pattern
+  `final c = navController.currentChannel; if (c == null) return …;` got
+  its `.value` rewrite but no `SignalBuilder` wrap, so the read fired
+  once at first build and never re-subscribed. The fix replaces
+  `computeWrapSet` with `computeWrapPlan`, which now returns both the
+  anchored wrap set AND a list of unanchored offsets;
+  `build_rewriter.rewriteBuildMethod` synthesizes an outer
+  `SignalBuilder` wrapping the entire build body when any offsets are
+  unanchored. New goldens cover the four shapes (top-level read,
+  early-return, cross-class env receiver, mixed top-level + inner). The
+  inner anchored wrap is pruned via the existing nested-reads rule
+  (SPEC §7.5) when the outer's name-set is a superset. SPEC §7.1 was
+  amended to document the unanchored-read case.
+
+  One follow-up known-good pattern surfaced from the same investigation:
+  reads inside deferred-builder closures (`LayoutBuilder.builder`,
+  `ListView.builder` `itemBuilder`) execute AFTER the wrapping
+  `SignalBuilder`'s tracking window closes, so the wrap registers zero
+  deps and the assertion fires. The chat example sidesteps this by
+  hoisting such reads (e.g. `final users = usersController.users;`) to
+  the top of build, where the new outer body wrap catches them. A
+  proper generator fix — push the wrap INSIDE the deferred closure —
+  is filed as a separate follow-up.
+
+Final-state runtime verification: launched `examples/chat/` in Chrome
+via the Dart MCP. No exceptions, no assertion failures. Wide-screen
+default layout renders both ChannelListPane and MessagePane;
+channel-list unread badges and online-count update live as the mock
+backend streams events. Tapping `#general` switches to the channel
+view (highlight, header, message list, composer all render). Tapping
+`#dart` swaps to a new message list with different content.
+Reactivity is end-to-end working.

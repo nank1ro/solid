@@ -4,11 +4,9 @@ import '../backend/chat_backend.dart';
 import '../domain/models.dart';
 
 class ChannelsController implements Disposable {
-  ChannelsController() {
-    channels.addAll(ChatBackend.seedChannels);
-  }
-
-  final channels = ListSignal<Channel>([], name: 'channels');
+  final channels = ListSignal<Channel>([
+    ...ChatBackend.seedChannels,
+  ], name: 'channels');
 
   late final channelCount = Computed<int>(
     () => channels.length,

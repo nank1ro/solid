@@ -1328,6 +1328,8 @@ A widget subtree needs `SignalBuilder` wrapping if and only if all three hold:
 2. The subtree contains at least one **tracked** reactive read (Section 6.5).
 3. The subtree is not already inside a `SignalBuilder`.
 
+**Unanchored reads (build-method statement scope).** When a tracked reactive read appears at the `build` method's statement scope rather than inside a widget expression — e.g. `final c = nav.currentChannel; if (c == null) return …;` — there is no candidate subtree for the minimal-subtree rule to pick. The generator synthesizes an outer `SignalBuilder` around the entire build method body. The original body is moved verbatim into the builder closure so all statements, early-returns, and switch expressions evaluate inside the SignalBuilder's tracking window and register their reads as dependencies. Any inner anchored wraps whose name-set is a subset of the unanchored-read names are pruned per §7.5 — the outer body wrap subsumes them.
+
 ### 7.2 Minimal-subtree rule (fine-grained)
 
 When multiple candidate subtrees in a build tree contain tracked reactive reads, wrap the **smallest** subtree for each independent read. "Smallest" is defined by the widget-subtree hierarchy: if the tracked read appears inside a `Text('$counter')`, wrap that `Text`, not its `Column` ancestor.

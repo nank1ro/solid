@@ -120,6 +120,10 @@ const List<String> goldenNames = <String>[
   'stateless_lift_with_helpers',
   'stateless_lift_with_user_init_state',
   'query_with_cross_class_collection_dep',
+  'top_level_read_in_build',
+  'top_level_read_early_return',
+  'top_level_cross_class_read_in_build',
+  'mixed_top_level_and_inner_read',
 ];
 
 /// Memoized golden directory resolution. Resolved relative to the package

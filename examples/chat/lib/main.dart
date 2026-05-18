@@ -13,24 +13,19 @@ import 'controllers/users_controller.dart';
 
 void main() {
   SolidartConfig.autoDispose = false;
+  // `.environment(X)` wraps the receiver in `Provider<X>(child: receiver)`,
+  // so X ends up ABOVE the receiver in the widget tree. For a Provider's
+  // `create` callback to find a dependency via `ctx.read<T>()`, the
+  // dependency must be ABOVE — i.e. its `.environment(...)` call must
+  // appear LATER in the chain (the last call is the outermost provider).
+  //
+  // Order below:
+  //   * NavigationController (consumer of ChannelsController) goes first
+  //   * ChannelsController goes after so it ends up above
+  //   * MessagesController (consumer of ChatBackend) goes before ChatBackend
+  //   * ChatBackend goes last so it ends up at the top
   runApp(
     const ChatApp()
-        .environment(
-          (_) => ChatBackend(),
-          dispose: (context, provider) => provider.dispose(),
-        )
-        .environment(
-          (_) => SessionController(),
-          dispose: (context, provider) => provider.dispose(),
-        )
-        .environment(
-          (_) => UsersController(),
-          dispose: (context, provider) => provider.dispose(),
-        )
-        .environment(
-          (_) => ChannelsController(),
-          dispose: (context, provider) => provider.dispose(),
-        )
         .environment(
           (ctx) =>
               NavigationController(channels: ctx.read<ChannelsController>()),
@@ -38,6 +33,22 @@ void main() {
         )
         .environment(
           (ctx) => MessagesController(backend: ctx.read<ChatBackend>()),
+          dispose: (context, provider) => provider.dispose(),
+        )
+        .environment(
+          (_) => UsersController(),
+          dispose: (context, provider) => provider.dispose(),
+        )
+        .environment(
+          (_) => SessionController(),
+          dispose: (context, provider) => provider.dispose(),
+        )
+        .environment(
+          (_) => ChannelsController(),
+          dispose: (context, provider) => provider.dispose(),
+        )
+        .environment(
+          (_) => ChatBackend(),
           dispose: (context, provider) => provider.dispose(),
         ),
   );

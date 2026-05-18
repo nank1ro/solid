@@ -24,13 +24,13 @@ class _LazyDisplayState extends State<LazyDisplay> {
 
   @override
   Widget build(BuildContext context) {
-    return switch (holder.count.hasValue) {
-      true => SignalBuilder(
-        builder: (context, child) {
-          return Text('count: ${holder.count.value}');
-        },
-      ),
-      false => const Text('not initialized'),
-    };
+    return SignalBuilder(
+      builder: (context, child) {
+        return switch (holder.count.hasValue) {
+          true => Text('count: ${holder.count.value}'),
+          false => const Text('not initialized'),
+        };
+      },
+    );
   }
 }

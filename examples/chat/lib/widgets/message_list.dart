@@ -35,22 +35,29 @@ class _MessageListState extends State<MessageList> {
 
   @override
   Widget build(BuildContext context) {
-    final messages =
-        messagesController.channelMessages[widget.channelId] ??
-        const <Message>[];
-    return Column(
-      children: [
-        Expanded(
-          child: messages.isEmpty
-              ? const Center(
-                  child: Text(
-                    'No messages yet — say hello',
-                    style: TextStyle(color: Colors.black54),
-                  ),
-                )
-              : SignalBuilder(
-                  builder: (context, child) {
-                    return ListView.builder(
+    return SignalBuilder(
+      builder: (context, child) {
+        // Hoist signal reads OUT of ListView.builder's deferred `itemBuilder`
+        // closure — that closure runs after the wrapping SignalBuilder has
+        // stopped tracking, so a read inside it never subscribes. Reading at
+        // the build method's statement scope keeps the read inside the outer
+        // SignalBuilder that the generator synthesizes around the whole build
+        // body (SPEC §7.1 unanchored case).
+        final messages =
+            messagesController.channelMessages[widget.channelId] ??
+            const <Message>[];
+        final users = usersController.users.value;
+        return Column(
+          children: [
+            Expanded(
+              child: messages.isEmpty
+                  ? const Center(
+                      child: Text(
+                        'No messages yet — say hello',
+                        style: TextStyle(color: Colors.black54),
+                      ),
+                    )
+                  : ListView.builder(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 12,
                         vertical: 8,
@@ -58,40 +65,40 @@ class _MessageListState extends State<MessageList> {
                       itemCount: messages.length,
                       itemBuilder: (context, index) {
                         final m = messages[index];
-                        final user = usersController.users[m.senderId];
+                        final user = users[m.senderId];
                         return _MessageRow(message: m, user: user);
                       },
-                    );
-                  },
+                    ),
+            ),
+            SizedBox(
+              height: 20,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: SignalBuilder(
+                    builder: (context, child) {
+                      return Text(
+                        _labelFor(
+                          watchTypingUsers().maybeWhen(
+                            ready: (ids) => ids,
+                            orElse: () => const <String>{},
+                          ),
+                        ),
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: Colors.black54,
+                          fontStyle: FontStyle.italic,
+                        ),
+                      );
+                    },
+                  ),
                 ),
-        ),
-        SizedBox(
-          height: 20,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: SignalBuilder(
-                builder: (context, child) {
-                  return Text(
-                    _labelFor(
-                      watchTypingUsers().maybeWhen(
-                        ready: (ids) => ids,
-                        orElse: () => const <String>{},
-                      ),
-                    ),
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: Colors.black54,
-                      fontStyle: FontStyle.italic,
-                    ),
-                  );
-                },
               ),
             ),
-          ),
-        ),
-      ],
+          ],
+        );
+      },
     );
   }
 

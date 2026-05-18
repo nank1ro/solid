@@ -4,13 +4,9 @@ import '../backend/chat_backend.dart';
 import '../domain/models.dart';
 
 class UsersController implements Disposable {
-  UsersController() {
-    for (final u in ChatBackend.seedUsers) {
-      users[u.id] = u;
-    }
-  }
-
-  final users = MapSignal<String, User>({}, name: 'users');
+  final users = MapSignal<String, User>({
+    for (final u in ChatBackend.seedUsers) u.id: u,
+  }, name: 'users');
 
   void upsert(User u) {
     users[u.id] = u;

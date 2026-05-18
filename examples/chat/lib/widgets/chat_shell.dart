@@ -56,52 +56,50 @@ class _ChatShellState extends State<ChatShell> {
 
   @override
   Widget build(BuildContext context) {
-    return ScaffoldMessenger(
-      key: _messengerKey,
-      child: Scaffold(
-        body: SafeArea(
-          child: SignalBuilder(
-            builder: (context, child) {
-              return LayoutBuilder(
-                builder: (context, constraints) {
-                  final wide = constraints.maxWidth >= 720;
-                  if (wide) {
-                    return const Row(
+    return SignalBuilder(
+      builder: (context, child) {
+        // Top-level reads at build's statement scope — the generator
+        // synthesizes an outer SignalBuilder around the whole body so the
+        // wide/narrow flip and channel-switching are both reactive.
+        final wide = MediaQuery.sizeOf(context).width >= 720;
+        final currentChannelId = navController.currentChannelId.value;
+        return ScaffoldMessenger(
+          key: _messengerKey,
+          child: Scaffold(
+            body: SafeArea(
+              child: wide
+                  ? const Row(
                       children: [
                         SizedBox(width: 260, child: ChannelListPane()),
                         Expanded(child: MessagePane()),
                       ],
-                    );
-                  }
-                  final showList = navController.currentChannelId.value == null;
-                  return showList
-                      ? const ChannelListPane()
-                      : Column(
-                          children: [
-                            Material(
-                              elevation: 1,
-                              child: SizedBox(
-                                height: 44,
-                                child: Row(
-                                  children: [
-                                    IconButton(
-                                      icon: const Icon(Icons.arrow_back),
-                                      onPressed: navController.closeCurrent,
-                                    ),
-                                    const Text('Back to channels'),
-                                  ],
+                    )
+                  : (currentChannelId == null
+                        ? const ChannelListPane()
+                        : Column(
+                            children: [
+                              Material(
+                                elevation: 1,
+                                child: SizedBox(
+                                  height: 44,
+                                  child: Row(
+                                    children: [
+                                      IconButton(
+                                        icon: const Icon(Icons.arrow_back),
+                                        onPressed: navController.closeCurrent,
+                                      ),
+                                      const Text('Back to channels'),
+                                    ],
+                                  ),
                                 ),
                               ),
-                            ),
-                            const Expanded(child: MessagePane()),
-                          ],
-                        );
-                },
-              );
-            },
+                              const Expanded(child: MessagePane()),
+                            ],
+                          )),
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 
