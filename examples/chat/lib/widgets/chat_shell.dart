@@ -58,9 +58,6 @@ class _ChatShellState extends State<ChatShell> {
   Widget build(BuildContext context) {
     return SignalBuilder(
       builder: (context, child) {
-        // Top-level reads at build's statement scope — the generator
-        // synthesizes an outer SignalBuilder around the whole body so the
-        // wide/narrow flip and channel-switching are both reactive.
         final wide = MediaQuery.sizeOf(context).width >= 720;
         final currentChannelId = navController.currentChannelId.value;
         return ScaffoldMessenger(

@@ -18,12 +18,13 @@ class MessageList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Hoist signal reads OUT of ListView.builder's deferred `itemBuilder`
-    // closure — that closure runs after the wrapping SignalBuilder has
-    // stopped tracking, so a read inside it never subscribes. Reading at
-    // the build method's statement scope keeps the read inside the outer
-    // SignalBuilder that the generator synthesizes around the whole build
-    // body (SPEC §7.1 unanchored case).
+    // Hoist signal reads OUT of ListView.builder's `itemBuilder` callback.
+    // `itemBuilder` is a separate function; a SignalBuilder only detects
+    // atoms read within its own builder function's execution, so a read
+    // performed inside the nested callback subscribes to nothing. Reading
+    // at the build method's statement scope keeps the read inside the outer
+    // SignalBuilder the generator synthesizes around the whole build body
+    // (SPEC §7.1 unanchored case).
     final messages =
         messagesController.channelMessages[channelId] ?? const <Message>[];
     final users = usersController.users;
