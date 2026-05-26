@@ -1,0 +1,30 @@
+name: Publish to pub.dev
+
+on:
+  push:
+    tags:
+      - "solid_generator-v[0-9]+.[0-9]+.[0-9]+" # Matches solid_generator-v1.2.3
+      - 'solid_generator-v[0-9]+.[0-9]+.[0-9]+\+[0-9]+' # Matches solid_generator-v1.2.3+4
+      - "solid_annotations-v[0-9]+.[0-9]+.[0-9]+" # Matches solid_annotations-v1.2.3
+      - 'solid_annotations-v[0-9]+.[0-9]+.[0-9]+\+[0-9]+' # Matches solid_annotations-v1.2.3+4
+
+jobs:
+  publish_solid_annotations:
+    if: startsWith(github.ref_name, 'solid_annotations-')
+    permissions:
+      id-token: write # Required for OIDC authentication to pub.dev
+    uses: nank1ro/flutter-shadcn-ui/.github/workflows/cached-publish.yaml@main
+    with:
+      environment: pub.dev
+      install_flutter: true
+      working-directory: packages/solid_annotations
+
+  publish_solid_generator:
+    if: startsWith(github.ref_name, 'solid_generator-')
+    permissions:
+      id-token: write # Required for OIDC authentication to pub.dev
+    uses: nank1ro/flutter-shadcn-ui/.github/workflows/cached-publish.yaml@main
+    with:
+      environment: pub.dev
+      install_flutter: true
+      working-directory: packages/solid_generator
