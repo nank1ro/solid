@@ -53,7 +53,16 @@ class MessagesController {
 
   void markAllRead(String channelId) {
     final msgs = channelMessages[channelId] ?? const <Message>[];
-    final next = <String>{...?readIds[channelId]};
+    final existing = readIds[channelId] ?? const <String>{};
+    // Skip the write when nothing new is unread: reassigning readIds with an
+    // equal-content set still notifies subscribers (totalUnread, the sidebar),
+    // and the viewing effect calls this on every incoming message in any channel.
+    if (msgs.every(
+      (m) => m.status != MessageStatus.confirmed || existing.contains(m.id),
+    )) {
+      return;
+    }
+    final next = <String>{...existing};
     for (final m in msgs) {
       if (m.status == MessageStatus.confirmed) next.add(m.id);
     }

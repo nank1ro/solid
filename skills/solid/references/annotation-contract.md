@@ -123,6 +123,18 @@ extension UntrackedExtension<T> on T {
 
 `counter.untracked` typechecks identically to `counter` and is a no-op at runtime. The generator detects the pattern at source level and rewrites it to the underlying `untrackedValue` primitive, excluding the read from the dependency set — `SignalBuilder` doesn't wrap it inside `build`, and an enclosing `@SolidEffect` / `@SolidQuery` won't re-fire on changes to it.
 
+The getter untracks a **read**. To untrack a **write** inside an effect, use the `untracked(() => …)` function form — also shipped by `solid_annotations` as a source-time stub (`T untracked<T>(T Function() callback) => callback();`, resolving to `flutter_solidart`'s `untracked` after generation). This is required when writing a collection signal (`MapSignal`/`ListSignal`/`SetSignal`) inside an effect: their element-writes read the signal internally to diff, so the write would otherwise subscribe the effect to what it writes (a cyclic reaction). Read the dependencies first, then wrap the write:
+
+```dart
+@SolidEffect()
+void recordHistory() {
+  final c = counter;                          // tracked dependency
+  untracked(() => history = [...history, c]); // untracked write
+}
+```
+
+The generator leaves the call verbatim (inner reads still get `.value` but are not tracked) and, when the file also keeps the `solid_annotations` import, emits it with `hide untracked` so the call binds to the runtime function.
+
 ### Two ways reads become untracked
 
 | Form | How |

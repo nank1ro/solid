@@ -62,6 +62,22 @@ final DartFormatter _formatter = DartFormatter(
 /// construction.
 final RegExp _environmentExtensionRef = RegExp(r'\.environment\b');
 
+/// Pattern matching a top-level `untracked(` or `untracked<T>(` call in lowered
+/// output (the `hide untracked` keep-path condition). The word boundary and
+/// `[(<]` avoid the `.untrackedValue` / `.untrackedState` getters and identifiers
+/// like `myUntracked(`. Hoisted like [_environmentExtensionRef].
+final RegExp _untrackedCallRef = RegExp(r'\buntracked\s*[(<]');
+
+/// A `show` or `as` clause on an import. When present, [_hideCombinator] leaves
+/// the directive alone: `show` doesn't expose the hidden name, and `as`
+/// prefixes the import so there's no bare-name clash.
+final RegExp _showOrAsCombinatorRef = RegExp(r'\b(?:show|as)\b');
+
+/// An existing `hide` clause on an import. [_hideCombinator] merges the new
+/// name into it (comma-separated) rather than appending a second `hide`, which
+/// would warn `multiple_combinators` (fatal under `--fatal-infos`).
+final RegExp _hideCombinatorRef = RegExp(r'\bhide\b');
+
 class _SolidBuilder implements Builder {
   @override
   final Map<String, List<String>> buildExtensions = const {
@@ -729,8 +745,29 @@ String _renderOutput(
     referencesSolidAnnotations: referencesSolidAnnotations,
     extraImports: extraImports,
   );
+  // `untracked(...)` (passed through verbatim from source, like
+  // `.environment<T>()`) collides with the `solid_annotations` `untracked` stub
+  // only when a file keeps BOTH imports — `solid_annotations` retained (a class
+  // emits `Disposable` / uses `.environment<T>()`) and `flutter_solidart` added.
+  // Then hide `untracked` from `solid_annotations` so the call binds to the
+  // runtime function. The body scan (cf. `_environmentExtensionRef` for
+  // verbatim-passthrough constructs) runs only when both imports are present.
+  final keepsSolidAnnotations = imports.any(
+    (u) => u.startsWith(solidAnnotationsUriPrefix),
+  );
+  final hideUntrackedFromAnnotations =
+      keepsSolidAnnotations &&
+      imports.contains(flutterSolidartUri) &&
+      _untrackedCallRef.hasMatch(body);
   final importBlock = imports
-      .map((u) => sourceDirectives[u] ?? "import '$u';")
+      .map((u) {
+        final directive = sourceDirectives[u] ?? "import '$u';";
+        if (hideUntrackedFromAnnotations &&
+            u.startsWith(solidAnnotationsUriPrefix)) {
+          return _hideCombinator(directive, 'untracked');
+        }
+        return directive;
+      })
       .join('\n');
 
   final combined = '$importBlock\n\n$body\n';
@@ -749,6 +786,28 @@ String _renderOutput(
   };
   final withConst = addConstAtCallSites(withDispose, constCtorNames);
   return _formatter.format(withConst);
+}
+
+/// Adds a `hide <name>` combinator before the `;` of an `import '...';`
+/// directive, keeping a SINGLE combinator (two `show`/`hide` clauses warn
+/// `multiple_combinators`, fatal under `--fatal-infos`):
+///   * no combinator      → append `hide <name>`
+///   * existing `hide ...` → merge: `hide ..., <name>`
+///   * existing `show`/`as`→ leave unchanged (name not exposed / import prefixed)
+///
+/// The combinator scan looks only at the text after the quoted URI, so a path
+/// segment like `/show.dart` is never mistaken for a combinator.
+String _hideCombinator(String directive, String name) {
+  final trimmed = directive.trimRight();
+  if (!trimmed.endsWith(';')) return directive;
+  final beforeSemi = trimmed.substring(0, trimmed.length - 1).trimRight();
+  final firstQuote = beforeSemi.indexOf("'");
+  final tail = firstQuote >= 0
+      ? beforeSemi.substring(beforeSemi.indexOf("'", firstQuote + 1) + 1)
+      : beforeSemi;
+  if (_showOrAsCombinatorRef.hasMatch(tail)) return directive;
+  if (_hideCombinatorRef.hasMatch(tail)) return '$beforeSemi, $name;';
+  return '$beforeSemi hide $name;';
 }
 
 /// Returns a [RewriteResult] for [c]: a verbatim slice when the class has

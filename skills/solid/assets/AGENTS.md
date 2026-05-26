@@ -25,6 +25,7 @@ You write a `StatelessWidget` with these annotations on members; the generator r
 - `@SolidQuery()` — `Future<T>` / `Stream<T>` method. **No parameters** — read `@SolidState` fields from the body to make it react. Options: `debounce: Duration(...)` waits N after the last input change before re-running; `useRefreshing: true` (default) keeps the resource on its previous value while refetching with `.isRefreshing == true` for smoother UX, `useRefreshing: false` drops back to the `loading` state on every re-execution.
 - `@SolidEnvironment()` — `late` field bound to the nearest ancestor `Provider<T>`. **`late` is required.**
 - `.untracked` — read a `@SolidState` field without registering a dependency. In string interpolation, only `'${x.untracked}'` works (not `'$x.untracked'`).
+- `untracked(() => …)` — function form, for *writing* a signal inside a `@SolidEffect` without the write re-triggering the effect (required for collection signals). Read deps first, wrap only the write: `final c = counter; untracked(() => history = [...history, c]);`. Don't wrap the whole effect body.
 
 ## Helper methods, `dispose()`, and `initState()` on a lifted `StatelessWidget`
 

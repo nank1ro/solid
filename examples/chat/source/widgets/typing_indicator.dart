@@ -22,15 +22,13 @@ class TypingIndicator extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Resolve the typing set + label inside build's statement scope so the
-    // generator's outer SignalBuilder catches the query subscription.
     final ids = watchTypingUsers().maybeWhen(
       ready: (ids) => ids,
       orElse: () => const <String>{},
     );
     final label = _labelFor(ids);
-    // Collapse to zero height when nobody is typing — avoids the always-on
-    // 20px gap that was visible above the input before.
+    // Collapse to zero height when nobody is typing, so the row reserves no
+    // space below the input while idle.
     return AnimatedSize(
       duration: const Duration(milliseconds: 150),
       alignment: Alignment.topCenter,

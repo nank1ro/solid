@@ -1294,7 +1294,19 @@ Rules:
 - **String interpolations.** Only the long form `'${counter.untracked}'` / `'${fetchData().untracked.value}'` expresses the untracked intent. The short form `'$counter.untracked'` parses as `${counter}` followed by a literal `.untracked` string suffix and rewrites as a normal tracked read of `counter`.
 - **Detection is name-based** for both read kinds; the existing shadowing guard (Section 5.5) suppresses the rewrite when a local variable shadows the underlying field or query name.
 
-The function-call form `untracked(() => …)` is rejected at build time with a `CodeGenerationError` directing the user to the extension form (`counter.untracked` for state reads, `fetchData().untracked` for query reads).
+The function-call form `untracked(() => …)` is supported for untracking a **write**. The `.untracked` getter only untracks a read; it cannot stop a *write* from subscribing. This matters for collection signals (`MapSignal` / `ListSignal` / `SetSignal`): their element-write operators (`[]=`, `add`, whole-collection reassignment via `setValue`) read the signal's tracked value internally to diff before writing, so a collection write *inside* an `@SolidEffect` subscribes the effect to the very signal it writes — the write then notifies, the effect re-runs, and it writes again (a cyclic reaction / stack overflow). Scalar writes go through a setter that does not read the tracked value, so they don't self-subscribe.
+
+To break the cycle, read the dependencies in separate statements (so they stay tracked) and wrap only the write in `untracked(() => …)`:
+
+```dart
+@SolidEffect()
+void recordHistory() {
+  final c = counter;                          // tracked dependency
+  untracked(() => history = [...history, c]); // untracked write — does not re-trigger the effect
+}
+```
+
+`solid_annotations` exports a source-time stub `T untracked<T>(T Function() callback) => callback();` (alongside the `UntrackedExtension` getter) so the source typechecks. The generator detects the target-less `untracked(...)` call and leaves it verbatim, treating its callback as an untracked context — inner reads still receive `.value` (to typecheck) but are NOT recorded as tracked reads, and inner writes do not subscribe. The generated call resolves to `flutter_solidart`'s `untracked`. When a generated file both retains the `solid_annotations` import (a class emits `Disposable` or uses `.environment<T>()`) and calls `untracked`, the import is emitted with `hide untracked` so the call binds to the runtime function.
 
 ### 6.5 Everything else is tracked
 

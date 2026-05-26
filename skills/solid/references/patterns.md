@@ -287,16 +287,33 @@ class KeyedContainer extends StatelessWidget {
 }
 ```
 
-Inside a `@SolidEffect` that writes to a signal, use `.untracked` on the signal you're writing to so the effect doesn't re-trigger itself:
+Reads inside `on*` callback parameters (`onPressed`, `onTap`, `onChanged`, …) are auto-untracked — no `.untracked` needed. In string interpolations, only the long form `'${counter.untracked}'` works; `'$counter.untracked'` is still tracked.
 
-```dart
+## 8. Writing a signal inside an effect — `untracked(() => …)`
+
+A `@SolidEffect` reacts (its reads are dependencies); it should not subscribe to what it *writes*.
+The `.untracked` getter only untracks a read — it cannot stop a **write** from subscribing. This
+bites collection signals: `MapSignal`/`ListSignal`/`SetSignal` element-writes read the signal
+internally to diff, so a collection write inside an effect subscribes the effect to itself → it
+re-runs → writes again → `RangeError: Maximum call stack size exceeded` (a cyclic reaction).
+
+Read the dependencies first (so they stay tracked), then wrap only the write in the
+`untracked(() => …)` function form:
+
+```dart title="source/history_recorder.dart"
+@SolidState()
+int counter = 0;
+
 @SolidState()
 List<int> history = [];
 
 @SolidEffect()
 void recordHistory() {
-  history = [...history.untracked, counter]; // counter tracked, history not
+  final c = counter;                          // tracked dependency
+  untracked(() => history = [...history, c]); // write does NOT re-trigger the effect
 }
 ```
 
-Reads inside `on*` callback parameters (`onPressed`, `onTap`, `onChanged`, …) are auto-untracked — no `.untracked` needed. In string interpolations, only the long form `'${counter.untracked}'` works; `'$counter.untracked'` is still tracked.
+`untracked` is a function (from `solid_annotations`, resolving to `flutter_solidart` after
+generation), not the `.untracked` getter. Do **not** wrap the whole body — that would untrack the
+dependency reads too, leaving the effect with no dependencies so it never re-runs.

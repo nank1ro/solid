@@ -2,7 +2,6 @@ import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/dart/ast/visitor.dart';
 import 'package:analyzer/dart/element/type.dart';
 import 'package:solid_generator/src/query_model.dart';
-import 'package:solid_generator/src/transformation_error.dart';
 
 /// A single value-level edit emitted by [collectValueEdits].
 ///
@@ -243,10 +242,10 @@ String applyEditsToRange(String text, List<ValueEdit> edits, int baseOffset) {
   return result;
 }
 
-/// Name of the marker getter exposed by `UntrackedExtension` in
-/// `solid_annotations`. Must stay in sync with the extension declaration in
-/// `packages/solid_annotations/lib/src/annotations.dart`.
-const String _untrackedGetterName = 'untracked';
+/// The `untracked` identifier exposed by `solid_annotations` — both the
+/// `UntrackedExtension` getter (`field.untracked`) and the top-level function
+/// (`untracked(() => ...)`). Must stay in sync with those declarations.
+const String _untrackedName = 'untracked';
 
 /// Name of the runtime opt-out getter on `ReadableSignal<T>` from
 /// `flutter_solidart`. Reading via this getter never subscribes the
@@ -422,17 +421,20 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
 
   @override
   void visitMethodInvocation(MethodInvocation node) {
-    // The function-call form `untracked(() => ...)` is rejected; the
-    // canonical opt-out marker is `<field>.untracked` (handled in
-    // [visitPrefixedIdentifier]).
-    if (node.target == null && node.methodName.name == _untrackedGetterName) {
-      throw const CodeGenerationError(
-        'untracked(() => ...) is not supported. '
-            'Use the extension getter at the call site instead, e.g. '
-            '`counter.untracked`.',
-        null,
-        'untracked() function-call form',
-      );
+    // `untracked(() => ...)` passes through verbatim and resolves to
+    // flutter_solidart's `untracked` at runtime; the depth bump suppresses
+    // dependency recording for inner reads, as for `on*` callbacks in
+    // [visitFunctionExpression]. The `!_isShadowed` guard mirrors the
+    // query-call branch below: a local/parameter named `untracked` is the
+    // user's own function, not the opt-out. (The `<field>.untracked` getter is
+    // handled separately in [visitPrefixedIdentifier].)
+    if (node.target == null &&
+        node.methodName.name == _untrackedName &&
+        !_isShadowed(_untrackedName)) {
+      _untrackedDepth++;
+      super.visitMethodInvocation(node);
+      _untrackedDepth--;
+      return;
     }
     // A `@SolidQuery` body that calls itself is rejected at codegen — flag
     // here so the reader can throw without walking the body a second time.
@@ -474,7 +476,7 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
     final parent = node.parent;
     return parent is PropertyAccess &&
         parent.target == node &&
-        parent.propertyName.name == _untrackedGetterName &&
+        parent.propertyName.name == _untrackedName &&
         _queryNames.contains(node.methodName.name);
   }
 
@@ -487,7 +489,7 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
     // etc. — is preserved verbatim because
     // the edit ends at `node.end` (the property name), not beyond.
     final target = node.target;
-    if (node.propertyName.name == _untrackedGetterName &&
+    if (node.propertyName.name == _untrackedName &&
         target is MethodInvocation &&
         _isQueryShape(target) &&
         _queryNames.contains(target.methodName.name)) {
@@ -573,7 +575,7 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
     // NOT recorded as a tracked read and `_untrackedDepth` is intentionally
     // not consulted — an `.untracked` read must never subscribe, regardless
     // of surrounding context.
-    if (node.identifier.name == _untrackedGetterName &&
+    if (node.identifier.name == _untrackedName &&
         _isTrackedField(node.prefix.name)) {
       edits.add(
         ValueEdit(

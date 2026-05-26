@@ -16,19 +16,64 @@ class MessageList extends StatefulWidget {
 
 class _MessageListState extends State<MessageList> {
   late final messagesController = context.read<MessagesController>();
+
   late final usersController = context.read<UsersController>();
+
+  final _scrollController = ScrollController();
+
+  bool _atBottom = true;
+
+  @override
+  void initState() {
+    super.initState();
+    keepChannelRead;
+    _scrollController.addListener(_onScroll);
+  }
+
+  @override
+  void dispose() {
+    keepChannelRead.dispose();
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  late final keepChannelRead = Effect(() {
+    // While this channel is on screen, mark its messages read as they arrive —
+    // the sidebar must never show an unread badge for the channel you're
+    // viewing. The bare read below is the effect's dependency; the write goes
+    // through `untracked` to avoid a cyclic reaction (marking read writes the
+    // `readIds` collection signal, which would otherwise re-trigger this effect).
+    messagesController.channelMessages[widget.channelId];
+    untracked(() => messagesController.markAllRead(widget.channelId));
+  }, name: 'keepChannelRead');
+
+  void _onScroll() {
+    if (!_scrollController.hasClients) return;
+    // With `reverse: true`, offset 0 is the visual bottom (newest message).
+    // The list stays pinned there as new messages arrive, so no manual
+    // auto-scroll is needed — the offset only drives the chip's visibility.
+    final atBottom = _scrollController.position.pixels <= 24;
+    if (atBottom != _atBottom) {
+      setState(() => _atBottom = atBottom);
+    }
+  }
+
+  void _scrollToBottom() {
+    if (!_scrollController.hasClients) return;
+    _scrollController.animateTo(
+      0,
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOut,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     return SignalBuilder(
       builder: (context, child) {
-        // Hoist signal reads OUT of ListView.builder's `itemBuilder` callback.
-        // `itemBuilder` is a separate function; a SignalBuilder only detects
-        // atoms read within its own builder function's execution, so a read
-        // performed inside the nested callback subscribes to nothing. Reading
-        // at the build method's statement scope keeps the read inside the outer
-        // SignalBuilder the generator synthesizes around the whole build body
-        // (SPEC §7.1 unanchored case).
+        // Read the reactive atoms in build's own scope so the generated
+        // SignalBuilder tracks them. The itemBuilder below is a separate
+        // function — reads performed inside it would not be tracked.
         final messages =
             messagesController.channelMessages[widget.channelId] ??
             const <Message>[];
@@ -41,130 +86,54 @@ class _MessageListState extends State<MessageList> {
             ),
           );
         }
-        return _MessageScrollList(messages: messages, users: users);
-      },
-    );
-  }
-}
-
-/// Manages the scroll position of the message list. Auto-scrolls to the
-/// bottom when new messages arrive AND the user was already at the bottom;
-/// shows a floating "scroll to bottom" button when the user has scrolled
-/// up (so new incoming messages don't yank them out of context).
-class _MessageScrollList extends StatefulWidget {
-  const _MessageScrollList({required this.messages, required this.users});
-
-  final List<Message> messages;
-  final Map<String, User> users;
-
-  @override
-  State<_MessageScrollList> createState() => _MessageScrollListState();
-}
-
-class _MessageScrollListState extends State<_MessageScrollList> {
-  final _controller = ScrollController();
-  bool _atBottom = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller.addListener(_onScroll);
-  }
-
-  @override
-  void didUpdateWidget(_MessageScrollList oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    // With `reverse: true`, the ListView's newest items live at scroll
-    // position 0 (the visual bottom). When new messages arrive AND the
-    // user is pinned to the bottom, animate from the small jitter back
-    // to 0 so the new row stays visible. If they scrolled up to read
-    // older history, the FAB takes over.
-    final grew = widget.messages.length > oldWidget.messages.length;
-    if (grew && _atBottom) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _animateToBottom());
-    }
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  void _onScroll() {
-    if (!_controller.hasClients) return;
-    final pos = _controller.position;
-    // With `reverse: true`, `pixels == 0` is the bottom (newest message).
-    // 24px tolerance for fractional offsets.
-    final atBottom = pos.pixels <= 24;
-    if (atBottom != _atBottom) {
-      setState(() => _atBottom = atBottom);
-    }
-  }
-
-  void _animateToBottom() {
-    if (!_controller.hasClients) return;
-    _controller.animateTo(
-      0,
-      duration: const Duration(milliseconds: 220),
-      curve: Curves.easeOut,
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final count = widget.messages.length;
-    return Stack(
-      children: [
-        ListView.builder(
-          controller: _controller,
-          reverse: true,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          itemCount: count,
-          itemBuilder: (context, index) {
-            // `reverse: true` flips the visual order. Index 0 is the
-            // bottom-most visual row, which we want to be the NEWEST
-            // message — so iterate the underlying list from the end.
-            final m = widget.messages[count - 1 - index];
-            final user = widget.users[m.senderId];
-            return _MessageRow(message: m, user: user);
-          },
-        ),
-        // Positioned must be a direct Stack child — wrapping it in
-        // AnimatedSwitcher would strip the absolute positioning. So the
-        // Positioned stays outside the switcher, and the switcher animates
-        // the chip's appearance / disappearance INSIDE it.
-        Positioned(
-          left: 0,
-          right: 0,
-          bottom: 12,
-          child: Center(
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 180),
-              switchInCurve: Curves.easeOutCubic,
-              switchOutCurve: Curves.easeInCubic,
-              transitionBuilder: (child, anim) => FadeTransition(
-                opacity: anim,
-                child: SlideTransition(
-                  position: Tween<Offset>(
-                    begin: const Offset(0, 0.3),
-                    end: Offset.zero,
-                  ).animate(anim),
-                  child: child,
+        final count = messages.length;
+        return Stack(
+          children: [
+            ListView.builder(
+              controller: _scrollController,
+              reverse: true,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              itemCount: count,
+              itemBuilder: (context, index) {
+                // `reverse: true` flips the order: index 0 is the bottom-most
+                // (newest) row, so read the underlying list from the end.
+                final m = messages[count - 1 - index];
+                return _MessageRow(message: m, user: users[m.senderId]);
+              },
+            ),
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 12,
+              child: Center(
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 180),
+                  switchInCurve: Curves.easeOutCubic,
+                  switchOutCurve: Curves.easeInCubic,
+                  transitionBuilder: (child, anim) => FadeTransition(
+                    opacity: anim,
+                    child: SlideTransition(
+                      position: Tween<Offset>(
+                        begin: const Offset(0, 0.3),
+                        end: Offset.zero,
+                      ).animate(anim),
+                      child: child,
+                    ),
+                  ),
+                  child: _atBottom
+                      ? const SizedBox.shrink(
+                          key: ValueKey('scroll-to-bottom-hidden'),
+                        )
+                      : _ScrollToBottomChip(
+                          key: const ValueKey('scroll-to-bottom'),
+                          onTap: _scrollToBottom,
+                        ),
                 ),
               ),
-              child: _atBottom
-                  ? const SizedBox.shrink(
-                      key: ValueKey('scroll-to-bottom-hidden'),
-                    )
-                  : _ScrollToBottomChip(
-                      key: const ValueKey('scroll-to-bottom'),
-                      onTap: _animateToBottom,
-                    ),
             ),
-          ),
-        ),
-      ],
+          ],
+        );
+      },
     );
   }
 }

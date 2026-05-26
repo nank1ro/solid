@@ -91,6 +91,22 @@ extension UntrackedExtension<T> on T {
   T get untracked => this;
 }
 
+/// {@template SolidAnnotations.untracked}
+/// Source-time stub mirroring `flutter_solidart`'s top-level `untracked`. Runs
+/// [callback] without subscribing the surrounding reactive context.
+///
+/// Use it inside a `@SolidEffect` to WRITE a signal without the write
+/// re-triggering the effect: read the dependencies first (so they stay
+/// tracked), then perform the write inside `untracked(() => ...)`. Needed for
+/// collection writes, whose element-write operators read the signal internally
+/// to diff and would otherwise subscribe the effect to what it writes — a
+/// cyclic reaction.
+///
+/// Identity over the callback's result at the source level (so it typechecks);
+/// the generated code resolves the call to `flutter_solidart`'s `untracked`.
+/// {@endtemplate}
+T untracked<T>(T Function() callback) => callback();
+
 /// {@template SolidAnnotations.LazyStateExtension}
 /// Source-time stubs for `SignalBase<T>` getters that survive verbatim through
 /// lowering: `.hasValue` (lazy-state probe) and
