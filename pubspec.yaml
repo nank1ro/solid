@@ -10,6 +10,7 @@ workspace:
   - examples/todos
   - examples/solidart_example
   - examples/weather
+  - examples/chat
 
 dev_dependencies:
   very_good_analysis: ^10.0.0

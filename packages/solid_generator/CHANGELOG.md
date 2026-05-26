@@ -3,6 +3,7 @@
 - **FEAT**: SignalBuilder placement, `.value` rewrite, dispose synthesis, StatelessWidget→StatefulWidget split.
 - **FEAT**: Computed synthesis from getter form of `@SolidState`.
 - **FEAT**: Fine-grained reactivity with untracked-read semantics (`.untracked`).
+- **FEAT**: Support the `untracked(() => …)` function form for untracked **writes** inside reactive bodies (e.g. writing a collection signal in a `@SolidEffect` without a cyclic reaction). The call passes through to `flutter_solidart`'s `untracked`; inner reads still receive `.value` but are not tracked. Previously this form was rejected.
 - **FEAT**: Effect lowering with `initState` materialization for State and plain-class targets.
 - **FEAT**: Resource lowering for Future/Stream with `.when()` / `.refresh()` call-site preservation.
 - **FEAT**: Environment field synthesis with Provider-backed DI and cross-class chain rewrites.

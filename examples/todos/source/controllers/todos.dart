@@ -8,7 +8,7 @@ class TodosController {
   }
 
   @SolidState()
-  List<Todo> todos = const [];
+  List<Todo> todos = [];
 
   @SolidState()
   List<Todo> get completedTodos => todos.where((t) => t.completed).toList();

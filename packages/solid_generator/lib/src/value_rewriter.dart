@@ -1,7 +1,7 @@
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/dart/ast/visitor.dart';
+import 'package:analyzer/dart/element/type.dart';
 import 'package:solid_generator/src/query_model.dart';
-import 'package:solid_generator/src/transformation_error.dart';
 
 /// A single value-level edit emitted by [collectValueEdits].
 ///
@@ -106,12 +106,13 @@ bool _isOnPrefixedCallbackName(String name) {
 /// declared on the enclosing class. The rewrite is name-based; the
 /// `type_aware_no_double_append` golden locks in the no-double-append
 /// guarantee at the name-set boundary. Cross-file resolution for
-/// `@SolidEnvironment` types is now wired via `BuildStep.resolver` (see
+/// `@SolidEnvironment` types is wired via `BuildStep.resolver` (see
 /// `builder.dart::_populateCrossFileTypes`) — `[classRegistry]` and
 /// `[classCollectionFields]` already include cross-file entries by the
-/// time this function is called. Full `staticType` subtype queries
-/// (covering arbitrary parameter / local-receiver shapes) remain deferred
-/// — they are the architectural prerequisite for shadowing support.
+/// time this function is called. Cross-class receiver resolution uses
+/// `staticType` when available (locals, method-call receivers, multi-level
+/// chains) and falls back to AST parameter inspection when unresolved
+/// (test sandboxes without the Flutter SDK).
 ///
 /// [queryNames] is the name-set of `@SolidQuery` methods declared on the
 /// enclosing class. Zero-argument `MethodInvocation`s whose target is
@@ -124,15 +125,14 @@ bool _isOnPrefixedCallbackName(String name) {
 /// upstream extensions on `ResourceState<T>`.
 ///
 /// [classRegistry] is the cross-class reactivity map (class name → reactive
-/// field/getter names). The implementation ships a single-level slice of
-/// the chain-aware rule: `<param>.<reactiveField>` shapes where `<param>`
-/// is a method parameter declared with a typed annotation that names a
-/// class in [classRegistry] receive a trailing `.value`. The receiver shape
-/// also includes `@SolidEnvironment late T name;` host-class fields via
-/// [environmentFields]. Full chains (`a.b.c.d`) and arbitrary receivers
-/// (locals, method-call results) still require the resolved-AST migration
-/// and remain deferred. Empty registry = no-op for the new path; existing
-/// same-class behavior unchanged.
+/// field/getter names). Single-level `<receiver>.<reactiveField>` is
+/// handled in [_ValueRewriteVisitor.visitPrefixedIdentifier]; multi-level
+/// chains (`a.b.c.d`) and non-SimpleIdentifier receivers
+/// (`getController().field`) are handled in [_ValueRewriteVisitor.
+/// visitPropertyAccess] via `staticType`-based receiver resolution. The
+/// receiver shape also includes `@SolidEnvironment late T name;`
+/// host-class fields via [environmentFields]. Empty registry = no-op for
+/// the cross-class branch; existing same-class behavior unchanged.
 ///
 /// [environmentFields] is the host class's `@SolidEnvironment` field map
 /// (`fieldName -> typeText`) — the sibling slice of the cross-class
@@ -187,6 +187,44 @@ ValueRewriteResult collectValueEdits(
   );
 }
 
+/// Emits a non-annotated user [method] with the `.value` rewrite applied to
+/// its body — bare `SimpleIdentifier` reads of [reactiveFields] (same-class)
+/// plus the cross-class single-level slice from [classRegistry] (parameter-
+/// receiver shape) and [environmentFields] (env-injected receiver shape) in
+/// one AST walk. [collectionFields] and [classCollectionFields] suppress
+/// `.value` insertion for collection-typed reactive fields (`ListSignal` /
+/// `SetSignal` / `MapSignal`) on the chain-access and bare-read paths.
+///
+/// Used by `plain_class_rewriter` for user methods on plain classes and by
+/// `state_class_rewriter` for user methods on `State<X>` subclasses. The two
+/// rewriters share this helper so the same `setTempUnit(unit) => tempUnit =
+/// unit` → `tempUnit.value = unit` rewrite applies consistently regardless
+/// of class kind.
+String rewriteUserMethod(
+  MethodDeclaration method,
+  Set<String> reactiveFields,
+  Map<String, Set<String>> classRegistry,
+  String source, {
+  Map<String, String> environmentFields = const {},
+  Set<String> collectionFields = const {},
+  Map<String, Set<String>> classCollectionFields = const {},
+}) {
+  final result = collectValueEdits(
+    method,
+    reactiveFields,
+    source,
+    classRegistry: classRegistry,
+    environmentFields: environmentFields,
+    collectionFields: collectionFields,
+    classCollectionFields: classCollectionFields,
+  );
+  return applyEditsToRange(
+    source.substring(method.offset, method.end),
+    result.edits,
+    method.offset,
+  );
+}
+
 /// Applies offset-based [edits] (with absolute file offsets) to [text] whose
 /// original file offset begins at [baseOffset]. Returns the rewritten string.
 ///
@@ -204,10 +242,10 @@ String applyEditsToRange(String text, List<ValueEdit> edits, int baseOffset) {
   return result;
 }
 
-/// Name of the marker getter exposed by `UntrackedExtension` in
-/// `solid_annotations`. Must stay in sync with the extension declaration in
-/// `packages/solid_annotations/lib/src/annotations.dart`.
-const String _untrackedGetterName = 'untracked';
+/// The `untracked` identifier exposed by `solid_annotations` — both the
+/// `UntrackedExtension` getter (`field.untracked`) and the top-level function
+/// (`untracked(() => ...)`). Must stay in sync with those declarations.
+const String _untrackedName = 'untracked';
 
 /// Name of the runtime opt-out getter on `ReadableSignal<T>` from
 /// `flutter_solidart`. Reading via this getter never subscribes the
@@ -235,10 +273,13 @@ const Set<String> _trackedSignalApiGetters = {'hasValue', 'previousValue'};
 
 /// AST visitor that accumulates [ValueEdit]s for reactive-field identifiers.
 ///
-/// Scope tracking is intentionally minimal: a local variable whose name
-/// collides with a reactive field suppresses the rewrite inside its
-/// enclosing block. A future type-driven shadowing pass will replace this
-/// heuristic.
+/// Scope tracking is name-based: a local variable, parameter, or function
+/// declaration whose name collides with a reactive field suppresses the
+/// rewrite inside its enclosing block. This matches Dart's natural
+/// shadowing rule (an inner declaration named `counter` resolves all
+/// subsequent `counter` references in scope to the local, regardless of
+/// type), so a resolved-AST upgrade would add no functional change here —
+/// the name-based check IS the language semantic.
 class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
   _ValueRewriteVisitor(
     this._reactiveFields,
@@ -380,17 +421,20 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
 
   @override
   void visitMethodInvocation(MethodInvocation node) {
-    // The function-call form `untracked(() => ...)` is rejected; the
-    // canonical opt-out marker is `<field>.untracked` (handled in
-    // [visitPrefixedIdentifier]).
-    if (node.target == null && node.methodName.name == _untrackedGetterName) {
-      throw const CodeGenerationError(
-        'untracked(() => ...) is not supported. '
-            'Use the extension getter at the call site instead, e.g. '
-            '`counter.untracked`.',
-        null,
-        'untracked() function-call form',
-      );
+    // `untracked(() => ...)` passes through verbatim and resolves to
+    // flutter_solidart's `untracked` at runtime; the depth bump suppresses
+    // dependency recording for inner reads, as for `on*` callbacks in
+    // [visitFunctionExpression]. The `!_isShadowed` guard mirrors the
+    // query-call branch below: a local/parameter named `untracked` is the
+    // user's own function, not the opt-out. (The `<field>.untracked` getter is
+    // handled separately in [visitPrefixedIdentifier].)
+    if (node.target == null &&
+        node.methodName.name == _untrackedName &&
+        !_isShadowed(_untrackedName)) {
+      _untrackedDepth++;
+      super.visitMethodInvocation(node);
+      _untrackedDepth--;
+      return;
     }
     // A `@SolidQuery` body that calls itself is rejected at codegen — flag
     // here so the reader can throw without walking the body a second time.
@@ -432,7 +476,7 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
     final parent = node.parent;
     return parent is PropertyAccess &&
         parent.target == node &&
-        parent.propertyName.name == _untrackedGetterName &&
+        parent.propertyName.name == _untrackedName &&
         _queryNames.contains(node.methodName.name);
   }
 
@@ -445,7 +489,7 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
     // etc. — is preserved verbatim because
     // the edit ends at `node.end` (the property name), not beyond.
     final target = node.target;
-    if (node.propertyName.name == _untrackedGetterName &&
+    if (node.propertyName.name == _untrackedName &&
         target is MethodInvocation &&
         _isQueryShape(target) &&
         _queryNames.contains(target.methodName.name)) {
@@ -461,7 +505,67 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
       // [_isUntrackedQueryCall].
       return;
     }
+    // Multi-level cross-class chain rewrite. `a.b.c.d` parses as
+    // PropertyAccess(target=PropertyAccess(target=PrefixedIdentifier(a, b),
+    // property=c), property=d); `getController().field` parses as
+    // PropertyAccess(target=MethodInvocation, property=field). Both shapes
+    // are caught here by resolving the receiver's `staticType` via
+    // [_resolveReceiverTypeName] and looking up the property name in
+    // [_classRegistry]. PrefixedIdentifier (the single-level `a.b` shape)
+    // is handled by [_maybeRewriteCrossClass] above so the two paths don't
+    // overlap.
+    if (_classRegistry.isNotEmpty && target != null) {
+      _maybeRewriteCrossClassPropertyAccess(node);
+    }
     super.visitPropertyAccess(node);
+  }
+
+  /// Cross-class rewrite for PropertyAccess shapes: chains > 2 levels
+  /// (`a.b.c.d`) and non-SimpleIdentifier receivers (`getController().field`,
+  /// `(expr).field`). Only fires when [Expression.staticType] on the
+  /// receiver resolves to an [InterfaceType] — there's no parsed-AST
+  /// fallback for these shapes, so an unresolved type means no rewrite.
+  ///
+  /// Limitation: this path does NOT contribute to
+  /// `trackedCrossClassReadNames` (the input to `Resource.source:`
+  /// Record-Computed synthesis on `@SolidQuery` bodies). That tracking
+  /// requires identifying the chain's root env-field — a separate walk
+  /// not implemented here. A user writing `controller.session.user.name`
+  /// inside a `@SolidQuery` body gets the value rewrite for body
+  /// correctness, but the Resource won't include the chain in its
+  /// multi-dep `source:` Record. Single-level env reads still go through
+  /// [_maybeRewriteCrossClass] and ARE tracked there.
+  void _maybeRewriteCrossClassPropertyAccess(PropertyAccess node) {
+    final target = node.target;
+    if (target == null) return;
+    if (_isAccessOnSignalApi(node.propertyName, _signalApiGetters)) return;
+    // Outer-chain Signal API guard: same as the single-level branch.
+    final outerParent = node.parent;
+    if (outerParent is PropertyAccess &&
+        outerParent.target == node &&
+        _signalApiGetters.contains(outerParent.propertyName.name)) {
+      if (_trackedSignalApiGetters.contains(outerParent.propertyName.name) &&
+          _untrackedDepth == 0) {
+        _recordTrackedRead(node.offset, node.propertyName.name);
+      }
+      return;
+    }
+    final declaredTypeName = _resolveReceiverTypeName(target);
+    if (declaredTypeName == null) return;
+    final fieldsOfType = _classRegistry[declaredTypeName];
+    if (fieldsOfType == null) return;
+    if (!fieldsOfType.contains(node.propertyName.name)) return;
+    final collectionFieldsOfType = _classCollectionFields[declaredTypeName];
+    final isCollection =
+        collectionFieldsOfType != null &&
+        collectionFieldsOfType.contains(node.propertyName.name);
+    final isChainPrefix = _isAnyChainTarget(node);
+    if (!isCollection || !isChainPrefix) {
+      edits.add(ValueEdit(node.end, node.end, '.value'));
+    }
+    if (_untrackedDepth == 0) {
+      _recordTrackedRead(node.offset, node.propertyName.name);
+    }
   }
 
   @override
@@ -471,7 +575,7 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
     // NOT recorded as a tracked read and `_untrackedDepth` is intentionally
     // not consulted — an `.untracked` read must never subscribe, regardless
     // of surrounding context.
-    if (node.identifier.name == _untrackedGetterName &&
+    if (node.identifier.name == _untrackedName &&
         _isTrackedField(node.prefix.name)) {
       edits.add(
         ValueEdit(
@@ -500,12 +604,12 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
 
   /// Single-level `<receiver>.<reactiveField>` cross-class rewrite — the
   /// shipped slice of the chain-aware rule. The receiver type resolves via
-  /// [_resolveParameterTypeName] (method parameter) then [_environmentFields]
-  /// (`@SolidEnvironment` host-class field); parameter wins because method
-  /// parameters shadow host-class fields in Dart and are not tracked by
-  /// [_isShadowed] (which covers only `visitFunctionExpression` and
-  /// block-local declarations), so the lookup ORDER carries the
-  /// parameter-vs-field shadowing semantics here.
+  /// [_resolveReceiverTypeName] (parameter / local / property-of-resolved-type)
+  /// then [_environmentFields] (`@SolidEnvironment` host-class field);
+  /// parameter wins because method parameters shadow host-class fields in
+  /// Dart and are not tracked by [_isShadowed] (which covers only
+  /// `visitFunctionExpression` and block-local declarations), so the lookup
+  /// ORDER carries the parameter-vs-field shadowing semantics here.
   ///
   /// Collection-field branch: if the resolved field is in
   /// [_classCollectionFields] for its receiver type AND the whole
@@ -547,7 +651,7 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
       return;
     }
     final declaredTypeName =
-        _resolveParameterTypeName(node.prefix) ??
+        _resolveReceiverTypeName(node.prefix) ??
         _environmentFields[node.prefix.name];
     if (declaredTypeName == null) return;
     final fieldsOfType = _classRegistry[declaredTypeName];
@@ -606,24 +710,45 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
   bool _isCrossClassChainPrefix(PrefixedIdentifier node) =>
       _isAnyChainTarget(node);
 
-  /// If [prefix] resolves to a method/function parameter declared with a
-  /// [NamedType] annotation, returns that type's simple name (e.g. `'Counter'`
-  /// for `Counter other`). Returns `null` for parameter shapes the visitor
-  /// cannot reason about in parsed AST: function-typed parameters,
-  /// `var`-typed parameters, generic type-parameter receivers, and identifiers
-  /// that do not resolve to a parameter at all (locals, fields, etc.). For
-  /// the host-class-field case (the `@SolidEnvironment` shape), see
-  /// the sibling [_environmentFields] lookup in [_maybeRewriteCrossClass] —
-  /// kept as a separate branch so the parameter-vs-field resolution order
-  /// matches Dart's natural shadowing.
+  /// Returns the simple type name of [receiver], using two-tier resolution:
   ///
-  /// A future revision will replace this with a `staticType` lookup on the
-  /// resolved AST. The parameter-only resolver and the env-field receiver
-  /// widening both work without requiring resolved AST.
-  String? _resolveParameterTypeName(SimpleIdentifier prefix) {
-    final method = prefix.thisOrAncestorOfType<MethodDeclaration>();
-    final fn = prefix.thisOrAncestorOfType<FunctionExpression>();
-    final params = method?.parameters?.parameters ?? fn?.parameters?.parameters;
+  ///  1. **Element-based.** When [Expression.staticType] is a resolved
+  ///     [InterfaceType], return its element name. Catches locals
+  ///     (`var c = controller; c.field`), method-call receivers
+  ///     (`getController().field`), and parameters identically — `staticType`
+  ///     is populated for every expression in resolved AST.
+  ///  2. **AST fallback (parameters only).** When the resolver hasn't run
+  ///     (parsed-AST fallback or test sandbox without the necessary SDK),
+  ///     resolve [receiver] as a method/function parameter declared with a
+  ///     [NamedType] annotation. Other receiver shapes (locals,
+  ///     method-call results) cannot be resolved on parsed AST and return
+  ///     `null` — the cross-class rewrite then no-ops, leaving the source
+  ///     unchanged. Function-typed parameters, `var`-typed parameters,
+  ///     `FieldFormalParameter`, and `SuperFormalParameter` also return
+  ///     `null` in this tier.
+  String? _resolveReceiverTypeName(Expression receiver) {
+    final type = receiver.staticType;
+    if (type is InterfaceType) return type.element.name;
+    if (receiver is SimpleIdentifier) {
+      return _resolveParameterTypeNameFromAst(receiver);
+    }
+    return null;
+  }
+
+  /// AST-only parameter resolver — the unresolved fallback for
+  /// [_resolveReceiverTypeName]. Walks the prefix's enclosing
+  /// [MethodDeclaration] / [FunctionExpression] for a matching
+  /// [SimpleFormalParameter] and returns the declared [NamedType]'s lexeme.
+  String? _resolveParameterTypeNameFromAst(SimpleIdentifier prefix) {
+    final params =
+        prefix
+            .thisOrAncestorOfType<MethodDeclaration>()
+            ?.parameters
+            ?.parameters ??
+        prefix
+            .thisOrAncestorOfType<FunctionExpression>()
+            ?.parameters
+            ?.parameters;
     if (params == null) return null;
     for (final param in params) {
       final inner = param is DefaultFormalParameter ? param.parameter : param;
@@ -632,9 +757,6 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
         final type = inner.type;
         if (type is NamedType) return type.name.lexeme;
       }
-      // FieldFormalParameter (`this.foo`), FunctionTypedFormalParameter,
-      // and SuperFormalParameter (`super.foo`) all fall through —
-      // unsupported until resolved AST lands.
       return null;
     }
     return null;

@@ -37,9 +37,10 @@ class SourceEdit {
 ///      wrapped in `SignalBuilder`. Untracked-context rules suppress tracking.
 ///
 /// [reactiveFields] is the set of field names declared `@SolidState` on the
-/// enclosing class. The match is name-based; a future type-driven rule will
-/// eventually upgrade to resolved-element analysis, at which point the call
-/// site swaps to a resolved predicate without restructuring this file.
+/// enclosing class. Matching is name-based; cross-class receiver resolution
+/// uses `staticType` in
+/// `value_rewriter._resolveReceiverTypeName` and falls back to AST
+/// parameter inspection when the resolver hasn't run.
 ///
 /// [queryNames] is the set of `@SolidQuery` method names declared on the
 /// enclosing class. Their zero-arg call sites in the build body are recorded
@@ -105,11 +106,13 @@ String rewriteBuildMethod(
     collectionFields: collectionFields,
     classCollectionFields: classCollectionFields,
   );
-  final wrapNodes = computeWrapSet(
+  final wrapPlan = computeWrapPlan(
     buildMethod,
     valueResult.trackedReadNamesByOffset,
     queryNames: queryNames,
   );
+  final wrapNodes = wrapPlan.wraps;
+  final hasUnanchored = wrapPlan.unanchoredOffsets.isNotEmpty;
 
   final edits = <SourceEdit>[];
 
@@ -202,7 +205,63 @@ String rewriteBuildMethod(
         edit.replacement +
         result.substring(edit.end);
   }
+  if (hasUnanchored) {
+    result = _synthesizeOuterWrap(
+      methodText: result,
+      body: buildMethod.body,
+      methodStart: methodStart,
+    );
+  }
   return result;
+}
+
+/// Wraps the build method's body in an outer `SignalBuilder` when one or
+/// more tracked reads sit at the build method's statement scope (no
+/// enclosing widget candidate). Block body's original `{…}` moves into the
+/// builder closure verbatim; expression body's `=> expr;` is converted to
+/// `{ return SignalBuilder(builder: (context, child) { return expr; }); }`.
+///
+/// [methodText] is the post-edit method text — value/wrap edits inside the
+/// body have already shifted text positions, so the only stable reference
+/// is `body.offset` (no edits land before it). The body's end is therefore
+/// taken as `methodText.length` (the body is the last thing in the
+/// method). Expression-body's trailing `;` is stripped by searching from
+/// the end.
+String _synthesizeOuterWrap({
+  required String methodText,
+  required FunctionBody body,
+  required int methodStart,
+}) {
+  final bodyStart = body.offset - methodStart;
+  final beforeBody = methodText.substring(0, bodyStart);
+  final bodyText = methodText.substring(bodyStart);
+  if (body is BlockFunctionBody) {
+    return '$beforeBody{\n'
+        '  return SignalBuilder(\n'
+        '    builder: (context, child) $bodyText,\n'
+        '  );\n'
+        '}';
+  }
+  if (body is ExpressionFunctionBody) {
+    // `=> expr;` — strip the arrow at the start and the trailing `;`. The
+    // arrow is always the first two chars after any optional `async`
+    // keyword; `build` is sync so the arrow sits at position 0 of bodyText.
+    final arrowEnd = bodyText.indexOf('=>') + 2;
+    final lastSemi = bodyText.lastIndexOf(';');
+    final exprText = bodyText
+        .substring(arrowEnd, lastSemi == -1 ? bodyText.length : lastSemi)
+        .trim();
+    return '$beforeBody{\n'
+        '  return SignalBuilder(\n'
+        '    builder: (context, child) {\n'
+        '      return $exprText;\n'
+        '    },\n'
+        '  );\n'
+        '}';
+  }
+  // Native / abstract bodies — shouldn't reach here for a `build` method;
+  // pass through unchanged as a defensive fail-safe.
+  return methodText;
 }
 
 /// Emits the `SignalBuilder` wrapper around [inner] using a block-body

@@ -109,9 +109,11 @@ For full target rules per annotation, read `references/annotation-contract.md`. 
 By default every read of a `@SolidState` field inside `build`, `@SolidEffect`, or `@SolidQuery` registers a dependency. Two opt-outs:
 
 - **Automatic**: reads inside callback parameters whose name starts with `on` (`onPressed`, `onTap`, `onChanged`, …) are untracked — Solid recognizes user-interaction handlers and doesn't subscribe.
-- **Manual**: append `.untracked` to the field. Common use: `key: ValueKey(counter.untracked)`, or reading the same signal you're writing to inside an effect to avoid a self-dependency loop.
+- **Manual read**: append `.untracked` to the field. Common use: `key: ValueKey(counter.untracked)`.
 
 In string interpolations, only the long form works: `'${counter.untracked}'`. The short form `'$counter.untracked'` parses as `${counter}` followed by a literal suffix (still tracked).
+
+To **write** a signal inside a `@SolidEffect` without the write re-triggering the effect (required for collection signals, whose element-writes self-subscribe), read the deps first, then wrap the write in the `untracked(() => …)` function: `final c = counter; untracked(() => history = [...history, c]);`. Don't wrap the whole body — that untracks the dependency reads too. See `references/patterns.md §8`.
 
 Docs: <https://solid.mariuti.com/guides/untracked>.
 

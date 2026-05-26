@@ -2,6 +2,8 @@ import 'package:analyzer/dart/analysis/features.dart';
 import 'package:analyzer/dart/analysis/utilities.dart';
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/dart/ast/visitor.dart';
+import 'package:analyzer/dart/element/element.dart';
+import 'package:solid_generator/src/element_utils.dart';
 import 'package:solid_generator/src/value_rewriter.dart';
 
 /// Returns [text] with `dispose: (context, provider) => provider.dispose()`
@@ -57,10 +59,20 @@ const String _disposeArgName = 'dispose';
 /// Walks the AST and records insertion edits at every Provider /
 /// `.environment<T>()` call that needs a `dispose:` argument.
 ///
-/// Bare `Provider(...)` parses as [MethodInvocation] in unresolved AST (no
-/// `const` / `new` keyword); `new Provider(...)` and `const Provider(...)`
-/// parse as [InstanceCreationExpression]. Both shapes share the same
-/// inject-if-create-and-not-dispose guard via [_maybeInject].
+/// Two-tier matching:
+///
+///   1. **Element-based.** When the resolver has populated
+///      `MethodInvocation.methodName.element` /
+///      `InstanceCreationExpression.constructorName.element`, match by class
+///      name plus library URI (`package:provider/` for `Provider`,
+///      `package:solid_annotations/` for `.environment`). Catches aliased
+///      imports like `import 'package:provider/provider.dart' as p;
+///      p.Provider(...)`.
+///   2. **Textual fallback.** When the resolver hasn't run (parsed-AST
+///      fallback for an annotation-free file, or test sandbox without the
+///      Flutter SDK), match by lexeme. Bare `Provider(...)` parses as
+///      [MethodInvocation] (no `const` / `new` keyword); `new Provider(...)`
+///      and `const Provider(...)` parse as [InstanceCreationExpression].
 class _ProviderDisposeVisitor extends RecursiveAstVisitor<void> {
   _ProviderDisposeVisitor(this._source);
 
@@ -69,31 +81,19 @@ class _ProviderDisposeVisitor extends RecursiveAstVisitor<void> {
 
   @override
   void visitMethodInvocation(MethodInvocation node) {
-    final name = node.methodName.name;
-    final target = node.target;
-
-    // `.environment<T>(...)` extension call. The extension takes no
-    // `create:` named arg (the create function is positional), so the guard
-    // shape differs from the Provider path: only the `dispose:` check fires.
-    if (target != null && name == _environmentMethod) {
+    if (_isEnvironmentCall(node)) {
       if (!_hasNamedArg(node.argumentList, _disposeArgName)) {
         _addInjection(node.argumentList);
       }
-    } else if (target == null && name == _providerType) {
-      // Bare `Provider(...)` (no `const` / `new` keyword) parses with
-      // `target == null`. `Provider.value(...)` parses with
-      // `target = SimpleIdentifier(Provider)` and is skipped here.
+    } else if (_isBareProviderCall(node)) {
       _maybeInject(node.argumentList);
     }
-
     super.visitMethodInvocation(node);
   }
 
   @override
   void visitInstanceCreationExpression(InstanceCreationExpression node) {
-    final typeName = node.constructorName.type.name.lexeme;
-    final namedCtor = node.constructorName.name?.name;
-    if (typeName == _providerType && namedCtor == null) {
+    if (_isUnnamedProviderCtor(node)) {
       _maybeInject(node.argumentList);
     }
     // `MultiProvider(...)` and named ctors (`Provider.value(...)`) are not
@@ -101,6 +101,57 @@ class _ProviderDisposeVisitor extends RecursiveAstVisitor<void> {
     // inner `Provider(...)` entries inside `MultiProvider(providers: [...])`
     // are visited.
     super.visitInstanceCreationExpression(node);
+  }
+
+  /// True when [node] is a `.environment<T>(...)` extension call from
+  /// `solid_annotations`. Element-based when the resolver populated the
+  /// extension-method element; textual fallback on
+  /// `target != null && methodName.name == 'environment'`.
+  bool _isEnvironmentCall(MethodInvocation node) {
+    final element = node.methodName.element;
+    if (element != null) {
+      if (element.name != _environmentMethod) return false;
+      final enclosing = element.enclosingElement;
+      if (enclosing is! ExtensionElement) return false;
+      return isFromPackage(enclosing.library.uri, 'solid_annotations');
+    }
+    // Unresolved fallback. `target != null` keeps `environment` instance
+    // calls on user types from being misidentified — the canonical
+    // authoring shape is `context.environment<T>(...)`.
+    return node.target != null && node.methodName.name == _environmentMethod;
+  }
+
+  /// True when [node] is a bare `Provider(...)` (no `const` / `new`) whose
+  /// resolved ctor (when present) lives in `package:provider/`.
+  bool _isBareProviderCall(MethodInvocation node) {
+    final element = node.methodName.element;
+    if (element is ConstructorElement) {
+      return _isProviderCtor(element);
+    }
+    return node.target == null && node.methodName.name == _providerType;
+  }
+
+  /// True when [node]'s ctor element is the unnamed `Provider` constructor.
+  bool _isUnnamedProviderCtor(InstanceCreationExpression node) {
+    final element = node.constructorName.element;
+    if (element != null) {
+      if (!_isProviderCtor(element)) return false;
+      // Analyzer 9 docs say the unnamed ctor's name is `'new'`; null and
+      // empty are accepted defensively in case the implementation drifts.
+      final name = element.name;
+      return name == 'new' || name == null || name.isEmpty;
+    }
+    final typeName = node.constructorName.type.name.lexeme;
+    final namedCtor = node.constructorName.name?.name;
+    return typeName == _providerType && namedCtor == null;
+  }
+
+  /// True iff [ctor] is a constructor on the `Provider` class declared in
+  /// `package:provider/`.
+  bool _isProviderCtor(ConstructorElement ctor) {
+    final enclosing = ctor.enclosingElement;
+    if (enclosing.name != _providerType) return false;
+    return isFromPackage(enclosing.library.uri, 'provider');
   }
 
   /// Provider-form guard: inject only when the call site has a `create:`

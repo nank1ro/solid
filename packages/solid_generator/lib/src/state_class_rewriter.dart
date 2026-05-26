@@ -7,7 +7,7 @@ import 'package:solid_generator/src/getter_model.dart';
 import 'package:solid_generator/src/import_rewriter.dart';
 import 'package:solid_generator/src/query_model.dart';
 import 'package:solid_generator/src/signal_emitter.dart';
-import 'package:solid_generator/src/transformation_error.dart';
+import 'package:solid_generator/src/value_rewriter.dart';
 
 /// Rewrites an existing `State<X>` subclass containing `@SolidState` fields,
 /// `@SolidEffect` methods, and/or `@SolidQuery` methods **in place** —
@@ -183,7 +183,17 @@ RewriteResult rewriteStateClass(
           disposeNames,
         );
       } else {
-        pieces.add(source.substring(member.offset, member.end));
+        pieces.add(
+          rewriteUserMethod(
+            member,
+            reactiveNames,
+            classRegistry,
+            source,
+            environmentFields: environmentFields,
+            collectionFields: collectionNames,
+            classCollectionFields: classCollectionFields,
+          ),
+        );
       }
       continue;
     }
@@ -198,7 +208,7 @@ RewriteResult rewriteStateClass(
   if (initStateMethod != null) {
     pieces[initStateSlot] = effectNames.isEmpty
         ? source.substring(initStateMethod.offset, initStateMethod.end)
-        : _mergeInitState(initStateMethod, effectNames, source, className);
+        : mergeInitState(initStateMethod, effectNames, source, className);
   } else if (effectNames.isNotEmpty) {
     pieces.add(emitInitState(effectNames));
   }
@@ -261,57 +271,4 @@ RewriteResult rewriteStateClass(
     emitsDisposable: false,
     constCtorNames: const <String>{},
   );
-}
-
-/// Splices Effect-materialization reads (`<effectName>;`, in declaration
-/// order) into an existing `initState()` body immediately after the
-/// `super.initState();` call, so Effects subscribe to signals before any
-/// user code in `initState` runs.
-///
-/// Splice point: the end of the first statement when it is recognised as
-/// `super.initState();`; otherwise immediately after the opening brace.
-/// `super.initState()` must come first, so the fallback only fires for
-/// non-conforming user code — keeping the merge adjacent to where the super
-/// call would have been.
-///
-/// Throws [CodeGenerationError] if the existing `initState()` uses an
-/// expression body (`=> …`) — the merge is only well-defined for a block.
-String _mergeInitState(
-  MethodDeclaration method,
-  List<String> effectNamesInDeclarationOrder,
-  String source,
-  String className,
-) {
-  final body = method.body;
-  if (body is! BlockFunctionBody) {
-    throw CodeGenerationError(
-      'existing initState() must have a block body for Effect merge',
-      null,
-      className,
-    );
-  }
-  final stmts = body.block.statements;
-  final int insertAt;
-  if (stmts.isNotEmpty && _isSuperInitStateCall(stmts.first)) {
-    insertAt = stmts.first.end;
-  } else {
-    insertAt = body.block.leftBracket.offset + 1;
-  }
-  final reads = effectNamesInDeclarationOrder
-      .map((name) => '    $name;')
-      .join('\n');
-  return '${source.substring(method.offset, insertAt)}'
-      '\n$reads'
-      '${source.substring(insertAt, method.end)}';
-}
-
-/// Returns `true` when [stmt] is exactly the expression statement
-/// `super.initState();`. Used by [_mergeInitState] to decide whether to
-/// splice Effect reads after the user's super call (the expected case) or
-/// at the top of the body (fallback).
-bool _isSuperInitStateCall(Statement stmt) {
-  if (stmt is! ExpressionStatement) return false;
-  final expr = stmt.expression;
-  if (expr is! MethodInvocation) return false;
-  return expr.target is SuperExpression && expr.methodName.name == 'initState';
 }

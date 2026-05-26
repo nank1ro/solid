@@ -221,6 +221,50 @@ HomePage()
 
 Reads of `@SolidState` members on the injected instance stay reactive — only the dependent UI rebuilds.
 
+**Order matters when one provider's `create` reads another, and `.environment(...)` reads inverted.** `.environment(X)` wraps the receiver in `Provider<X>(child: receiver)`, so the LAST call in the chain is the OUTERMOST (top of the tree) — the chain reads bottom-up. `MultiProvider`'s `providers:` list is the natural top-down convention: list[0] is the outermost, list[last] is the innermost (just above `child:`), matching the equivalent nested `Provider(child: Provider(child: …))` form line-for-line.
+
+For a Provider's `create` callback to find a dependency via `ctx.read<T>()`, the dependency must be ABOVE it. That means in a `.environment(...)` chain, dependencies go LAST; in a `MultiProvider` list, dependencies go FIRST. Get either backwards and the consumer's `create` throws `ProviderNotFoundException`.
+
+```dart title="source/main.dart — .environment(...) form (chain reads bottom-up)"
+runApp(
+  const HomePage()
+      // Consumers FIRST (innermost — bottom of the tree).
+      .environment(
+        (ctx) => MessagesController(backend: ctx.read<ChatBackend>()),
+      )
+      .environment(
+        (ctx) => NavigationController(channels: ctx.read<ChannelsController>()),
+      )
+      // Dependencies LAST (outermost — ABOVE the consumers).
+      .environment((_) => ChannelsController())
+      .environment((_) => ChatBackend()),
+);
+```
+
+```dart title="source/main.dart — MultiProvider form (list reads top-down)"
+runApp(
+  MultiProvider(
+    providers: [
+      // Dependencies FIRST (outermost — top of the tree).
+      Provider(create: (_) => ChatBackend()),
+      Provider(create: (_) => ChannelsController()),
+      // Consumers LAST (innermost).
+      Provider(
+        create: (ctx) =>
+            NavigationController(channels: ctx.read<ChannelsController>()),
+      ),
+      Provider(
+        create: (ctx) =>
+            MessagesController(backend: ctx.read<ChatBackend>()),
+      ),
+    ],
+    child: const HomePage(),
+  ),
+);
+```
+
+For non-interdependent providers (the original two-line `.environment` example above), order doesn't matter — there's no `ctx.read<T>()` from another provider in the chain.
+
 ## 7. Reading reactive state without subscribing — `.untracked`
 
 Docs: <https://solid.mariuti.com/guides/untracked>. Append `.untracked` to read the current value without registering a dependency on the surrounding `build`, effect, or query.
@@ -243,16 +287,33 @@ class KeyedContainer extends StatelessWidget {
 }
 ```
 
-Inside a `@SolidEffect` that writes to a signal, use `.untracked` on the signal you're writing to so the effect doesn't re-trigger itself:
+Reads inside `on*` callback parameters (`onPressed`, `onTap`, `onChanged`, …) are auto-untracked — no `.untracked` needed. In string interpolations, only the long form `'${counter.untracked}'` works; `'$counter.untracked'` is still tracked.
 
-```dart
+## 8. Writing a signal inside an effect — `untracked(() => …)`
+
+A `@SolidEffect` reacts (its reads are dependencies); it should not subscribe to what it *writes*.
+The `.untracked` getter only untracks a read — it cannot stop a **write** from subscribing. This
+bites collection signals: `MapSignal`/`ListSignal`/`SetSignal` element-writes read the signal
+internally to diff, so a collection write inside an effect subscribes the effect to itself → it
+re-runs → writes again → `RangeError: Maximum call stack size exceeded` (a cyclic reaction).
+
+Read the dependencies first (so they stay tracked), then wrap only the write in the
+`untracked(() => …)` function form:
+
+```dart title="source/history_recorder.dart"
+@SolidState()
+int counter = 0;
+
 @SolidState()
 List<int> history = [];
 
 @SolidEffect()
 void recordHistory() {
-  history = [...history.untracked, counter]; // counter tracked, history not
+  final c = counter;                          // tracked dependency
+  untracked(() => history = [...history, c]); // write does NOT re-trigger the effect
 }
 ```
 
-Reads inside `on*` callback parameters (`onPressed`, `onTap`, `onChanged`, …) are auto-untracked — no `.untracked` needed. In string interpolations, only the long form `'${counter.untracked}'` works; `'$counter.untracked'` is still tracked.
+`untracked` is a function (from `solid_annotations`, resolving to `flutter_solidart` after
+generation), not the `.untracked` getter. Do **not** wrap the whole body — that would untrack the
+dependency reads too, leaving the effect with no dependencies so it never re-runs.
