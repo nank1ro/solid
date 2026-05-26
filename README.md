@@ -20,11 +20,12 @@ The benefits of using Solid include:
 
 ## Installation
 
-Add Solid's runtime deps to your Flutter app and install the generator:
+Add Solid's runtime deps to your Flutter app, then add the generator and `build_runner` as dev dependencies:
 
 ```bash
 flutter pub add solid_annotations flutter_solidart provider
-dart pub global activate solid_generator
+dart pub add --dev solid_generator build_runner
+dart run build_runner build
 ```
 
 See the [Getting Started Guide](https://solid.mariuti.com/guides/getting-started) for the full setup including recommended lints.
