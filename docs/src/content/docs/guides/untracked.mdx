@@ -1,6 +1,6 @@
 ---
 title: Untracked
-description: Read reactive state without re-running the surrounding build, effect, or query.
+description: Read or write reactive state without re-running the surrounding build, effect, or query.
 sidebar:
   order: 6
 ---
@@ -34,7 +34,7 @@ class ConditionalDialog extends StatelessWidget {
 }
 ```
 
-You don't write anything special — Solid handles it. Just keep in mind the body reads a *snapshot*, not a live value.
+You don't write anything special — Solid handles it.
 
 ## Manual opt-out: `field.untracked`
 
@@ -58,24 +58,46 @@ class KeyedContainer extends StatelessWidget {
 }
 ```
 
-`.untracked` is a typed identity extension shipped by `solid_annotations` — `counter.untracked` has the same type as `counter` and at runtime is a no-op. Only the source-time presence matters: the generator rewrites `counter.untracked` to the underlying `untrackedValue` primitive and excludes the read from the dependency set, so `SignalBuilder` doesn't wrap it inside `build` and an enclosing effect or query won't re-fire on changes to it.
+If you find yourself sprinkling `.untracked` everywhere, step back — usually a `@SolidState` getter (derived state) or a non-reactive plain field is the better tool.
 
-<Aside type="caution">
-Inside string interpolations only the long form works: `'${counter.untracked}'`. The short form `'$counter.untracked'` parses as `${counter}` followed by a literal `.untracked` suffix — that read is tracked.
-</Aside>
+## Untracked writes: `untracked(() => …)`
 
-## When to reach for `.untracked`
+`.untracked` opts out a single *read*. Sometimes the **write** is the problem instead. Inside a `@SolidEffect`, mutating a collection signal you also read creates a **cyclic reaction**: a collection's element-write operators read the signal internally (to diff), so the effect subscribes to the very signal it writes and re-fires forever.
 
-- Building a one-time `Key` / `ValueKey` from a reactive field.
-- Inside a `@SolidEffect` that writes to a signal, reading the same signal's current value to avoid a self-dependency loop:
+Wrap the write in `untracked(() => …)` to run it without subscribing the surrounding effect. Read your real dependencies first so they stay tracked, then write inside the callback:
 
-  ```dart
+```dart title="source/history_recorder.dart"
+class HistoryRecorder extends StatelessWidget {
+  HistoryRecorder({super.key});
+
+  @SolidState()
+  int counter = 0;
+
+  @SolidState()
+  List<int> history = [];
+
   @SolidEffect()
   void recordHistory() {
-    history = [...history.untracked, counter]; // counter is tracked, history is not
+    final c = counter;                          // tracked — re-runs when counter changes
+    untracked(() => history = [...history, c]); // write is untracked — no self-trigger
   }
-  ```
 
-- Logging / analytics calls that should not cause rebuilds.
+  @override
+  Widget build(BuildContext context) {
+    return Text('history has ${history.length} entries');
+  }
+}
+```
 
-If you find yourself sprinkling `.untracked` everywhere, step back — usually a `@SolidState` getter (derived state) or a non-reactive plain field is the better tool.
+Reads inside the callback still see live values — they just don't subscribe the surrounding effect, query, or build.
+
+It behaves the same for method calls that mutate signals — for example, marking a channel's messages read while depending on that channel's message list:
+
+```dart title="source/message_list.dart"
+@SolidEffect()
+void keepChannelRead() {
+  messagesController.channelMessages[widget.channelId];              // tracked dependency
+  untracked(() => messagesController.markAllRead(widget.channelId)); // mutation untracked
+}
+```
+
