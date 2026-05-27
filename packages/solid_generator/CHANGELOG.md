@@ -1,3 +1,7 @@
+## 2.0.0+1
+
+- **DOCS**: Update README installation.
+
 ## 2.0.0
 
 - **FEAT**: SignalBuilder placement, `.value` rewrite, dispose synthesis, StatelessWidget→StatefulWidget split.

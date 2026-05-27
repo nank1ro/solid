@@ -1,3 +1,7 @@
+## 2.0.0+1
+
+- **DOCS**: Update README installation.
+
 ## 2.0.0
 
 - **FEAT**: `Disposable` marker for environment values that need teardown.
