@@ -10,6 +10,16 @@ export default defineConfig({
     starlight({
       title: 'Flutter Solid Framework',
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/nank1ro/solid' }],
+      head: [
+        {
+          tag: 'script',
+          attrs: {
+            defer: true,
+            src: 'https://umami.mariuti.com/script.js',
+            'data-website-id': '682aff24-32d8-48eb-b29a-a8ec596dc1e4',
+          },
+        },
+      ],
       plugins: [
         starlightLlmsTxt({
           description:
