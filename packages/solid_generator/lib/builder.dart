@@ -8,6 +8,7 @@ import 'package:dart_style/dart_style.dart';
 import 'package:glob/glob.dart';
 
 import 'package:solid_generator/src/annotation_reader.dart';
+import 'package:solid_generator/src/ast_compat.dart';
 import 'package:solid_generator/src/class_kind.dart';
 import 'package:solid_generator/src/const_call_site_rewriter.dart';
 import 'package:solid_generator/src/effect_model.dart';
@@ -154,7 +155,7 @@ class _SolidBuilder implements Builder {
     }
     // Acquire a TYPE-RESOLVED CompilationUnit when possible. Path:
     //   1. `libraryFor(inputId)` returns a fully-resolved `LibraryElement`
-    //      (analyzer 8.x forces full type resolution at this step).
+    //      (the analyzer resolves types fully at this step).
     //   2. `astNodeFor(anyElement, resolve: true)` returns that element's
     //      resolved declaration node — `Expression.staticType` is populated
     //      on every node beneath it.
@@ -625,8 +626,8 @@ Future<CompilationUnit> _resolveUnit(
       buildStep.inputId,
       allowSyntaxErrors: true,
     );
-    // analyzer 9 `astNodeFor` takes a `Fragment` (the per-file
-    // declaration-level element). The library's defining-file fragment is
+    // `astNodeFor` takes a `Fragment` (the per-file declaration-level
+    // element). The library's defining-file fragment is
     // available as `library.firstFragment` (a `LibraryFragment`); passing
     // it with `resolve: true` returns the resolved `CompilationUnit` for
     // that file directly. Falls back to the parsed AST if the resolver

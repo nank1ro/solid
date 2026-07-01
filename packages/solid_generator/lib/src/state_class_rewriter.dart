@@ -1,4 +1,5 @@
 import 'package:analyzer/dart/ast/ast.dart';
+import 'package:solid_generator/src/ast_compat.dart';
 import 'package:solid_generator/src/build_rewriter.dart';
 import 'package:solid_generator/src/effect_model.dart';
 import 'package:solid_generator/src/environment_model.dart';

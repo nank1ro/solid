@@ -57,12 +57,10 @@ final appRouter = GoRouter(
 
 ```dart title="source/main.dart"
 import 'package:flutter/material.dart';
-import 'package:flutter_solidart/flutter_solidart.dart';
 
 import 'router.dart';
 
 void main() {
-  SolidartConfig.autoDispose = false;
   runApp(MaterialApp.router(routerConfig: appRouter));
 }
 ```

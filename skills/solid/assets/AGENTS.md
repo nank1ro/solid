@@ -76,18 +76,6 @@ linter:
     prefer_relative_imports: true
 ```
 
-## Required `source/main.dart` setup
-
-```dart
-import 'package:flutter/material.dart';
-import 'package:flutter_solidart/flutter_solidart.dart';
-
-void main() {
-  SolidartConfig.autoDispose = false; // Solid manages disposal manually
-  runApp(/* ... */);
-}
-```
-
 ## Common bugs you might be asked about
 
 | Symptom | Diagnosis |

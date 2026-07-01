@@ -28,7 +28,6 @@ Common errors and fixes. Source: <https://solid.mariuti.com/faq> plus the "commo
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
-| Atoms are not disposed in tests / long sessions | `flutter_solidart` defaults to auto-dispose, which Solid manages manually. | In `source/main.dart` set `SolidartConfig.autoDispose = false;` before `runApp(...)`. (Will become the default in a future `flutter_solidart` major release.) |
 | `Provider not found` when reading a `@SolidEnvironment` field | No ancestor `Provider<T>` in the widget tree. | Add `.environment((_) => T(...))` on a parent widget, or wrap with `Provider<T>(create: ..., child: ...)`. |
 | `ProviderNotFoundException` from a `.environment(...)` `create` callback that calls `ctx.read<T>()` | `.environment(X)` wraps the RECEIVER, so X ends up ABOVE it. A consumer chained BEFORE its dependency has the dep BELOW (not above) its own `create` context. | Reorder so the dependency's `.environment(...)` appears AFTER the consumer's (the dep ends up outermost = above). See [patterns.md §6](./patterns.md#6-solidenvironment-reading-an-ancestor-providert) for the worked example. |
 | Reactive read inside `@SolidQuery` body doesn't trigger re-run | The read happens before the resource is observed, or on a non-`@SolidState` source. | Ensure the value comes from a `@SolidState` field (or a `@SolidState` getter) on the same widget. |
