@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_solidart/flutter_solidart.dart';
 import 'package:solid_annotations/solid_annotations.dart';
 
 import 'api/weather_api.dart';
@@ -9,7 +8,6 @@ import 'domain/city.dart';
 import 'pages/home_page.dart';
 
 void main() {
-  SolidartConfig.autoDispose = false;
   runApp(
     const WeatherApp()
         .environment(

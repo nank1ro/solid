@@ -1,7 +1,7 @@
 name: _
 publish_to: none
 environment:
-  sdk: ^3.9.2
+  sdk: ^3.10.0
 workspace:
   - packages/solid_generator
   - packages/solid_annotations
@@ -13,4 +13,4 @@ workspace:
   - examples/chat
 
 dev_dependencies:
-  very_good_analysis: ^10.0.0
+  very_good_analysis: ^10.3.0

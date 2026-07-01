@@ -1,5 +1,6 @@
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/dart/ast/visitor.dart';
+import 'package:solid_generator/src/ast_compat.dart';
 import 'package:solid_generator/src/transformation_error.dart';
 
 /// Reserved annotation names from `package:solid_annotations` whose full

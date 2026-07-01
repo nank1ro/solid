@@ -132,9 +132,8 @@ If `pubspec.yaml` doesn't yet declare Solid, install it:
          - lib/**
          - $package$
    ```
-4. In `source/main.dart`, set `SolidartConfig.autoDispose = false;` before `runApp(...)`. (Temporary — will become the default in a future `flutter_solidart` major release.)
-5. In `analysis_options.yaml`, add `analyzer.errors.must_be_immutable: ignore` (your source widgets are mutable; the generated ones are immutable).
-6. Run `dart run build_runner watch` during development.
+4. In `analysis_options.yaml`, add `analyzer.errors.must_be_immutable: ignore` (your source widgets are mutable; the generated ones are immutable).
+5. Run `dart run build_runner watch` during development.
 
 ## Verify your changes
 
@@ -157,7 +156,6 @@ Why `dart fix --apply` matters: the generator prioritises correct, runnable code
 - Following a pub-package README literally when it says `lib/`. Substitute `source/`. See `references/third-party-packages.md`.
 - Adding `final` or `static` to a `@SolidState` field. The generator rejects it.
 - Giving `@SolidQuery` parameters. Use `@SolidState` fields as inputs — the query re-runs when they change.
-- Forgetting `SolidartConfig.autoDispose = false` in `source/main.dart` — atoms leak in tests and long sessions.
 - Importing same-package files via `package:<self>/...` from inside `source/`. Use relative paths.
 - Expecting `flutter run` to pick up build_runner output without `r` or `dashmonx`.
 - Treating `must_be_immutable` lint as a real error — your widgets are mutable; the generated ones are immutable. Set `must_be_immutable: ignore`.

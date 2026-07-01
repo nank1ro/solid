@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_solidart/flutter_solidart.dart';
 import 'package:solid_annotations/solid_annotations.dart';
 
 import 'controllers/filter.dart';
@@ -8,7 +7,6 @@ import 'domain/todo.dart';
 import 'pages/todos.dart';
 
 void main() {
-  SolidartConfig.autoDispose = false;
   runApp(const MyApp());
 }
 

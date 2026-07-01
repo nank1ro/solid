@@ -30,3 +30,8 @@ analyzer:
     # The setter fixture intentionally has no corresponding getter — the
     # whole point is that `@SolidState` on a setter must be rejected.
     avoid_setters_without_getters: ignore
+    # Fixtures carry intentional `ignore_for_file` directives (e.g.
+    # `unreachable_from_main`) that document intent and mirror what the
+    # generated output needs; analysed in isolation an input may not produce
+    # the diagnostic, so the ignore reads as unnecessary.
+    unnecessary_ignore: ignore
