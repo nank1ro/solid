@@ -127,6 +127,8 @@ const List<String> goldenNames = <String>[
   'top_level_read_early_return',
   'top_level_cross_class_read_in_build',
   'mixed_top_level_and_inner_read',
+  'cross_class_instance_field_read',
+  'cross_class_instance_field_no_state',
 ];
 
 /// Memoized golden directory resolution. Resolved relative to the package

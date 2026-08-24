@@ -3,6 +3,7 @@
 - **BREAKING**: Raise the Dart SDK lower bound to `^3.10.0` to target the solidart v3 ecosystem.
 - **CHORE**: Upgrade `analyzer` to `^12.0.0` and adapt to its reshaped class/enum declaration AST (name and members moved onto `namePart`/`body` for primary constructors).
 - **CHORE**: Bump `solid_annotations` to `^3.0.0-dev.1`, `dart_style` to `^3.1.8`, and `build`/`build_runner`/`build_test`.
+- **FIX**: Cross-class `.value` rewrite now resolves constructor-injected instance fields (`final AuthRepository _authRepository;`), not just method/function parameters and `@SolidEnvironment` fields. Previously a bare instance field receiver silently kept its unlowered form, producing always-true null checks and compile errors against the unboxed `Signal` payload.
 
 ## 2.0.0+1
 

@@ -1,6 +1,7 @@
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/dart/ast/visitor.dart';
 import 'package:analyzer/dart/element/type.dart';
+import 'package:solid_generator/src/ast_compat.dart';
 import 'package:solid_generator/src/query_model.dart';
 
 /// A single value-level edit emitted by [collectValueEdits].
@@ -111,8 +112,9 @@ bool _isOnPrefixedCallbackName(String name) {
 /// `[classCollectionFields]` already include cross-file entries by the
 /// time this function is called. Cross-class receiver resolution uses
 /// `staticType` when available (locals, method-call receivers, multi-level
-/// chains) and falls back to AST parameter inspection when unresolved
-/// (test sandboxes without the Flutter SDK).
+/// chains) and falls back to AST parameter or instance-field inspection when
+/// unresolved (test sandboxes without the Flutter SDK, or a constructor-
+/// injected field like `final AuthRepository _authRepository;`).
 ///
 /// [queryNames] is the name-set of `@SolidQuery` methods declared on the
 /// enclosing class. Zero-argument `MethodInvocation`s whose target is
@@ -710,35 +712,70 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
   bool _isCrossClassChainPrefix(PrefixedIdentifier node) =>
       _isAnyChainTarget(node);
 
-  /// Returns the simple type name of [receiver], using two-tier resolution:
+  /// Returns the simple type name of [receiver], using three-tier resolution:
   ///
   ///  1. **Element-based.** When [Expression.staticType] is a resolved
   ///     [InterfaceType], return its element name. Catches locals
   ///     (`var c = controller; c.field`), method-call receivers
   ///     (`getController().field`), and parameters identically — `staticType`
   ///     is populated for every expression in resolved AST.
-  ///  2. **AST fallback (parameters only).** When the resolver hasn't run
+  ///  2. **AST fallback (parameters).** When the resolver hasn't run
   ///     (parsed-AST fallback or test sandbox without the necessary SDK),
   ///     resolve [receiver] as a method/function parameter declared with a
-  ///     [NamedType] annotation. Other receiver shapes (locals,
-  ///     method-call results) cannot be resolved on parsed AST and return
-  ///     `null` — the cross-class rewrite then no-ops, leaving the source
-  ///     unchanged. Function-typed parameters, `var`-typed parameters,
-  ///     `FieldFormalParameter`, and `SuperFormalParameter` also return
-  ///     `null` in this tier.
+  ///     [NamedType] annotation. Function-typed parameters, `var`-typed
+  ///     parameters, `FieldFormalParameter`, and `SuperFormalParameter`
+  ///     return `null` in this tier — a parameter name match with no
+  ///     resolvable type still counts as "matched" and short-circuits tier 3
+  ///     (a parameter shadows a same-named field; falling through to the
+  ///     field would rewrite the wrong receiver).
+  ///  3. **AST fallback (instance fields).** When [receiver] is not a
+  ///     parameter at all (matched or not), resolve it as a non-static field
+  ///     of the enclosing [ClassDeclaration] declared with a [NamedType] —
+  ///     the constructor-injected DI shape (`final AuthRepository
+  ///     _authRepository;`) most Flutter apps use. Other receiver shapes
+  ///     (locals, method-call results) cannot be resolved on parsed AST and
+  ///     return `null` — the cross-class rewrite then no-ops, leaving the
+  ///     source unchanged.
   String? _resolveReceiverTypeName(Expression receiver) {
     final type = receiver.staticType;
     if (type is InterfaceType) return type.element.name;
     if (receiver is SimpleIdentifier) {
-      return _resolveParameterTypeNameFromAst(receiver);
+      if (_isParameterName(receiver)) {
+        return _resolveParameterTypeNameFromAst(receiver);
+      }
+      return _resolveInstanceFieldTypeNameFromAst(receiver);
     }
     return null;
   }
 
-  /// AST-only parameter resolver — the unresolved fallback for
-  /// [_resolveReceiverTypeName]. Walks the prefix's enclosing
-  /// [MethodDeclaration] / [FunctionExpression] for a matching
-  /// [SimpleFormalParameter] and returns the declared [NamedType]'s lexeme.
+  /// True if [prefix] names a parameter of the nearest enclosing
+  /// [MethodDeclaration] / [FunctionExpression], regardless of whether that
+  /// parameter's type is resolvable. Gates the tier-3 instance-field fallback
+  /// in [_resolveReceiverTypeName]: Dart scoping always prefers a parameter
+  /// over a same-named field, so an unresolvable parameter type must produce
+  /// "no rewrite" rather than silently resolving through the shadowed field.
+  bool _isParameterName(SimpleIdentifier prefix) {
+    final params =
+        prefix
+            .thisOrAncestorOfType<MethodDeclaration>()
+            ?.parameters
+            ?.parameters ??
+        prefix
+            .thisOrAncestorOfType<FunctionExpression>()
+            ?.parameters
+            ?.parameters;
+    if (params == null) return false;
+    for (final param in params) {
+      final inner = param is DefaultFormalParameter ? param.parameter : param;
+      if (inner.name?.lexeme == prefix.name) return true;
+    }
+    return false;
+  }
+
+  /// AST-only parameter resolver — tier 2 of [_resolveReceiverTypeName].
+  /// Walks the prefix's enclosing [MethodDeclaration] / [FunctionExpression]
+  /// for a matching [SimpleFormalParameter] and returns the declared
+  /// [NamedType]'s lexeme.
   String? _resolveParameterTypeNameFromAst(SimpleIdentifier prefix) {
     final params =
         prefix
@@ -758,6 +795,30 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
         if (type is NamedType) return type.name.lexeme;
       }
       return null;
+    }
+    return null;
+  }
+
+  /// AST-only instance-field resolver — tier 3 of [_resolveReceiverTypeName].
+  /// Walks the prefix's enclosing [ClassDeclaration] for a matching
+  /// non-static [FieldDeclaration] and returns the declared [NamedType]'s
+  /// lexeme. Covers the most common Flutter DI shape — a constructor-injected
+  /// field (`final AuthRepository _authRepository;`) — that has no parameter
+  /// counterpart. Returns `null` for `var`/inferred-typed fields, static
+  /// fields, and when no field on the enclosing class matches [prefix]'s
+  /// name; callers gate this tier on [_isParameterName] returning `false` so
+  /// a parameter never gets shadowed by a same-named field.
+  String? _resolveInstanceFieldTypeNameFromAst(SimpleIdentifier prefix) {
+    final classDecl = prefix.thisOrAncestorOfType<ClassDeclaration>();
+    if (classDecl == null) return null;
+    for (final member in classDecl.members) {
+      if (member is! FieldDeclaration) continue;
+      if (member.isStatic) continue;
+      final type = member.fields.type;
+      if (type is! NamedType) continue;
+      for (final variable in member.fields.variables) {
+        if (variable.name.lexeme == prefix.name) return type.name.lexeme;
+      }
     }
     return null;
   }
