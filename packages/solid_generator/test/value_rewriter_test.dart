@@ -1,19 +1,31 @@
-// Unit tests for the instance-field tier of `value_rewriter.dart`'s
-// cross-class `.value` resolution (`_resolveInstanceFieldTypeNameFromAst`).
+// Unit tests for the parameter-shadow guard in `value_rewriter.dart`'s
+// cross-class `.value` resolution (`_isParameterName` /
+// `_resolveReceiverTypeName`).
 //
-// The `testBuilder` golden harness (see `test/integration/golden_test.dart`)
-// fully resolves plain-Dart receiver types even without this tier — a field
-// of a non-Flutter type resolves via `Expression.staticType` regardless of
-// whether the Flutter SDK is available in the sandbox (only Flutter-typed
-// expressions resolve to `InvalidType` there; see `placement_visitor_test.
-// dart`). So the golden pair `cross_class_instance_field_read` /
-// `cross_class_instance_field_no_state` is real regression coverage but
-// does not, by itself, prove the new AST fallback tier is what did the
-// work. This suite calls `collectValueEdits` directly against `parseString`
-// output — a genuinely UNRESOLVED AST (every `staticType` is null, mirroring
-// the real fallback trigger: a `BuildStep.resolver` that hasn't fully
-// resolved the receiver) — so a passing test can only be explained by the
-// AST-only parameter/instance-field tiers.
+// Every other new behavior this receiver-resolution tier introduces — the
+// guard-style null check, the `!`-chain, the `.hasValue` / explicit `.value`
+// no-double-rewrite guards, the `this.<field>` shape, bare and `??=` writes,
+// and the "registered class but non-reactive member" negative — is pinned as
+// golden input/output pairs in `test/golden/{inputs,outputs}/
+// cross_class_instance_field_read.dart` instead: the `testBuilder` harness
+// resolves a constructor-injected field's declared type (`final
+// AuthRepository _authRepository;`) via `Expression.staticType` regardless
+// of Flutter SDK availability, so those goldens exercise real input→output
+// behavior end-to-end.
+//
+// The parameter-shadow guard is the one piece that behavior can't reach that
+// way. `_isParameterName` exists specifically to stop an UNTYPED parameter
+// (no `NamedType` — e.g. `hasSession(_authRepository)`, which infers
+// `dynamic`) from falling through to a same-named field's type. But under a
+// real resolver, `dynamic` already isn't an `InterfaceType`, so a golden
+// with an untyped parameter would prove nothing about this guard
+// specifically — the same "no rewrite" outcome falls out of resolved-AST
+// tier 1 whether or not `_isParameterName` exists. Only a genuinely
+// UNRESOLVED AST (every `staticType` null, mirroring a `BuildStep.resolver`
+// that hasn't fully resolved the receiver) isolates the guard: without it,
+// an untyped parameter would incorrectly fall through to tier 3 and resolve
+// via the shadowed field. This suite calls `collectValueEdits` directly
+// against `parseString` output to construct that unresolved AST.
 
 import 'package:analyzer/dart/analysis/features.dart';
 import 'package:analyzer/dart/analysis/utilities.dart';
@@ -42,184 +54,10 @@ MethodDeclaration _method(String source, String className, String methodName) {
 }
 
 void main() {
-  group('cross-class instance-field resolution (unresolved AST)', () {
+  group('cross-class parameter-shadow guard (unresolved AST)', () {
     const classRegistry = {
       'AuthRepository': {'session'},
     };
-
-    test('guard-style null check gains .value', () {
-      const source = '''
-class SessionGuard {
-  SessionGuard(this._authRepository);
-
-  final AuthRepository _authRepository;
-
-  bool hasSession() {
-    return _authRepository.session != null;
-  }
-}
-''';
-      final method = _method(source, 'SessionGuard', 'hasSession');
-      final result = collectValueEdits(
-        method,
-        const {},
-        source,
-        classRegistry: classRegistry,
-      );
-
-      final rewritten = applyEditsToRange(
-        source.substring(method.offset, method.end),
-        result.edits,
-        method.offset,
-      );
-      expect(rewritten, contains('_authRepository.session.value != null'));
-    });
-
-    test('chained member access through ! gains .value before the bang', () {
-      const source = '''
-class SessionGuard {
-  SessionGuard(this._authRepository);
-
-  final AuthRepository _authRepository;
-
-  int sessionLength() {
-    return _authRepository.session!.length;
-  }
-}
-''';
-      final method = _method(source, 'SessionGuard', 'sessionLength');
-      final result = collectValueEdits(
-        method,
-        const {},
-        source,
-        classRegistry: classRegistry,
-      );
-
-      final rewritten = applyEditsToRange(
-        source.substring(method.offset, method.end),
-        result.edits,
-        method.offset,
-      );
-      expect(rewritten, contains('_authRepository.session.value!.length'));
-    });
-
-    test('.hasValue chain is not double-rewritten', () {
-      const source = '''
-class SessionGuard {
-  SessionGuard(this._authRepository);
-
-  final AuthRepository _authRepository;
-
-  bool sessionResolved() {
-    return _authRepository.session.hasValue;
-  }
-}
-''';
-      final method = _method(source, 'SessionGuard', 'sessionResolved');
-      final result = collectValueEdits(
-        method,
-        const {},
-        source,
-        classRegistry: classRegistry,
-      );
-
-      final rewritten = applyEditsToRange(
-        source.substring(method.offset, method.end),
-        result.edits,
-        method.offset,
-      );
-      expect(rewritten, contains('_authRepository.session.hasValue'));
-      expect(rewritten, isNot(contains('.session.value.hasValue')));
-    });
-
-    test('explicit .value chain is not double-rewritten', () {
-      const source = '''
-class SessionGuard {
-  SessionGuard(this._authRepository);
-
-  final AuthRepository _authRepository;
-
-  String? rawSession() {
-    return _authRepository.session.value;
-  }
-}
-''';
-      final method = _method(source, 'SessionGuard', 'rawSession');
-      final result = collectValueEdits(
-        method,
-        const {},
-        source,
-        classRegistry: classRegistry,
-      );
-
-      final rewritten = applyEditsToRange(
-        source.substring(method.offset, method.end),
-        result.edits,
-        method.offset,
-      );
-      expect(rewritten, contains('_authRepository.session.value'));
-      expect(rewritten, isNot(contains('.value.value')));
-    });
-
-    test(
-      'field whose type is not in classRegistry is left untouched',
-      () {
-        const source = '''
-class Reporter {
-  Reporter(this._helper);
-
-  final PlainHelper _helper;
-
-  int report() {
-    return _helper.count;
-  }
-}
-''';
-        final method = _method(source, 'Reporter', 'report');
-        // `PlainHelper` never enters the registry (only classes with
-        // `@SolidState` members do) — no edit should fire even though the
-        // field's declared type resolves fine.
-        final result = collectValueEdits(
-          method,
-          const {},
-          source,
-          classRegistry: classRegistry,
-        );
-
-        expect(result.edits, isEmpty);
-      },
-    );
-
-    test(
-      'field whose registered type does not own the accessed member is '
-      'left untouched',
-      () {
-        const source = '''
-class Reporter {
-  Reporter(this._authRepository);
-
-  final AuthRepository _authRepository;
-
-  String other() {
-    return _authRepository.other;
-  }
-}
-''';
-        final method = _method(source, 'Reporter', 'other');
-        // `AuthRepository` IS registered, but `other` is not one of its
-        // `@SolidState` members (only `session` is) — the field-name
-        // discrimination inside `_maybeRewriteCrossClass` must still gate
-        // the rewrite.
-        final result = collectValueEdits(
-          method,
-          const {},
-          source,
-          classRegistry: classRegistry,
-        );
-
-        expect(result.edits, isEmpty);
-      },
-    );
 
     test(
       'a same-named method parameter shadows the field and suppresses the '
@@ -249,76 +87,6 @@ class SessionGuard {
         );
 
         expect(result.edits, isEmpty);
-      },
-    );
-
-    test(
-      'this.<field>.<reactiveField> gains .value (this. bypasses parameter '
-      'shadowing)',
-      () {
-        const source = '''
-class SessionGuard {
-  SessionGuard(this._authRepository);
-
-  final AuthRepository _authRepository;
-
-  bool hasSession() {
-    return this._authRepository.session != null;
-  }
-}
-''';
-        final method = _method(source, 'SessionGuard', 'hasSession');
-        final result = collectValueEdits(
-          method,
-          const {},
-          source,
-          classRegistry: classRegistry,
-        );
-
-        final rewritten = applyEditsToRange(
-          source.substring(method.offset, method.end),
-          result.edits,
-          method.offset,
-        );
-        expect(
-          rewritten,
-          contains('this._authRepository.session.value != null'),
-        );
-      },
-    );
-
-    test(
-      'this.<field>.<reactiveField> chained through ! gains .value before '
-      'the bang',
-      () {
-        const source = '''
-class SessionGuard {
-  SessionGuard(this._authRepository);
-
-  final AuthRepository _authRepository;
-
-  int sessionLength() {
-    return this._authRepository.session!.length;
-  }
-}
-''';
-        final method = _method(source, 'SessionGuard', 'sessionLength');
-        final result = collectValueEdits(
-          method,
-          const {},
-          source,
-          classRegistry: classRegistry,
-        );
-
-        final rewritten = applyEditsToRange(
-          source.substring(method.offset, method.end),
-          result.edits,
-          method.offset,
-        );
-        expect(
-          rewritten,
-          contains('this._authRepository.session.value!.length'),
-        );
       },
     );
 
@@ -353,133 +121,6 @@ class SessionGuard {
         expect(
           rewritten,
           contains('this._authRepository.session.value != null'),
-        );
-      },
-    );
-
-    test('bare <receiver>.<reactiveField> write gains .value', () {
-      const source = '''
-class SessionGuard {
-  SessionGuard(this._authRepository);
-
-  final AuthRepository _authRepository;
-
-  void clearSession() {
-    _authRepository.session = null;
-  }
-}
-''';
-      final method = _method(source, 'SessionGuard', 'clearSession');
-      final result = collectValueEdits(
-        method,
-        const {},
-        source,
-        classRegistry: classRegistry,
-      );
-
-      final rewritten = applyEditsToRange(
-        source.substring(method.offset, method.end),
-        result.edits,
-        method.offset,
-      );
-      expect(rewritten, contains('_authRepository.session.value = null'));
-    });
-
-    test(
-      'bare <receiver>.<reactiveField> compound-assign (??=) gains .value',
-      () {
-        const source = '''
-class SessionGuard {
-  SessionGuard(this._authRepository);
-
-  final AuthRepository _authRepository;
-
-  void ensureSession() {
-    _authRepository.session ??= 'anon';
-  }
-}
-''';
-        final method = _method(source, 'SessionGuard', 'ensureSession');
-        final result = collectValueEdits(
-          method,
-          const {},
-          source,
-          classRegistry: classRegistry,
-        );
-
-        final rewritten = applyEditsToRange(
-          source.substring(method.offset, method.end),
-          result.edits,
-          method.offset,
-        );
-        expect(
-          rewritten,
-          contains("_authRepository.session.value ??= 'anon'"),
-        );
-      },
-    );
-
-    test('this.<field>.<reactiveField> write gains .value', () {
-      const source = '''
-class SessionGuard {
-  SessionGuard(this._authRepository);
-
-  final AuthRepository _authRepository;
-
-  void clearSession() {
-    this._authRepository.session = null;
-  }
-}
-''';
-      final method = _method(source, 'SessionGuard', 'clearSession');
-      final result = collectValueEdits(
-        method,
-        const {},
-        source,
-        classRegistry: classRegistry,
-      );
-
-      final rewritten = applyEditsToRange(
-        source.substring(method.offset, method.end),
-        result.edits,
-        method.offset,
-      );
-      expect(
-        rewritten,
-        contains('this._authRepository.session.value = null'),
-      );
-    });
-
-    test(
-      'this.<field>.<reactiveField> compound-assign (??=) gains .value',
-      () {
-        const source = '''
-class SessionGuard {
-  SessionGuard(this._authRepository);
-
-  final AuthRepository _authRepository;
-
-  void ensureSession() {
-    this._authRepository.session ??= 'anon';
-  }
-}
-''';
-        final method = _method(source, 'SessionGuard', 'ensureSession');
-        final result = collectValueEdits(
-          method,
-          const {},
-          source,
-          classRegistry: classRegistry,
-        );
-
-        final rewritten = applyEditsToRange(
-          source.substring(method.offset, method.end),
-          result.edits,
-          method.offset,
-        );
-        expect(
-          rewritten,
-          contains("this._authRepository.session.value ??= 'anon'"),
         );
       },
     );
