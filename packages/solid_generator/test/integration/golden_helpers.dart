@@ -136,6 +136,7 @@ const List<String> goldenNames = <String>[
   'cross_file_dispose_unannotated_main',
   'cross_file_dispose_from_annotated_main',
   'cross_file_dispose_unknown_type_injected',
+  'cross_file_registry_decoy_collision',
 ];
 
 /// Memoized golden directory resolution. Resolved relative to the package

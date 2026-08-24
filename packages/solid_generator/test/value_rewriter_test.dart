@@ -356,5 +356,132 @@ class SessionGuard {
         );
       },
     );
+
+    test('bare <receiver>.<reactiveField> write gains .value', () {
+      const source = '''
+class SessionGuard {
+  SessionGuard(this._authRepository);
+
+  final AuthRepository _authRepository;
+
+  void clearSession() {
+    _authRepository.session = null;
+  }
+}
+''';
+      final method = _method(source, 'SessionGuard', 'clearSession');
+      final result = collectValueEdits(
+        method,
+        const {},
+        source,
+        classRegistry: classRegistry,
+      );
+
+      final rewritten = applyEditsToRange(
+        source.substring(method.offset, method.end),
+        result.edits,
+        method.offset,
+      );
+      expect(rewritten, contains('_authRepository.session.value = null'));
+    });
+
+    test(
+      'bare <receiver>.<reactiveField> compound-assign (??=) gains .value',
+      () {
+        const source = '''
+class SessionGuard {
+  SessionGuard(this._authRepository);
+
+  final AuthRepository _authRepository;
+
+  void ensureSession() {
+    _authRepository.session ??= 'anon';
+  }
+}
+''';
+        final method = _method(source, 'SessionGuard', 'ensureSession');
+        final result = collectValueEdits(
+          method,
+          const {},
+          source,
+          classRegistry: classRegistry,
+        );
+
+        final rewritten = applyEditsToRange(
+          source.substring(method.offset, method.end),
+          result.edits,
+          method.offset,
+        );
+        expect(
+          rewritten,
+          contains("_authRepository.session.value ??= 'anon'"),
+        );
+      },
+    );
+
+    test('this.<field>.<reactiveField> write gains .value', () {
+      const source = '''
+class SessionGuard {
+  SessionGuard(this._authRepository);
+
+  final AuthRepository _authRepository;
+
+  void clearSession() {
+    this._authRepository.session = null;
+  }
+}
+''';
+      final method = _method(source, 'SessionGuard', 'clearSession');
+      final result = collectValueEdits(
+        method,
+        const {},
+        source,
+        classRegistry: classRegistry,
+      );
+
+      final rewritten = applyEditsToRange(
+        source.substring(method.offset, method.end),
+        result.edits,
+        method.offset,
+      );
+      expect(
+        rewritten,
+        contains('this._authRepository.session.value = null'),
+      );
+    });
+
+    test(
+      'this.<field>.<reactiveField> compound-assign (??=) gains .value',
+      () {
+        const source = '''
+class SessionGuard {
+  SessionGuard(this._authRepository);
+
+  final AuthRepository _authRepository;
+
+  void ensureSession() {
+    this._authRepository.session ??= 'anon';
+  }
+}
+''';
+        final method = _method(source, 'SessionGuard', 'ensureSession');
+        final result = collectValueEdits(
+          method,
+          const {},
+          source,
+          classRegistry: classRegistry,
+        );
+
+        final rewritten = applyEditsToRange(
+          source.substring(method.offset, method.end),
+          result.edits,
+          method.offset,
+        );
+        expect(
+          rewritten,
+          contains("this._authRepository.session.value ??= 'anon'"),
+        );
+      },
+    );
   });
 }

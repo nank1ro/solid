@@ -1086,8 +1086,8 @@ Future<void> _populateCrossFileTypes(
             );
           }
         }
+        wantedTypes.remove(className);
       }
-      wantedTypes.remove(className);
     }
   }
 }
