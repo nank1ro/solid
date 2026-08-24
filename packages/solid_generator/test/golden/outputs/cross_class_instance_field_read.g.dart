@@ -26,6 +26,12 @@ class SessionGuard implements Disposable {
 
   bool sessionResolved() => _authRepository.session.hasValue;
 
+  bool hasSessionViaThis() {
+    return this._authRepository.session.value != null;
+  }
+
+  int? sessionLengthViaThis() => this._authRepository.session.value!.length;
+
   @override
   void dispose() {
     probeCount.dispose();

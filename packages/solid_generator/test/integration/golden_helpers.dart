@@ -132,6 +132,10 @@ const List<String> goldenNames = <String>[
   'environment_dispose_skipped_no_dispose_method',
   'environment_dispose_injected_changenotifier',
   'environment_dispose_explicit_null_skipped',
+  'environment_dispose_injected_transitive_base',
+  'cross_file_dispose_unannotated_main',
+  'cross_file_dispose_from_annotated_main',
+  'cross_file_dispose_unknown_type_injected',
 ];
 
 /// Memoized golden directory resolution. Resolved relative to the package

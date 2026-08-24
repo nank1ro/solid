@@ -712,7 +712,7 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
   bool _isCrossClassChainPrefix(PrefixedIdentifier node) =>
       _isAnyChainTarget(node);
 
-  /// Returns the simple type name of [receiver], using three-tier resolution:
+  /// Returns the simple type name of [receiver], using four-tier resolution:
   ///
   ///  1. **Element-based.** When [Expression.staticType] is a resolved
   ///     [InterfaceType], return its element name. Catches locals
@@ -736,6 +736,15 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
   ///     (locals, method-call results) cannot be resolved on parsed AST and
   ///     return `null` — the cross-class rewrite then no-ops, leaving the
   ///     source unchanged.
+  ///  4. **AST fallback (`this.<field>`).** When [receiver] is a
+  ///     [PropertyAccess] whose target is a [ThisExpression] (`this.field` —
+  ///     `this` is a keyword, so this shape can never parse as a
+  ///     [PrefixedIdentifier] / tier-2-or-3 [SimpleIdentifier]), resolve
+  ///     `field` directly against the same instance-field tier as case 3 —
+  ///     skipping the parameter-shadow check entirely. `this.` explicitly
+  ///     names a field; that is its purpose, and it must resolve to the
+  ///     field even when a same-named parameter is in scope (unlike a bare
+  ///     reference, which the parameter legitimately shadows).
   String? _resolveReceiverTypeName(Expression receiver) {
     final type = receiver.staticType;
     if (type is InterfaceType) return type.element.name;
@@ -744,6 +753,12 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
         return _resolveParameterTypeNameFromAst(receiver);
       }
       return _resolveInstanceFieldTypeNameFromAst(receiver);
+    }
+    if (receiver is PropertyAccess && receiver.target is ThisExpression) {
+      return _resolveInstanceFieldTypeNameByName(
+        receiver.propertyName.name,
+        receiver,
+      );
     }
     return null;
   }
@@ -800,16 +815,21 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
   }
 
   /// AST-only instance-field resolver — tier 3 of [_resolveReceiverTypeName].
-  /// Walks the prefix's enclosing [ClassDeclaration] for a matching
-  /// non-static [FieldDeclaration] and returns the declared [NamedType]'s
-  /// lexeme. Covers the most common Flutter DI shape — a constructor-injected
-  /// field (`final AuthRepository _authRepository;`) — that has no parameter
-  /// counterpart. Returns `null` for `var`/inferred-typed fields, static
-  /// fields, and when no field on the enclosing class matches [prefix]'s
-  /// name; callers gate this tier on [_isParameterName] returning `false` so
-  /// a parameter never gets shadowed by a same-named field.
-  String? _resolveInstanceFieldTypeNameFromAst(SimpleIdentifier prefix) {
-    final classDecl = prefix.thisOrAncestorOfType<ClassDeclaration>();
+  /// Covers the most common Flutter DI shape — a constructor-injected field
+  /// (`final AuthRepository _authRepository;`) — that has no parameter
+  /// counterpart. Callers gate this tier on [_isParameterName] returning
+  /// `false` so a parameter never gets shadowed by a same-named field.
+  String? _resolveInstanceFieldTypeNameFromAst(SimpleIdentifier prefix) =>
+      _resolveInstanceFieldTypeNameByName(prefix.name, prefix);
+
+  /// Shared implementation of [_resolveInstanceFieldTypeNameFromAst] (tier 3)
+  /// and the `this.<field>` branch (tier 4) of [_resolveReceiverTypeName].
+  /// Walks [anchor]'s enclosing [ClassDeclaration] for a matching non-static
+  /// [FieldDeclaration] named [name] and returns the declared [NamedType]'s
+  /// lexeme. Returns `null` for `var`/inferred-typed fields, static fields,
+  /// and when no field on the enclosing class matches [name].
+  String? _resolveInstanceFieldTypeNameByName(String name, AstNode anchor) {
+    final classDecl = anchor.thisOrAncestorOfType<ClassDeclaration>();
     if (classDecl == null) return null;
     for (final member in classDecl.members) {
       if (member is! FieldDeclaration) continue;
@@ -817,7 +837,7 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
       final type = member.fields.type;
       if (type is! NamedType) continue;
       for (final variable in member.fields.variables) {
-        if (variable.name.lexeme == prefix.name) return type.name.lexeme;
+        if (variable.name.lexeme == name) return type.name.lexeme;
       }
     }
     return null;

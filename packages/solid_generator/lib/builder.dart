@@ -220,8 +220,15 @@ class _SolidBuilder implements Builder {
     // Cross-file resolver: walks every `package:`/relative import of the
     // current source file, redirecting same-package imports from `lib/` to
     // `source/`, and pulls in `@SolidState` member names for every class
-    // referenced by a `@SolidEnvironment` field type — same contract as the
-    // same-file pass, but for types declared in other source files.
+    // referenced by a `@SolidEnvironment` field type OR created at a
+    // `Provider(...)` / `.environment<T>()` call site (the latter set is
+    // gathered here — see [collectProviderCreatedTypeNames] — so a
+    // cross-file `@SolidState` controller that's only ever PROVIDED, never
+    // consumed via `@SolidEnvironment`, still gets a `classRegistry` entry;
+    // the auto-dispose pass in `_renderOutput` / the `hasProviderHint`
+    // branch below relies on that entry to recognize the type as
+    // Solid-lowered) — same contract as the same-file pass, but for types
+    // declared in other source files.
     await _populateCrossFileTypes(
       unit,
       buildStep,
@@ -229,6 +236,7 @@ class _SolidBuilder implements Builder {
       sameFileCollections,
       sameFileFieldTypes,
       crossClassFieldTypeOriginUris,
+      hasProviderHint ? collectProviderCreatedTypeNames(unit) : const {},
     );
 
     final annotatedClasses = _collectAnnotatedClasses(
@@ -245,6 +253,7 @@ class _SolidBuilder implements Builder {
         final withDispose = addProviderDisposeAtCallSites(
           source,
           unit: unit,
+          classRegistry: sameFileRegistry,
         );
         if (identical(withDispose, source)) {
           await buildStep.writeAsString(outputId, source);
@@ -287,6 +296,14 @@ class _SolidBuilder implements Builder {
 /// `_buildClassRegistry` did: Effects have no observable `.value`, and
 /// Queries lower to `Resource<T>` whose call sites resolve through
 /// `Resource.call() → state`.
+///
+/// Caveat: every consumer of this registry (here, `_populateCrossFileTypes`,
+/// and the auto-dispose type-aware check in `provider_dispose_rewriter.dart`)
+/// keys it by SIMPLE class name, not library-qualified identity. Two
+/// distinct classes that happen to share a name across different libraries
+/// would collide — a pre-existing risk of the name-based design, widened
+/// (not introduced) by giving the auto-dispose check a second reason to
+/// consult this map.
 Map<String, Set<String>> _prescanClassRegistry(CompilationUnit unit) {
   final registry = <String, Set<String>>{};
   for (final decl in unit.declarations) {
@@ -777,7 +794,10 @@ String _renderOutput(
   // that omits `dispose:`. Runs before `addConstAtCallSites` so the injected
   // closure (a `FunctionExpression`, never const-eligible) is part of the
   // argument list when const promotion evaluates const-eligibility.
-  final withDispose = addProviderDisposeAtCallSites(combined);
+  final withDispose = addProviderDisposeAtCallSites(
+    combined,
+    classRegistry: classRegistry,
+  );
   // The const-ctor pass adds `const` to widget-ctor declarations; this pass
   // adds `const` to call sites of those declarations elsewhere in the assembled
   // output (top-level `main()`, rewritten `build` bodies, passthrough classes
@@ -917,10 +937,13 @@ RewriteResult _rewriteClass(
 
 /// Resolver pass for the cross-file slice of the chain-aware rule. For each
 /// `@SolidEnvironment` field whose declared type is NOT defined in the
-/// current source file, walk the imported `source/<path>.dart` file(s) via
-/// `BuildStep.resolver.compilationUnitFor` and merge any `@SolidState`
-/// members of the matching class declaration into [classRegistry] (and the
-/// collection-subset into [classCollectionFields]).
+/// current source file, OR each type name in [extraWantedTypes] (the types
+/// created at a `Provider(...)` / `.environment<T>()` call site in this
+/// file — see [collectProviderCreatedTypeNames]), walk the imported
+/// `source/<path>.dart` file(s) via `BuildStep.resolver.compilationUnitFor`
+/// and merge any `@SolidState` members of the matching class declaration
+/// into [classRegistry] (and the collection-subset into
+/// [classCollectionFields]).
 ///
 /// The two registries are mutated in place. Same-file types take precedence:
 /// when a type name is already present, the cross-file pass does NOT
@@ -942,6 +965,7 @@ Future<void> _populateCrossFileTypes(
   Map<String, Set<String>> classCollectionFields,
   Map<String, Map<String, String>> classFieldTypes,
   Map<String, Set<String>> crossClassFieldTypeOriginUris,
+  Set<String> extraWantedTypes,
 ) async {
   // Walk every `@SolidEnvironment` field declaration in the unit. The
   // builder pre-scan does NOT pre-build env-field models — the readers do
@@ -962,6 +986,10 @@ Future<void> _populateCrossFileTypes(
       if (classRegistry.containsKey(typeText)) continue;
       wantedTypes.add(typeText);
     }
+  }
+  for (final typeText in extraWantedTypes) {
+    if (classRegistry.containsKey(typeText)) continue;
+    wantedTypes.add(typeText);
   }
   if (wantedTypes.isEmpty) return;
 

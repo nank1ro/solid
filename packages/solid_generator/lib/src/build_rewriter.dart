@@ -38,9 +38,13 @@ class SourceEdit {
 ///
 /// [reactiveFields] is the set of field names declared `@SolidState` on the
 /// enclosing class. Matching is name-based; cross-class receiver resolution
-/// uses `staticType` in
-/// `value_rewriter._resolveReceiverTypeName` and falls back to AST
-/// parameter inspection when the resolver hasn't run.
+/// uses `staticType` in `value_rewriter._resolveReceiverTypeName` and, when
+/// the resolver hasn't run, falls back to AST inspection — first as a method
+/// parameter, then as a non-static instance field of the enclosing class
+/// (the constructor-injected DI shape, `final AuthRepository
+/// _authRepository;`), then as a `this.` + field receiver (which bypasses
+/// the parameter-shadow check entirely, since `this.` explicitly names a
+/// field).
 ///
 /// [queryNames] is the set of `@SolidQuery` method names declared on the
 /// enclosing class. Their zero-arg call sites in the build body are recorded

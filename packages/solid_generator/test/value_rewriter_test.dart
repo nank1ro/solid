@@ -251,5 +251,110 @@ class SessionGuard {
         expect(result.edits, isEmpty);
       },
     );
+
+    test(
+      'this.<field>.<reactiveField> gains .value (this. bypasses parameter '
+      'shadowing)',
+      () {
+        const source = '''
+class SessionGuard {
+  SessionGuard(this._authRepository);
+
+  final AuthRepository _authRepository;
+
+  bool hasSession() {
+    return this._authRepository.session != null;
+  }
+}
+''';
+        final method = _method(source, 'SessionGuard', 'hasSession');
+        final result = collectValueEdits(
+          method,
+          const {},
+          source,
+          classRegistry: classRegistry,
+        );
+
+        final rewritten = applyEditsToRange(
+          source.substring(method.offset, method.end),
+          result.edits,
+          method.offset,
+        );
+        expect(
+          rewritten,
+          contains('this._authRepository.session.value != null'),
+        );
+      },
+    );
+
+    test(
+      'this.<field>.<reactiveField> chained through ! gains .value before '
+      'the bang',
+      () {
+        const source = '''
+class SessionGuard {
+  SessionGuard(this._authRepository);
+
+  final AuthRepository _authRepository;
+
+  int sessionLength() {
+    return this._authRepository.session!.length;
+  }
+}
+''';
+        final method = _method(source, 'SessionGuard', 'sessionLength');
+        final result = collectValueEdits(
+          method,
+          const {},
+          source,
+          classRegistry: classRegistry,
+        );
+
+        final rewritten = applyEditsToRange(
+          source.substring(method.offset, method.end),
+          result.edits,
+          method.offset,
+        );
+        expect(
+          rewritten,
+          contains('this._authRepository.session.value!.length'),
+        );
+      },
+    );
+
+    test(
+      'this.<field>.<reactiveField> still rewrites even when a same-named '
+      'parameter is in scope — this. explicitly bypasses shadowing',
+      () {
+        const source = '''
+class SessionGuard {
+  SessionGuard(this._authRepository);
+
+  final AuthRepository _authRepository;
+
+  bool hasSession(_authRepository) {
+    return this._authRepository.session != null;
+  }
+}
+''';
+        final method = _method(source, 'SessionGuard', 'hasSession');
+        final result = collectValueEdits(
+          method,
+          const {},
+          source,
+          classRegistry: classRegistry,
+        );
+
+        final rewritten = applyEditsToRange(
+          source.substring(method.offset, method.end),
+          result.edits,
+          method.offset,
+        );
+        expect(
+          rewritten,
+          contains('this._authRepository.session.value != null'),
+        );
+      },
+    );
   });
 }

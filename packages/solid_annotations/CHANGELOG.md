@@ -2,7 +2,7 @@
 
 - **BREAKING**: Raise the Dart SDK lower bound to `^3.10.0` and align with the solidart v3 ecosystem (`flutter_solidart` `^3.0.0-dev.1`).
 - **CHORE**: Bump `meta`, `provider`, and `very_good_analysis`.
-- **DOCS**: Update `WidgetEnvironment.environment()` doc comment — `solid_generator` now only auto-injects `dispose:` when the created type statically has a `dispose()` method; omitting `dispose:` on a type with none injects nothing instead of a call that crashed at dispose time.
+- **DOCS**: Update `WidgetEnvironment.environment()` doc comment — `solid_generator` now only auto-injects `dispose:` when the created type is recognized as needing it (has a provable `dispose()`, or is `@Solid*`-annotated — same-file or cross-file); omitting `dispose:` on a type provably without one injects nothing instead of a call that previously failed source-layer typechecking with a compile-time `undefined_method` error on `.dispose()`.
 
 ## 2.0.0+1
 
