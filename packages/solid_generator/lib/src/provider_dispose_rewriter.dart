@@ -3,18 +3,25 @@ import 'package:analyzer/dart/analysis/utilities.dart';
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/dart/ast/visitor.dart';
 import 'package:analyzer/dart/element/element.dart';
+import 'package:analyzer/dart/element/type.dart';
+import 'package:solid_generator/src/ast_compat.dart';
 import 'package:solid_generator/src/element_utils.dart';
 import 'package:solid_generator/src/value_rewriter.dart';
 
 /// Returns [text] with `dispose: (context, provider) => provider.dispose()`
 /// injected into every `Provider(...)`, `Provider<T>(...)`, and
-/// `.environment<T>(...)` call site that omits the `dispose:` named argument.
+/// `.environment<T>(...)` call site that omits the `dispose:` named argument
+/// AND whose created type statically has a `dispose()` method (own
+/// declaration or inherited — see [_ProviderDisposeVisitor] for the
+/// two-tier check).
 ///
 /// Every Solid-lowered class implements `Disposable` and has a synthesized
 /// `dispose()`, so the injected closure resolves at runtime for any annotated
 /// reactive class. Non-Solid types whose creator has no `dispose()` method
-/// must opt out by supplying an explicit `dispose:` (including
-/// `dispose: null`).
+/// get NOTHING injected — same as an explicit `dispose: null` — rather than
+/// an injected closure that crashes at dispose time. A type that DOES have a
+/// `dispose()` but must outlive the `Provider` can still opt out via an
+/// explicit `dispose: null`.
 ///
 /// `MultiProvider(...)` itself never receives a `dispose:` argument — the
 /// visitor descends into its `providers:` list naturally and applies the
@@ -36,11 +43,23 @@ String addProviderDisposeAtCallSites(String text, {CompilationUnit? unit}) {
         featureSet: FeatureSet.latestLanguageVersion(),
         throwIfDiagnostics: false,
       ).unit;
-  final visitor = _ProviderDisposeVisitor(text);
+  final visitor = _ProviderDisposeVisitor(text, ast);
   ast.accept(visitor);
   if (visitor.edits.isEmpty) return text;
   return applyEditsToRange(text, visitor.edits, 0);
 }
+
+/// Base-class / mixin / interface names known to declare a `dispose()`
+/// method that the AST-only tier of [_ProviderDisposeVisitor] cannot see the
+/// members of (they are declared outside the file being scanned). A small,
+/// explicit allowlist rather than full type inference — mirrors the
+/// `Disposable`-marker-name convention already used by
+/// `plain_class_rewriter.dart`.
+const Set<String> _knownDisposableBaseNames = {
+  'Disposable', // package:solid_annotations — every Solid-lowered class.
+  'ChangeNotifier', // package:flutter/foundation.dart
+  'ValueNotifier', // package:flutter/foundation.dart (extends ChangeNotifier)
+};
 
 /// Closure spliced before the closing `)` of every matching call site.
 const String _disposeArg = 'dispose: (context, provider) => provider.dispose()';
@@ -74,19 +93,38 @@ const String _disposeArgName = 'dispose';
 ///      [MethodInvocation] (no `const` / `new` keyword); `new Provider(...)`
 ///      and `const Provider(...)` parse as [InstanceCreationExpression].
 class _ProviderDisposeVisitor extends RecursiveAstVisitor<void> {
-  _ProviderDisposeVisitor(this._source);
+  _ProviderDisposeVisitor(this._source, this._ast);
 
   final String _source;
+
+  /// The compilation unit being walked — reused by [_hasDisposeInSameUnit]
+  /// for the AST-only same-file class lookup (tier 2). This is the SAME
+  /// unit the visitor is traversing (either the builder's already-resolved
+  /// unit, or the freshly re-parsed assembled output), so a class found here
+  /// is always in scope at the call site being rewritten.
+  final CompilationUnit _ast;
+
   final List<ValueEdit> edits = [];
 
   @override
   void visitMethodInvocation(MethodInvocation node) {
     if (_isEnvironmentCall(node)) {
       if (!_hasNamedArg(node.argumentList, _disposeArgName)) {
-        _addInjection(node.argumentList);
+        _maybeInject(
+          node.argumentList,
+          typeArguments: node.typeArguments,
+          callback: _firstPositionalArg(node.argumentList),
+        );
       }
     } else if (_isBareProviderCall(node)) {
-      _maybeInject(node.argumentList);
+      if (_hasNamedArg(node.argumentList, _createArg) &&
+          !_hasNamedArg(node.argumentList, _disposeArgName)) {
+        _maybeInject(
+          node.argumentList,
+          typeArguments: node.typeArguments,
+          callback: _namedArgValue(node.argumentList, _createArg),
+        );
+      }
     }
     super.visitMethodInvocation(node);
   }
@@ -94,7 +132,15 @@ class _ProviderDisposeVisitor extends RecursiveAstVisitor<void> {
   @override
   void visitInstanceCreationExpression(InstanceCreationExpression node) {
     if (_isUnnamedProviderCtor(node)) {
-      _maybeInject(node.argumentList);
+      final args = node.argumentList;
+      if (_hasNamedArg(args, _createArg) &&
+          !_hasNamedArg(args, _disposeArgName)) {
+        _maybeInject(
+          args,
+          typeArguments: node.constructorName.type.typeArguments,
+          callback: _namedArgValue(args, _createArg),
+        );
+      }
     }
     // `MultiProvider(...)` and named ctors (`Provider.value(...)`) are not
     // injected here; the recursion below descends into argument lists so
@@ -154,13 +200,173 @@ class _ProviderDisposeVisitor extends RecursiveAstVisitor<void> {
     return isFromPackage(enclosing.library.uri, 'provider');
   }
 
-  /// Provider-form guard: inject only when the call site has a `create:`
-  /// argument and lacks a `dispose:` argument.
-  void _maybeInject(ArgumentList args) {
-    if (_hasNamedArg(args, _createArg) &&
-        !_hasNamedArg(args, _disposeArgName)) {
+  /// Injects the dispose closure into [args] iff the created type statically
+  /// has a `dispose()` method. Callers have already checked the presence /
+  /// absence of `create:` and `dispose:` named args; this is the new
+  /// type-aware gate.
+  void _maybeInject(
+    ArgumentList args, {
+    required TypeArgumentList? typeArguments,
+    required Expression? callback,
+  }) {
+    if (_createdTypeHasDispose(typeArguments, callback)) {
       _addInjection(args);
     }
+  }
+
+  /// True iff the type created at this call site has a `dispose()` method,
+  /// using two-tier resolution:
+  ///
+  ///  1. **Element-based.** When the `create` callback's return expression
+  ///     has a resolved `staticType`, look up `dispose()` across its full
+  ///     inheritance chain via `InterfaceType.lookUpMethod`. Correct for any
+  ///     resolvable type, including ones declared in another file/package
+  ///     (e.g. a real `ChangeNotifier`) — but only reachable when the caller
+  ///     supplied an already-resolved `CompilationUnit` (the builder's
+  ///     no-annotation fast path); the main annotated-file pipeline
+  ///     re-parses its assembled output with no resolver, so this tier is a
+  ///     no-op there.
+  ///  2. **AST fallback (same file only).** Resolve the created type's
+  ///     *name* — the explicit type argument (`Provider<T>`,
+  ///     `.environment<T>()`) if present, else the name parsed from the
+  ///     `create` callback's returned constructor call — then look for a
+  ///     `ClassDeclaration` of that name in [_ast] and check whether it
+  ///     declares `dispose()` itself or extends/implements/mixes in one of
+  ///     [_knownDisposableBaseNames]. A type declared in a DIFFERENT file
+  ///     that this tier cannot see is treated as "no evidence of dispose()"
+  ///     — the safe default is to inject nothing rather than guess.
+  bool _createdTypeHasDispose(
+    TypeArgumentList? typeArguments,
+    Expression? callback,
+  ) {
+    final returnExpr = _calleeReturnExpression(callback);
+    final elementResult = _hasDisposeViaElement(returnExpr);
+    if (elementResult != null) return elementResult;
+
+    final typeName =
+        _explicitTypeArgName(typeArguments) ??
+        _constructedTypeNameFromExpression(returnExpr);
+    if (typeName == null) return false;
+    return _hasDisposeInSameUnit(typeName) ?? false;
+  }
+
+  /// Tier 1 of [_createdTypeHasDispose]. Returns `null` (not `false`) when
+  /// [returnExpr]'s `staticType` isn't a resolved `InterfaceType` — that
+  /// means "inapplicable", distinct from "resolved and definitely no
+  /// `dispose()`", so the caller knows to fall through to tier 2 instead of
+  /// treating an unresolved type as a hard negative.
+  bool? _hasDisposeViaElement(Expression? returnExpr) {
+    final type = returnExpr?.staticType;
+    if (type is! InterfaceType) return null;
+    return type.lookUpMethod('dispose', type.element.library) != null;
+  }
+
+  /// Tier 2 of [_createdTypeHasDispose]. Returns `null` when no
+  /// `ClassDeclaration` named [typeName] exists in [_ast] — distinct from
+  /// `false` ("found it, and it has no dispose evidence") purely for
+  /// documentation; the caller treats both as "don't inject".
+  bool? _hasDisposeInSameUnit(String typeName) {
+    for (final decl in _ast.declarations) {
+      if (decl is ClassDeclaration && decl.name.lexeme == typeName) {
+        return _classDeclaresDispose(decl) || _extendsKnownDisposableBase(decl);
+      }
+    }
+    return null;
+  }
+
+  /// True iff [decl] declares its own `dispose()` method (not a getter or
+  /// setter). Matches both a hand-written stub (the documented
+  /// `void dispose() {}` opt-in from `WidgetEnvironment.environment`'s doc
+  /// comment) and a Solid-synthesized `dispose()` — by the time this
+  /// visitor runs on the assembled output, an annotated class's synthesized
+  /// `dispose()` is already textually present.
+  bool _classDeclaresDispose(ClassDeclaration decl) {
+    for (final member in decl.members) {
+      if (member is MethodDeclaration &&
+          member.name.lexeme == 'dispose' &&
+          !member.isGetter &&
+          !member.isSetter) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// True iff [decl]'s `extends` / `with` / `implements` clause names one of
+  /// [_knownDisposableBaseNames].
+  bool _extendsKnownDisposableBase(ClassDeclaration decl) {
+    final superName = decl.extendsClause?.superclass.name.lexeme;
+    if (superName != null && _knownDisposableBaseNames.contains(superName)) {
+      return true;
+    }
+    final mixinNames =
+        decl.withClause?.mixinTypes.map((t) => t.name.lexeme) ?? const [];
+    if (mixinNames.any(_knownDisposableBaseNames.contains)) return true;
+    final interfaceNames =
+        decl.implementsClause?.interfaces.map((t) => t.name.lexeme) ?? const [];
+    return interfaceNames.any(_knownDisposableBaseNames.contains);
+  }
+
+  /// The `create` callback's returned expression: the expression body for
+  /// `(ctx) => X()`, or the first `return` statement's expression for a
+  /// block-bodied callback (`(ctx) { ...; return X(); }`). `null` for any
+  /// other callback shape (not a `FunctionExpression`, no `return`, etc.) —
+  /// callers treat that as "cannot determine".
+  Expression? _calleeReturnExpression(Expression? callback) {
+    if (callback is! FunctionExpression) return null;
+    final body = callback.body;
+    if (body is ExpressionFunctionBody) return body.expression;
+    if (body is BlockFunctionBody) {
+      for (final stmt in body.block.statements) {
+        if (stmt is ReturnStatement) return stmt.expression;
+      }
+    }
+    return null;
+  }
+
+  /// The simple name of a single explicit type argument (`Provider<T>`,
+  /// `.environment<T>()`). `null` when there are zero or more-than-one type
+  /// arguments, or the argument isn't a plain `NamedType`.
+  String? _explicitTypeArgName(TypeArgumentList? typeArguments) {
+    final args = typeArguments?.arguments;
+    if (args == null || args.length != 1) return null;
+    final arg = args.single;
+    return arg is NamedType ? arg.name.lexeme : null;
+  }
+
+  /// The constructed class's simple name parsed from [expr]: an
+  /// `InstanceCreationExpression` (`new X()` / `const X()`) or a bare
+  /// `MethodInvocation` with no target (`X()` — the unresolved-AST shape for
+  /// a constructor call without `new`/`const`, per [_isBareProviderCall]).
+  /// `null` for any other shape.
+  String? _constructedTypeNameFromExpression(Expression? expr) {
+    if (expr is InstanceCreationExpression) {
+      return expr.constructorName.type.name.lexeme;
+    }
+    if (expr is MethodInvocation && expr.target == null) {
+      return expr.methodName.name;
+    }
+    return null;
+  }
+
+  /// The first argument in [args] that is NOT a `NamedExpression` — the
+  /// `.environment(create, {dispose})` shape's positional `create` callback.
+  Expression? _firstPositionalArg(ArgumentList args) {
+    for (final arg in args.arguments) {
+      if (arg is! NamedExpression) return arg;
+    }
+    return null;
+  }
+
+  /// The value expression of the named argument [name] in [args], or `null`
+  /// if absent.
+  Expression? _namedArgValue(ArgumentList args, String name) {
+    for (final arg in args.arguments) {
+      if (arg is NamedExpression && arg.name.label.name == name) {
+        return arg.expression;
+      }
+    }
+    return null;
   }
 
   bool _hasNamedArg(ArgumentList args, String name) {

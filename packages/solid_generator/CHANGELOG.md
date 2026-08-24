@@ -4,6 +4,7 @@
 - **CHORE**: Upgrade `analyzer` to `^12.0.0` and adapt to its reshaped class/enum declaration AST (name and members moved onto `namePart`/`body` for primary constructors).
 - **CHORE**: Bump `solid_annotations` to `^3.0.0-dev.1`, `dart_style` to `^3.1.8`, and `build`/`build_runner`/`build_test`.
 - **FIX**: Cross-class `.value` rewrite now resolves constructor-injected instance fields (`final AuthRepository _authRepository;`), not just method/function parameters and `@SolidEnvironment` fields. Previously a bare instance field receiver silently kept its unlowered form, producing always-true null checks and compile errors against the unboxed `Signal` payload.
+- **FIX**: `.environment()` / `Provider(...)` dispose auto-injection is now type-aware — `dispose: (context, provider) => provider.dispose()` is only injected when the created type statically has a `dispose()` method (own declaration or inherited, e.g. `implements Disposable` / `extends ChangeNotifier`). Previously the injection was unconditional and crashed at dispose time for any type with no `dispose()` method; omitting `dispose:` for such a type now injects nothing (same as an explicit `dispose: null`) instead of a load-bearing `dispose: null` workaround. This changes generated output for existing call sites that omit `dispose:` on a dispose-less type — the crash goes away.
 
 ## 2.0.0+1
 

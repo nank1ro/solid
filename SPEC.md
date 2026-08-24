@@ -374,7 +374,7 @@ extension WidgetEnvironment on Widget {
 }
 ```
 
-**Auto-dispose injection.** When a `Provider(...)` / `Provider<T>(...)` / `.environment<T>(...)` call site omits the `dispose:` named argument, the generator inserts `dispose: (context, provider) => provider.dispose()` automatically (see §4.9 rule 7). The user writes the create-side only:
+**Auto-dispose injection.** When a `Provider(...)` / `Provider<T>(...)` / `.environment<T>(...)` call site omits the `dispose:` named argument AND the created type `T` statically has a `dispose()` method (its own declaration, or inherited — e.g. `implements Disposable`, or `extends ChangeNotifier`), the generator inserts `dispose: (context, provider) => provider.dispose()` automatically (see §4.9 rule 7). When `T` has no `dispose()` at all, omitting `dispose:` injects nothing — the call site is left byte-identical, same as an explicit `dispose: null`. This is a same-file, AST-level check (or, when the caller supplies an already-resolved compilation unit, a full inheritance-chain check) — a type declared in another file/package that the generator cannot see is treated as "no evidence of `dispose()`" and nothing is injected; the user can still supply `dispose:` explicitly for that type. The user writes the create-side only:
 
 ```dart
 HomePage().environment<Counter>((context) => Counter())
@@ -402,7 +402,19 @@ class Counter {
 
 The empty body is appropriate because the Section 10 merge rule prepends the synthesized reactive disposals (`value.dispose();` etc.) to the user's body in the lowered output. Users don't need to write `value.dispose()` themselves; the generator handles it.
 
-To opt out of auto-injection (e.g., for a non-disposable type, or to wire a non-default cleanup method), supply `dispose:` explicitly — any value, including `dispose: null`, suppresses the injection:
+For a type with no `dispose()` method at all, the user writes no stub and no `dispose:` — the generator detects the absence and injects nothing:
+
+```dart
+class AuthRepository {
+  String? session;
+}
+
+HomePage().environment<AuthRepository>((context) => AuthRepository())
+```
+
+lowers byte-identical (no `dispose:` argument added).
+
+To opt out of auto-injection for a type that DOES have `dispose()` (e.g. to wire a non-default cleanup method, or because the instance must outlive this `Provider`), supply `dispose:` explicitly — any value, including `dispose: null`, suppresses the injection:
 
 ```dart
 HomePage().environment<AuthService>(
@@ -1052,11 +1064,13 @@ Rules:
 
 6. **Cross-class reactive reads use the §5.1 type-driven rewrite.** When the consumer body reads `counter.value` where `counter` is a `@SolidEnvironment` field of type `Counter` and `Counter.value` resolves to `Signal<int>`, the chain becomes `counter.value.value` per Section 5.1. The §7 SignalBuilder placement rule wraps the enclosing subtree.
 
-7. **Auto-dispose injection.** When a `Provider<T>(...)`, `Provider(...)` (with inferred `T`), or `.environment<T>(...)` call site omits the `dispose:` named argument, the generator inserts `dispose: (context, provider) => provider.dispose()` automatically. `MultiProvider(...)` itself never receives a `dispose:` argument; the generator descends into its `providers:` list and applies the per-Provider rule to each inner entry. Other arguments (`create:`, `child:`, `lazy:`, etc.) pass through byte-identical. `Provider<T>.value(...)` is not rewritten — it owns no instance and takes no `dispose:`.
+7. **Auto-dispose injection is type-aware.** When a `Provider<T>(...)`, `Provider(...)` (with inferred `T`), or `.environment<T>(...)` call site omits the `dispose:` named argument, the generator inserts `dispose: (context, provider) => provider.dispose()` automatically ONLY when `T` statically has a `dispose()` method — its own declaration, or inherited (e.g. `implements Disposable`, or a known disposable base like `ChangeNotifier`). `T` is read from the call site's explicit type argument when present, else inferred from the `create` callback's returned constructor call. `MultiProvider(...)` itself never receives a `dispose:` argument; the generator descends into its `providers:` list and applies the per-Provider rule to each inner entry. Other arguments (`create:`, `child:`, `lazy:`, etc.) pass through byte-identical. `Provider<T>.value(...)` is not rewritten — it owns no instance and takes no `dispose:`.
 
-   The user opts out by supplying any explicit `dispose:` value (including `dispose: null`) — the visitor leaves any call site that already has a `dispose:` named argument untouched.
+   When `T` has no evidence of a `dispose()` method, omitting `dispose:` injects nothing — the call site is left byte-identical, the same outcome as an explicit `dispose: null`. This is deliberately conservative: a type declared in a file the generator isn't scanning (e.g. a repository class imported from elsewhere with no `dispose()`) is treated as "no evidence", not as "has dispose()" — the old unconditional-injection behavior crashed at dispose time for exactly this shape.
 
-   The injected `provider.dispose()` always compiles for Solid-lowered types because Section 10 attaches `implements Disposable` and a synthesized `dispose()` to every annotated class. For non-Solid types, the user is responsible for either declaring `void dispose()` on the source class or opting out via explicit `dispose:`.
+   The user opts out for a type that DOES have `dispose()` by supplying any explicit `dispose:` value (including `dispose: null`) — the visitor leaves any call site that already has a `dispose:` named argument untouched.
+
+   The injected `provider.dispose()` always compiles for Solid-lowered types because Section 10 attaches `implements Disposable` and a synthesized `dispose()` to every annotated class, and the generator recognizes the synthesized method. For non-Solid types, the user declares `void dispose()` (or a known disposable base) on the source class for the injection to fire; otherwise nothing is injected and the user may still opt in by writing `dispose:` explicitly.
 
    The pass runs over every source file — including files without any `@Solid*` annotations — so `main.dart`-style entry points that wire up `Provider(...)` at the app root receive the same auto-injection.
 
@@ -1559,7 +1573,7 @@ Disposal order is **reverse declaration order**: dependents are disposed before 
 
 Solid-lowered plain classes (Section 8.3) — every class with reactive declarations that gets a synthesized `dispose()` — declare `implements Disposable` in their lowered output and annotate the synthesized `dispose()` with `@override`. `Disposable` is exported from `solid_annotations` (Section 3.6). The marker is added BY THE GENERATOR: it appears only in the lowered `lib/` output, never in the user's source class. So the user does not see `implements Disposable` on their own source declaration and cannot rely on it for compile-time resolution inside source code.
 
-Practical consequence: a user who declares `void dispose() {}` on a source class can pass that class to `Provider<Counter>(...)` or `.environment<Counter>(...)` without writing `dispose:` themselves — the generator injects `dispose: (context, provider) => provider.dispose()` automatically (see §4.9 rule 7). The source-side `void dispose() {}` stub is still required so the source-layer analyzer accepts `provider.dispose()` without an unresolved-method error, and so the auto-injected closure typechecks against the user's source layer. The empty-body convention is fine — the dispose-body merge rule below prepends the synthesized reactive disposals to whatever the user wrote:
+Practical consequence: a user who declares `void dispose() {}` on a source class can pass that class to `Provider<Counter>(...)` or `.environment<Counter>(...)` without writing `dispose:` themselves — the generator detects the source-side `dispose()` declaration and injects `dispose: (context, provider) => provider.dispose()` automatically (see §4.9 rule 7). The source-side `void dispose() {}` stub is therefore doubly required: it is both what the generator's type-aware check looks for AND what makes `provider.dispose()` resolve without an unresolved-method error at the source layer. A class with no `dispose()` stub gets nothing injected — no crash, no manual `dispose: null` needed. The empty-body convention is fine — the dispose-body merge rule below prepends the synthesized reactive disposals to whatever the user wrote:
 
 ```dart
 // source/

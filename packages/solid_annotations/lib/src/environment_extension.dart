@@ -14,10 +14,16 @@ import 'package:provider/provider.dart';
 ///
 /// The Solid generator auto-injects
 /// `dispose: (context, provider) => provider.dispose()` when the call site
-/// omits `dispose:`. For source-layer typecheck of the auto-injected closure,
-/// declare an empty `void dispose() {}` on the injected type — Solid-lowered
-/// classes get a synthesized `dispose()` in `lib/`. Pass `dispose:` explicitly
-/// (any value, including `null`) to opt out.
+/// omits `dispose:` AND `T` statically has a `dispose()` method (its own
+/// declaration, or inherited — e.g. `implements Disposable`, or
+/// `extends ChangeNotifier`). Solid-lowered classes always qualify (they get
+/// a synthesized `dispose()` in `lib/`); for a plain type, declare a
+/// `void dispose() {}` on it for the injection to fire (and for
+/// source-layer typecheck of the auto-injected closure). When `T` has no
+/// `dispose()` at all, omitting `dispose:` injects nothing — same as
+/// explicit `dispose: null`. Pass `dispose:` explicitly (any value,
+/// including `null`) to always opt out, even for a type that does have
+/// `dispose()` (e.g. one that must outlive this `Provider`).
 /// {@endtemplate}
 extension WidgetEnvironment on Widget {
   /// {@macro SolidAnnotations.WidgetEnvironment}
