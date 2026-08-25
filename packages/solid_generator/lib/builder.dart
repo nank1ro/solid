@@ -937,9 +937,11 @@ RewriteResult _rewriteClass(
 
 /// Resolver pass for the cross-file slice of the chain-aware rule. For each
 /// `@SolidEnvironment` field whose declared type is NOT defined in the
-/// current source file, OR each type name in [extraWantedTypes] (the types
+/// current source file, each type name in [extraWantedTypes] (the types
 /// created at a `Provider(...)` / `.environment<T>()` call site in this
-/// file — see [collectProviderCreatedTypeNames]), walk the imported
+/// file — see [collectProviderCreatedTypeNames]), OR the declared type name
+/// of any class's instance field / constructor parameter in this file (the
+/// plain constructor-injection DI shape — see issue #104), walk the imported
 /// `source/<path>.dart` file(s) via `BuildStep.resolver.compilationUnitFor`
 /// and merge any `@SolidState` members of the matching class declaration
 /// into [classRegistry] (and the collection-subset into
@@ -948,7 +950,13 @@ RewriteResult _rewriteClass(
 /// The two registries are mutated in place. Same-file types take precedence:
 /// when a type name is already present, the cross-file pass does NOT
 /// overwrite it (in-file source is always the source of truth for the
-/// current build).
+/// current build). More generally, any simple name this unit itself
+/// declares (class/enum/mixin/…) is dropped from the wanted set before the
+/// import walk even starts — mirroring Dart's own name resolution, where a
+/// local top-level declaration always shadows a same-name import — and each
+/// import's `show`/`hide` combinators are honored so an import cannot be
+/// credited as a name's source when it explicitly excludes that name (see
+/// [_importExposesName]).
 ///
 /// `package:` imports of the **current package** are redirected from `lib/`
 /// to `source/` because the user's `@SolidState` annotations live on the
@@ -991,6 +999,76 @@ Future<void> _populateCrossFileTypes(
     if (classRegistry.containsKey(typeText)) continue;
     wantedTypes.add(typeText);
   }
+  // Additionally seed `wantedTypes` from the declared type names of every
+  // class's instance fields and constructor parameters — the plain
+  // constructor-injection DI shape (`CustomersRepository({required
+  // AuthRepository authRepository})`, `final AuthRepository
+  // _authRepository;`) has no `@SolidEnvironment` field and creates nothing
+  // at a `Provider(...)` / `.environment<T>()` call site, so neither rule
+  // above ever seeds it — see issue #104. Candidates are annotation-blind
+  // simple type names, exactly like the two seeding rules above; a name that
+  // doesn't match any `@SolidState`-bearing class among the resolved imports
+  // below is harmless — the import walk only writes a `classRegistry` entry
+  // when it finds `@SolidState` members on the matching class. Generic type
+  // arguments are seeded recursively (`List<AuthRepository>` seeds both
+  // `List` and `AuthRepository`, `Map<String, List<AuthRepository>>` seeds
+  // all three) via [_seedWantedTypeRecursive] — `List`/`Map`/`String` are
+  // filtered out by [_coreSdkTypeNames] there, so only the payload type
+  // reaches [wantedTypes]. This enables the resolved-type-driven cross-class
+  // rewrite tiers in `value_rewriter.dart` to fire on collection-derived
+  // receivers whose static type resolves to the payload class (e.g. a
+  // `for (final c in repos) { c.field }` loop variable, or `repos.first`) —
+  // see issue #104 fix review, finding 4.
+  for (final decl in unit.declarations) {
+    if (decl is! ClassDeclaration) continue;
+    for (final member in decl.members) {
+      if (member is FieldDeclaration) {
+        if (member.isStatic) continue;
+        final type = member.fields.type;
+        if (type is! NamedType) continue;
+        _seedWantedTypeRecursive(type, wantedTypes, classRegistry);
+      } else if (member is ConstructorDeclaration) {
+        for (final param in member.parameters.parameters) {
+          final inner = param is DefaultFormalParameter
+              ? param.parameter
+              : param;
+          final TypeAnnotation? paramType;
+          if (inner is SimpleFormalParameter) {
+            paramType = inner.type;
+          } else if (inner is FieldFormalParameter) {
+            paramType = inner.type;
+          } else if (inner is SuperFormalParameter) {
+            // Only the explicit-type-annotation shape (`Foo(AuthRepository
+            // super.repo)`) is recoverable here: `inner.type` is populated
+            // straight from the source annotation, same as the two branches
+            // above. The far more common bare-shorthand form (`super.repo`,
+            // no type written) carries NO type annotation in the source at
+            // all — the type is only knowable by resolving `repo` against
+            // the superclass's matching parameter/field, which this
+            // syntactic AST walk does not do. That shape is a known,
+            // accepted gap (see CHANGELOG): such a parameter simply isn't a
+            // wantedTypes candidate from this loop, same as if the class had
+            // no matching field/param seeding it at all.
+            paramType = inner.type;
+          } else {
+            paramType = null;
+          }
+          if (paramType is! NamedType) continue;
+          _seedWantedTypeRecursive(paramType, wantedTypes, classRegistry);
+        }
+      }
+    }
+  }
+  // Local declarations always shadow same-name imports (standard Dart
+  // name-resolution: no error, no ambiguity — the current library's own
+  // top-level declaration simply wins). So a simple name that this unit
+  // itself declares as a class/enum/mixin/etc. can NEVER be the wanted
+  // type's cross-file source, no matter what any import brings in under
+  // that same simple name — see issue #104 fix review, finding 1 (same-
+  // simple-name shadowing collision: a local plain `class Address` plus an
+  // unrelated imported `@SolidState`-annotated `class Address` elsewhere
+  // must not attribute the import's reactive fields to the local class).
+  wantedTypes.removeAll(_collectDeclaredTypeNames(unit));
   if (wantedTypes.isEmpty) return;
 
   for (final directive in unit.directives.whereType<ImportDirective>()) {
@@ -1021,6 +1099,7 @@ Future<void> _populateCrossFileTypes(
       if (decl is! ClassDeclaration) continue;
       final className = decl.name.lexeme;
       if (!wantedTypes.contains(className)) continue;
+      if (!_importExposesName(directive, className)) continue;
       final scalarNames = <String>{};
       final collectionNames = <String>{};
       final fieldTypeTexts = <String, String>{};
@@ -1148,6 +1227,121 @@ Set<String> _collectDeclaredTypeNames(CompilationUnit unit) {
     if (decl is GenericTypeAlias) names.add(decl.name.lexeme);
   }
   return names;
+}
+
+/// True when [directive]'s `show`/`hide` combinators (if any) allow [name]
+/// to be brought into scope by that import — i.e. the directive cannot be
+/// [name]'s source when this returns false. An import may carry multiple
+/// combinators (`show A hide B` is legal, if unusual); ALL of them must
+/// agree the name is visible.
+///
+/// Used by [_populateCrossFileTypes]'s import walk so a `hide Foo` (or a
+/// `show` list that excludes `Foo`) is honored — mirrors Dart's own
+/// combinator semantics and protects every seeding path (same-file
+/// `@SolidEnvironment` fields, `Provider(...)`/`.environment<T>()` call
+/// sites, and the constructor-injection seeding added for issue #104) from
+/// misattributing a same-simple-name class the import explicitly excludes.
+bool _importExposesName(ImportDirective directive, String name) {
+  for (final combinator in directive.combinators) {
+    if (combinator is ShowCombinator) {
+      if (!combinator.shownNames.any((id) => id.name == name)) return false;
+    } else if (combinator is HideCombinator) {
+      if (combinator.hiddenNames.any((id) => id.name == name)) return false;
+    }
+  }
+  return true;
+}
+
+/// `dart:core` / `dart:async` simple type names a user class would never
+/// legitimately shadow. Checked by [_seedWantedTypeRecursive] before adding
+/// a candidate to `wantedTypes` in the constructor-injection / instance-
+/// field seeding loop added for issue #104 (the two PRE-EXISTING seeding
+/// paths — `@SolidEnvironment` fields and `Provider`/`.environment<T>()`
+/// call sites — are left untouched, per finding 5 of the fix review: those
+/// are already annotation- or call-site-scoped and rarely fire on SDK
+/// names).
+///
+/// Without this filter, nearly every annotated file would seed `String`,
+/// `int`, `bool`, etc. from ordinary field/parameter declarations, defeating
+/// the `wantedTypes.isEmpty` early return below and forcing a wasted
+/// resolve-and-scan of every import for a name no import will ever satisfy
+/// (the SDK carries no `@SolidState` annotations).
+const Set<String> _coreSdkTypeNames = {
+  'int',
+  'double',
+  'num',
+  'bool',
+  'String',
+  'List',
+  'Map',
+  'Set',
+  'Iterable',
+  'Iterator',
+  'Object',
+  'Function',
+  'Never',
+  'Null',
+  'dynamic',
+  'Future',
+  'FutureOr',
+  'Stream',
+  'StreamSubscription',
+  'StreamController',
+  'Duration',
+  'DateTime',
+  'Symbol',
+  'Type',
+  'BigInt',
+  'RegExp',
+  'RegExpMatch',
+  'Uri',
+  'StringBuffer',
+  'StringSink',
+  'Timer',
+  'Comparable',
+  'Pattern',
+  'Match',
+  'Runes',
+  'StackTrace',
+  'Exception',
+  'Error',
+  'Record',
+  'Completer',
+  'Zone',
+  'Sink',
+  'EventSink',
+  'WeakReference',
+  'Expando',
+};
+
+/// Adds [type]'s simple name — and, recursively, the simple name of every
+/// generic type argument at every nesting level — to [wantedTypes], subject
+/// to the same two guards the pre-existing seeding call sites apply inline:
+/// skip names already resolved in [classRegistry], and (new for issue #104
+/// finding 4/5) skip [_coreSdkTypeNames].
+///
+/// `List<AuthRepository>` seeds `AuthRepository` (not `List`, filtered);
+/// `Map<String, List<AuthRepository>>` seeds only `AuthRepository` (both
+/// `Map` and `String` are filtered, `List` is filtered, `AuthRepository`
+/// survives). A candidate that matches nothing on the subsequent import walk
+/// is harmless — see the loop's own doc comment.
+void _seedWantedTypeRecursive(
+  NamedType type,
+  Set<String> wantedTypes,
+  Map<String, Set<String>> classRegistry,
+) {
+  final typeText = type.name.lexeme;
+  if (!_coreSdkTypeNames.contains(typeText) &&
+      !classRegistry.containsKey(typeText)) {
+    wantedTypes.add(typeText);
+  }
+  final args = type.typeArguments?.arguments;
+  if (args == null) return;
+  for (final arg in args) {
+    if (arg is NamedType) {
+      _seedWantedTypeRecursive(arg, wantedTypes, classRegistry);
+    }
+  }
 }
 
 /// Translates a `source/<rel>` AssetId to its `lib/<rel>` sibling. The
