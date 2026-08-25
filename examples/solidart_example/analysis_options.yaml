@@ -13,6 +13,11 @@ analyzer:
     # the lib analyzer would otherwise flag those directives as
     # unnecessary. Suppress to keep source/ and lib/ ignores symmetric.
     unnecessary_ignore: ignore
+    # Newer SDKs mark `NavigatorState.push` `@awaitNotRequired`, flagging the
+    # `unawaited(...)` wraps as unnecessary; older SDKs lack the annotation
+    # and require them via `unawaited_futures`. Suppress so the explicit
+    # `unawaited(...)` intent stays valid on both.
+    unnecessary_unawaited: ignore
     always_put_required_named_parameters_first: ignore
     invalid_annotation_target: ignore
     avoid_print: ignore
@@ -25,6 +30,14 @@ analyzer:
     # same name as a `@SolidState` field would also collide with the
     # implicit setter the generator emits. Suppress at the example level.
     use_setters_to_change_properties: ignore
+  exclude:
+    - build/**
+    - android/**
+    - ios/**
+    - web/**
+    - windows/**
+    - macos/**
+    - linux/**
 linter:
   rules:
     public_member_api_docs: false

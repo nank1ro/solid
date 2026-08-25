@@ -7,11 +7,23 @@ analyzer:
   # directory to keep the IDE focused on the actual runnable output.
   exclude:
     - source/**
+    - build/**
+    - android/**
+    - ios/**
+    - web/**
+    - windows/**
+    - macos/**
+    - linux/**
   errors:
     must_be_immutable: ignore
     always_put_required_named_parameters_first: ignore
     invalid_annotation_target: ignore
     specify_nonobvious_property_types: ignore
+    # Newer SDKs mark `NavigatorState.push` `@awaitNotRequired`, flagging the
+    # `unawaited(...)` wraps as unnecessary; older SDKs lack the annotation
+    # and require them via `unawaited_futures`. Suppress so the explicit
+    # `unawaited(...)` intent stays valid on both.
+    unnecessary_unawaited: ignore
 linter:
   rules:
     public_member_api_docs: false

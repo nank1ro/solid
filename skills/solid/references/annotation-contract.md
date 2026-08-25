@@ -104,6 +104,16 @@ For multiple providers, chain `.environment(...)` calls or use `MultiProvider` f
 
 The type argument is inferred from the closure's return type. Pass it explicitly only when consumers should read by a supertype: `.environment<AuthService>((_) => RealAuthService())`.
 
+### Disposal
+
+When the `dispose:` argument is omitted, the generator decides per the created type:
+
+- The type provably has a `dispose()` method (own, inherited, or synthesized because the class is `@Solid*`-annotated — same-file or cross-file): `dispose: (context, provider) => provider.dispose()` is injected.
+- The type's declaration is visible and has no `dispose()`: nothing is injected.
+- The type's declaration is not visible (and not recognizably `@Solid*`-annotated): the dispose callback is injected anyway; if the type really has no `dispose()`, that fails loudly at compile time (`undefined_method`) — pass `dispose: null` to opt out explicitly.
+
+An explicit `dispose:` argument (including `dispose: null`) is always taken verbatim.
+
 ### Invalid
 
 - Non-`late` field. The lookup is lazy and needs `late` to defer initialization.
