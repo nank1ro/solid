@@ -144,6 +144,7 @@ const List<String> goldenNames = <String>[
   'cross_file_import_hide_combinator',
   'cross_file_super_param_type_only',
   'cross_file_collection_generic_arg_seeding',
+  'cross_file_computed_from_injected_state',
 ];
 
 /// Memoized golden directory resolution. Resolved relative to the package
