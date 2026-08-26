@@ -125,4 +125,57 @@ class SessionGuard {
       },
     );
   });
+
+  group('cross-class name-collision guard (unresolved AST) — issue #110', () {
+    test(
+      'a name builder.dart flagged ambiguous never rewrites through an '
+      'AST-only receiver, even when a matching qualified origin exists',
+      () {
+        const source = '''
+class Holder {
+  Holder(this.repo);
+
+  final AuthRepository repo;
+
+  bool hasSession() {
+    return repo.session != null;
+  }
+}
+''';
+        final method = _method(source, 'Holder', 'hasSession');
+        // `classRegistry` is empty here on purpose — mirrors what
+        // `builder.dart::_populateCrossFileTypes`'s finalize pass actually
+        // does to a flagged name (strips the flat entry; see that
+        // function's doc comment). `classRegistryOrigins` DOES carry a
+        // real, matching entry — `session` is exactly the field this body
+        // reads — so the only thing standing between this receiver and a
+        // (wrong, unproven) rewrite is the tier-1-URI-match requirement.
+        final result = collectValueEdits(
+          method,
+          const {},
+          source,
+          classRegistryOrigins: const {
+            'AuthRepository': {
+              'package:app/auth_repository.dart': {'session'},
+            },
+          },
+          classRegistryShadowedNames: const {'AuthRepository'},
+        );
+
+        // `repo`'s type resolves via AST-only tier 2 (the parameter/field
+        // NamedType text) since this is an unresolved AST — no
+        // `Expression.staticType`, hence no library URI ever reaches
+        // `_fieldsForCrossClassName`. Per issue #110's conservative-
+        // fallback invariant, a FLAGGED name can only resolve through a
+        // tier-1 URI match; an AST-only tier must refuse regardless of how
+        // plausible the qualified entry looks. The golden harness cannot
+        // exercise this: `testBuilder`'s resolver always supplies a real
+        // `staticType` for a `final AuthRepository repo;` field, so tier 1
+        // would answer for real and this specific guard would never be the
+        // reason a golden passes or fails — same "golden can't reach it"
+        // reasoning as this file's header comment.
+        expect(result.edits, isEmpty);
+      },
+    );
+  });
 }

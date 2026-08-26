@@ -137,6 +137,9 @@ GetterModel? readSolidStateGetter(
   Map<String, String> environmentFields = const {},
   Set<String> collectionFields = const {},
   Set<String> widgetBoundFields = const {},
+  Map<String, Map<String, Set<String>>> classRegistryOrigins = const {},
+  Map<String, Map<String, Set<String>>> classCollectionFieldsOrigins = const {},
+  Set<String> classRegistryShadowedNames = const {},
 }) {
   if (!decl.isGetter || decl.isStatic) return null;
   final annotation = findAnnotationByName(solidStateName, decl.metadata);
@@ -177,6 +180,9 @@ GetterModel? readSolidStateGetter(
     environmentFields: environmentFields,
     collectionFields: collectionFields,
     widgetBoundFields: widgetBoundFields,
+    classRegistryOrigins: classRegistryOrigins,
+    classCollectionFieldsOrigins: classCollectionFieldsOrigins,
+    classRegistryShadowedNames: classRegistryShadowedNames,
   );
 
   return GetterModel(
@@ -232,6 +238,9 @@ _readReactiveBody(
   Map<String, String> environmentFields = const {},
   Set<String> collectionFields = const {},
   Set<String> widgetBoundFields = const {},
+  Map<String, Map<String, Set<String>>> classRegistryOrigins = const {},
+  Map<String, Map<String, Set<String>>> classCollectionFieldsOrigins = const {},
+  Set<String> classRegistryShadowedNames = const {},
 }) {
   final AstNode node;
   final bool isBlockBody;
@@ -255,6 +264,9 @@ _readReactiveBody(
     environmentFields: environmentFields,
     collectionFields: collectionFields,
     widgetBoundFields: widgetBoundFields,
+    classRegistryOrigins: classRegistryOrigins,
+    classCollectionFieldsOrigins: classCollectionFieldsOrigins,
+    classRegistryShadowedNames: classRegistryShadowedNames,
   );
   // Zero-deps Effect / Computed are rejected. A reactive dep is either a
   // `.value`-rewritten state read, a tracked query-call invocation, OR a
@@ -307,6 +319,9 @@ EffectModel? readSolidEffectMethod(
   Map<String, String> environmentFields = const {},
   Set<String> collectionFields = const {},
   Set<String> widgetBoundFields = const {},
+  Map<String, Map<String, Set<String>>> classRegistryOrigins = const {},
+  Map<String, Map<String, Set<String>>> classCollectionFieldsOrigins = const {},
+  Set<String> classRegistryShadowedNames = const {},
 }) {
   if (decl.isGetter || decl.isSetter || decl.isStatic) return null;
   final annotation = findAnnotationByName(solidEffectName, decl.metadata);
@@ -341,6 +356,9 @@ EffectModel? readSolidEffectMethod(
     environmentFields: environmentFields,
     collectionFields: collectionFields,
     widgetBoundFields: widgetBoundFields,
+    classRegistryOrigins: classRegistryOrigins,
+    classCollectionFieldsOrigins: classCollectionFieldsOrigins,
+    classRegistryShadowedNames: classRegistryShadowedNames,
   );
 
   return EffectModel(
@@ -377,6 +395,9 @@ QueryModel? readSolidQueryMethod(
   Map<String, String> environmentFields = const {},
   Set<String> widgetBoundFields = const {},
   Set<String> collectionFields = const {},
+  Map<String, Map<String, Set<String>>> classRegistryOrigins = const {},
+  Map<String, Map<String, Set<String>>> classCollectionFieldsOrigins = const {},
+  Set<String> classRegistryShadowedNames = const {},
 }) {
   if (decl.isGetter || decl.isSetter || decl.isStatic) return null;
   final annotation = findAnnotationByName(solidQueryName, decl.metadata);
@@ -420,6 +441,9 @@ QueryModel? readSolidQueryMethod(
     environmentFields: environmentFields,
     collectionFields: collectionFields,
     widgetBoundFields: widgetBoundFields,
+    classRegistryOrigins: classRegistryOrigins,
+    classCollectionFieldsOrigins: classCollectionFieldsOrigins,
+    classRegistryShadowedNames: classRegistryShadowedNames,
   );
 
   // A self-cycle is rejected at codegen — solidart would re-run

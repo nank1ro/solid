@@ -108,6 +108,9 @@ BuildMethodRewrite rewriteBuildMethod(
   Set<String> widgetBoundFields = const {},
   Set<String> collectionFields = const {},
   Map<String, Set<String>> classCollectionFields = const {},
+  Map<String, Map<String, Set<String>>> classRegistryOrigins = const {},
+  Map<String, Map<String, Set<String>>> classCollectionFieldsOrigins = const {},
+  Set<String> classRegistryShadowedNames = const {},
 }) {
   final methodStart = buildMethod.offset;
   final methodEnd = buildMethod.end;
@@ -123,6 +126,9 @@ BuildMethodRewrite rewriteBuildMethod(
     widgetBoundFields: widgetBoundFields,
     collectionFields: collectionFields,
     classCollectionFields: classCollectionFields,
+    classRegistryOrigins: classRegistryOrigins,
+    classCollectionFieldsOrigins: classCollectionFieldsOrigins,
+    classRegistryShadowedNames: classRegistryShadowedNames,
   );
   final wrapPlan = computeWrapPlan(
     buildMethod,

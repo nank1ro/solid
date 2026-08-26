@@ -165,6 +165,15 @@ class _SolidBuilder implements Builder {
     Map<String, Set<String>>? probedCrossFileCollections;
     Map<String, Map<String, String>>? probedCrossFileFieldTypes;
     Map<String, Set<String>>? probedCrossFileOriginUris;
+    // Origin-qualified counterparts (issue #110) — see
+    // `_populateCrossFileTypes`'s doc comment. Populated in lockstep with
+    // the four maps above; empty (never null) is a valid, common result —
+    // most files resolve every wanted name unambiguously — so these are
+    // merged unconditionally below rather than null-checked like the ones
+    // above.
+    Map<String, Map<String, Set<String>>>? probedClassRegistryOrigins;
+    Map<String, Map<String, Set<String>>>? probedClassCollectionFieldsOrigins;
+    Set<String>? probedClassRegistryShadowedNames;
 
     if (!hasSolidAnnotation && !hasProviderHint) {
       // Cheap syntactic pre-check (#106): seed candidate cross-file wanted
@@ -195,6 +204,9 @@ class _SolidBuilder implements Builder {
       final probeCollections = <String, Set<String>>{};
       final probeFieldTypes = <String, Map<String, String>>{};
       final probeOriginUris = <String, Set<String>>{};
+      final probeRegistryOrigins = <String, Map<String, Set<String>>>{};
+      final probeCollectionFieldsOrigins = <String, Map<String, Set<String>>>{};
+      final probeShadowedNames = <String>{};
       await _populateCrossFileTypes(
         parsed.unit,
         buildStep,
@@ -203,8 +215,20 @@ class _SolidBuilder implements Builder {
         probeFieldTypes,
         probeOriginUris,
         const {},
+        probeRegistryOrigins,
+        probeCollectionFieldsOrigins,
+        probeShadowedNames,
       );
-      if (probeRegistry.isEmpty) {
+      // A name issue #110's finalize pass flagged as ambiguous (shadowed by
+      // a local declaration, or collided across two-plus cross-file
+      // origins) is stripped from `probeRegistry` but still lives in
+      // `probeShadowedNames` / `probeRegistryOrigins` — exactly the
+      // `cross_file_super_param_one_hop_local_shadow` shape, where the
+      // file's ONLY cross-file find is a shadowed name. Bailing out here on
+      // `probeRegistry.isEmpty` alone (its pre-#110 condition) would treat
+      // that file as having nothing to lower at all, silently reintroducing
+      // the bug this issue fixes.
+      if (probeRegistry.isEmpty && probeShadowedNames.isEmpty) {
         await buildStep.writeAsString(outputId, source);
         return;
       }
@@ -212,6 +236,9 @@ class _SolidBuilder implements Builder {
       probedCrossFileCollections = probeCollections;
       probedCrossFileFieldTypes = probeFieldTypes;
       probedCrossFileOriginUris = probeOriginUris;
+      probedClassRegistryOrigins = probeRegistryOrigins;
+      probedClassCollectionFieldsOrigins = probeCollectionFieldsOrigins;
+      probedClassRegistryShadowedNames = probeShadowedNames;
     }
 
     for (final diagnostic in parsed.errors) {
@@ -284,6 +311,16 @@ class _SolidBuilder implements Builder {
     // import into the consumer's lib output so the synthesized
     // `Computed<(…, T, …)>` Record-Computed resolves at lib-time.
     final crossClassFieldTypeOriginUris = <String, Set<String>>{};
+    // Origin-qualified counterparts of `sameFileRegistry` /
+    // `sameFileCollections` (issue #110) — `name -> originUri -> fields` —
+    // plus the set of names those two maps deliberately hold NO flat entry
+    // for. See `_populateCrossFileTypes`'s doc comment; threaded down to
+    // every reader / rewriter so `value_rewriter.dart`'s tier-1 URI match
+    // can resolve a flagged name wherever a reactive body reads it.
+    final sameFileRegistryOrigins = <String, Map<String, Set<String>>>{};
+    final sameFileCollectionFieldsOrigins =
+        <String, Map<String, Set<String>>>{};
+    final sameFileShadowedNames = <String>{};
     // Cross-file resolver: walks every `package:`/relative import of the
     // current source file, redirecting same-package imports from `lib/` to
     // `source/`, and pulls in `@SolidState` member names for every class
@@ -313,6 +350,11 @@ class _SolidBuilder implements Builder {
       sameFileCollections.addAll(probedCrossFileCollections!);
       sameFileFieldTypes.addAll(probedCrossFileFieldTypes!);
       crossClassFieldTypeOriginUris.addAll(probedCrossFileOriginUris!);
+      sameFileRegistryOrigins.addAll(probedClassRegistryOrigins!);
+      sameFileCollectionFieldsOrigins.addAll(
+        probedClassCollectionFieldsOrigins!,
+      );
+      sameFileShadowedNames.addAll(probedClassRegistryShadowedNames!);
     } else {
       await _populateCrossFileTypes(
         unit,
@@ -322,6 +364,9 @@ class _SolidBuilder implements Builder {
         sameFileFieldTypes,
         crossClassFieldTypeOriginUris,
         hasProviderHint ? collectProviderCreatedTypeNames(unit) : const {},
+        sameFileRegistryOrigins,
+        sameFileCollectionFieldsOrigins,
+        sameFileShadowedNames,
       );
     }
 
@@ -330,6 +375,9 @@ class _SolidBuilder implements Builder {
       source,
       sameFileRegistry,
       sameFileCollections,
+      sameFileRegistryOrigins,
+      sameFileCollectionFieldsOrigins,
+      sameFileShadowedNames,
     );
     if (annotatedClasses.every((c) => c.hasNoAnnotations)) {
       // No reactive annotations resolved. The file may still need:
@@ -377,6 +425,9 @@ class _SolidBuilder implements Builder {
         unit,
         classRegistry: sameFileRegistry,
         classCollectionFields: sameFileCollections,
+        classRegistryOrigins: sameFileRegistryOrigins,
+        classCollectionFieldsOrigins: sameFileCollectionFieldsOrigins,
+        classRegistryShadowedNames: sameFileShadowedNames,
       );
       var current = lowered.text;
       if (hasProviderHint) {
@@ -421,6 +472,9 @@ class _SolidBuilder implements Builder {
       crossClassFieldTypeOriginUris,
       buildStep.inputId,
       source,
+      sameFileRegistryOrigins,
+      sameFileCollectionFieldsOrigins,
+      sameFileShadowedNames,
     );
     await buildStep.writeAsString(outputId, transformed);
   }
@@ -576,6 +630,9 @@ List<_AnnotatedClass> _collectAnnotatedClasses(
   String source,
   Map<String, Set<String>> classRegistry,
   Map<String, Set<String>> classCollectionFields,
+  Map<String, Map<String, Set<String>>> classRegistryOrigins,
+  Map<String, Map<String, Set<String>>> classCollectionFieldsOrigins,
+  Set<String> classRegistryShadowedNames,
 ) {
   final result = <_AnnotatedClass>[];
   for (final decl in unit.declarations) {
@@ -608,6 +665,18 @@ List<_AnnotatedClass> _collectAnnotatedClasses(
       ..remove(selfClass);
     final crossClassCollections = Map<String, Set<String>>.from(
       classCollectionFields,
+    )..remove(selfClass);
+    // Origin-qualified counterparts (issue #110), same exclude-self
+    // discipline as the two flat views above.
+    final crossClassRegistryOrigins =
+        Map<String, Map<String, Set<String>>>.from(classRegistryOrigins)
+          ..remove(selfClass);
+    final crossClassCollectionFieldsOrigins =
+        Map<String, Map<String, Set<String>>>.from(
+          classCollectionFieldsOrigins,
+        )..remove(selfClass);
+    final crossClassShadowedNames = Set<String>.from(
+      classRegistryShadowedNames,
     )..remove(selfClass);
     // Pre-scan members once for `@SolidEnvironment` so each reader sees the
     // host class's env-field map (fieldName → typeText) up-front. The
@@ -651,6 +720,9 @@ List<_AnnotatedClass> _collectAnnotatedClasses(
           queryNames: queryNames,
           classRegistry: crossClassRegistry,
           classCollectionFields: crossClassCollections,
+          classRegistryOrigins: crossClassRegistryOrigins,
+          classCollectionFieldsOrigins: crossClassCollectionFieldsOrigins,
+          classRegistryShadowedNames: crossClassShadowedNames,
           environmentFields: environmentFieldsForBody,
           collectionFields: collectionFieldsSeen,
           widgetBoundFields: widgetBoundCtorNames,
@@ -673,6 +745,9 @@ List<_AnnotatedClass> _collectAnnotatedClasses(
           queryNames: queryNames,
           classRegistry: crossClassRegistry,
           classCollectionFields: crossClassCollections,
+          classRegistryOrigins: crossClassRegistryOrigins,
+          classCollectionFieldsOrigins: crossClassCollectionFieldsOrigins,
+          classRegistryShadowedNames: crossClassShadowedNames,
           environmentFields: environmentFieldsForBody,
           collectionFields: collectionFieldsSeen,
           widgetBoundFields: widgetBoundCtorNames,
@@ -688,6 +763,9 @@ List<_AnnotatedClass> _collectAnnotatedClasses(
           queryNames: queryNames,
           classRegistry: crossClassRegistry,
           classCollectionFields: crossClassCollections,
+          classRegistryOrigins: crossClassRegistryOrigins,
+          classCollectionFieldsOrigins: crossClassCollectionFieldsOrigins,
+          classRegistryShadowedNames: crossClassShadowedNames,
           environmentFields: environmentFieldsForBody,
           collectionFields: collectionFieldsSeen,
           widgetBoundFields: widgetBoundCtorNames,
@@ -825,6 +903,9 @@ String _renderOutput(
   Map<String, Set<String>> crossClassFieldTypeOriginUris,
   AssetId inputId,
   String source,
+  Map<String, Map<String, Set<String>>> classRegistryOrigins,
+  Map<String, Map<String, Set<String>>> classCollectionFieldsOrigins,
+  Set<String> classRegistryShadowedNames,
 ) {
   // Walk `unit.declarations` in source order. Class declarations are paired
   // with `annotatedClasses` (which `_collectAnnotatedClasses` populates in
@@ -842,6 +923,9 @@ String _renderOutput(
           classCollectionFields,
           classFieldTypes,
           source,
+          classRegistryOrigins,
+          classCollectionFieldsOrigins,
+          classRegistryShadowedNames,
         )
       else
         _passthroughResult(decl, source),
@@ -981,6 +1065,9 @@ RewriteResult _resultForClass(
   Map<String, Set<String>> classCollectionFields,
   Map<String, Map<String, String>> classFieldTypes,
   String source,
+  Map<String, Map<String, Set<String>>> classRegistryOrigins,
+  Map<String, Map<String, Set<String>>> classCollectionFieldsOrigins,
+  Set<String> classRegistryShadowedNames,
 ) {
   if (c.hasNoAnnotations) return _passthroughResult(c.decl, source);
   return _rewriteClass(
@@ -994,6 +1081,9 @@ RewriteResult _resultForClass(
     classCollectionFields,
     classFieldTypes,
     source,
+    classRegistryOrigins,
+    classCollectionFieldsOrigins,
+    classRegistryShadowedNames,
   );
 }
 
@@ -1025,6 +1115,9 @@ RewriteResult _rewriteClass(
   Map<String, Set<String>> classCollectionFields,
   Map<String, Map<String, String>> classFieldTypes,
   String source,
+  Map<String, Map<String, Set<String>>> classRegistryOrigins,
+  Map<String, Map<String, Set<String>>> classCollectionFieldsOrigins,
+  Set<String> classRegistryShadowedNames,
 ) {
   final kind = classKindOf(decl);
   final className = decl.name.lexeme;
@@ -1041,6 +1134,9 @@ RewriteResult _rewriteClass(
         classCollectionFields,
         classFieldTypes,
         source,
+        classRegistryOrigins: classRegistryOrigins,
+        classCollectionFieldsOrigins: classCollectionFieldsOrigins,
+        classRegistryShadowedNames: classRegistryShadowedNames,
       );
     case ClassKind.plainClass:
       return rewritePlainClass(
@@ -1054,6 +1150,9 @@ RewriteResult _rewriteClass(
         classCollectionFields,
         classFieldTypes,
         source,
+        classRegistryOrigins: classRegistryOrigins,
+        classCollectionFieldsOrigins: classCollectionFieldsOrigins,
+        classRegistryShadowedNames: classRegistryShadowedNames,
       );
     case ClassKind.stateClass:
       return rewriteStateClass(
@@ -1067,6 +1166,9 @@ RewriteResult _rewriteClass(
         classCollectionFields,
         classFieldTypes,
         source,
+        classRegistryOrigins: classRegistryOrigins,
+        classCollectionFieldsOrigins: classCollectionFieldsOrigins,
+        classRegistryShadowedNames: classRegistryShadowedNames,
       );
     case ClassKind.statefulWidget:
       throw CodeGenerationError(
@@ -1092,12 +1194,22 @@ RewriteResult _rewriteClass(
 /// The two registries are mutated in place. Same-file types take precedence:
 /// when a type name is already present, the cross-file pass does NOT
 /// overwrite it (in-file source is always the source of truth for the
-/// current build). More generally, any simple name this unit itself
-/// declares (class/enum/mixin/…) is dropped from the wanted set before the
-/// import walk even starts — mirroring Dart's own name resolution, where a
-/// local top-level declaration always shadows a same-name import — and each
-/// import's `show`/`hide` combinators are honored so an import cannot be
-/// credited as a name's source when it explicitly excludes that name (see
+/// current build).
+///
+/// A simple name this unit ALSO declares itself (class/enum/mixin/…) no
+/// longer removes the name from the wanted set before the import walk (issue
+/// #110 — it used to, dropping any foreign class of that name from the
+/// registry entirely, silently losing its reactivity). The import walk now
+/// always searches; a match found under a locally-shadowed name (or a name
+/// two-plus distinct imports resolve to different classes for) is
+/// registered QUALIFIED, by origin, into [classRegistryOrigins] /
+/// [classCollectionFieldsOrigins] rather than the flat [classRegistry] /
+/// [classCollectionFields] — see the finalize pass at the end of this
+/// function and `value_rewriter.dart`'s [_ValueRewriteVisitor.
+/// _fieldsForCrossClassName] for how a flagged name resolves at rewrite
+/// time (a mandatory tier-1 library-URI match). Each import's `show`/`hide`
+/// combinators are still honored, so an import cannot be credited as a
+/// name's source when it explicitly excludes that name (see
 /// [_importExposesName]).
 ///
 /// `package:` imports of the **current package** are redirected from `lib/`
@@ -1116,6 +1228,9 @@ Future<void> _populateCrossFileTypes(
   Map<String, Map<String, String>> classFieldTypes,
   Map<String, Set<String>> crossClassFieldTypeOriginUris,
   Set<String> extraWantedTypes,
+  Map<String, Map<String, Set<String>>> classRegistryOrigins,
+  Map<String, Map<String, Set<String>>> classCollectionFieldsOrigins,
+  Set<String> classRegistryShadowedNames,
 ) async {
   // Walk every `@SolidEnvironment` field declaration in the unit. The
   // builder pre-scan does NOT pre-build env-field models — the readers do
@@ -1124,10 +1239,17 @@ Future<void> _populateCrossFileTypes(
   // present in [classRegistry] are skipped (the same-file pass is the
   // source of truth there).
   final wantedTypes = <String>{};
-  // Computed up front (issue #108 fix review finding 1): a name [unit]
-  // itself declares always shadows a same-name import, no matter how many
-  // hops away the import lives — see the `wantedTypes.removeAll(...)` call
-  // below, and [_populateCrossFileTypesOneHop]'s use of this same set.
+  // Computed up front (issue #108 fix review finding 1; repurposed by issue
+  // #110). A name [unit] itself declares always shadows a same-name import
+  // for ORDINARY (unqualified) name resolution — Dart's own rule — no
+  // matter how many hops away the import lives. Before issue #110 this set
+  // was used to strip such names from `wantedTypes` before the import walk
+  // even started, so a foreign class sharing the name was never looked up
+  // at all and its reactivity silently lost (see the
+  // `cross_file_super_param_one_hop_local_shadow` fixture). It is now
+  // consulted only by the finalize pass at the end of this function, AFTER
+  // the walk below has had a chance to find and qualify any such foreign
+  // class by origin — see [classRegistryOrigins].
   final declaredInUnit = _collectDeclaredTypeNames(unit);
   for (final decl in unit.declarations) {
     if (decl is! ClassDeclaration) continue;
@@ -1264,11 +1386,12 @@ Future<void> _populateCrossFileTypes(
                     hop.$2,
                     step,
                     wantedTypes,
-                    declaredInUnit,
                     classRegistry,
                     classCollectionFields,
                     classFieldTypes,
                     crossClassFieldTypeOriginUris,
+                    classRegistryOrigins,
+                    classCollectionFieldsOrigins,
                   );
                 }
               }
@@ -1282,20 +1405,14 @@ Future<void> _populateCrossFileTypes(
       }
     }
   }
-  // Local declarations always shadow same-name imports (standard Dart
-  // name-resolution: no error, no ambiguity — the current library's own
-  // top-level declaration simply wins). So a simple name that this unit
-  // itself declares as a class/enum/mixin/etc. can NEVER be the wanted
-  // type's cross-file source, no matter what any import brings in under
-  // that same simple name — see issue #104 fix review, finding 1 (same-
-  // simple-name shadowing collision: a local plain `class Address` plus an
-  // unrelated imported `@SolidState`-annotated `class Address` elsewhere
-  // must not attribute the import's reactive fields to the local class).
-  wantedTypes.removeAll(declaredInUnit);
+  // A simple name this unit itself declares as a class/enum/mixin/etc. no
+  // longer removes that name from `wantedTypes` (issue #110 — see this
+  // function's doc comment). `wantedTypes` may still be empty here (nothing
+  // needed cross-file resolution at all), in which case the walk below is a
+  // no-op.
   if (wantedTypes.isEmpty) return;
 
   for (final directive in unit.directives.whereType<ImportDirective>()) {
-    if (wantedTypes.isEmpty) break;
     final uri = directive.uri.stringValue;
     if (uri == null || uri.startsWith('dart:')) continue;
     final assetId = _resolveImportToSourceAsset(uri, step.inputId);
@@ -1328,7 +1445,33 @@ Future<void> _populateCrossFileTypes(
       classCollectionFields,
       classFieldTypes,
       crossClassFieldTypeOriginUris,
+      classRegistryOrigins,
+      classCollectionFieldsOrigins,
     );
+  }
+
+  // Finalize per-name ambiguity (issue #110). A name qualifies for
+  // disambiguation — meaning the flat, name-keyed `classRegistry` /
+  // `classCollectionFields` deliberately hold NO entry for it, forcing
+  // every consumer through the origin-qualified `classRegistryOrigins` /
+  // `classCollectionFieldsOrigins` side-maps instead — iff either (a)
+  // `_registerWantedClassesFrom` (above, or via the one-hop extension)
+  // found the name under two or more DISTINCT origins (a genuine
+  // same-simple-name collision across this file's own imports), or (b)
+  // this file ALSO declares its own top-level type under that name (the
+  // shadowing scenario this issue exists to fix — previously handled by
+  // dropping the name from `wantedTypes` before the walk even started, so
+  // the foreign class's reactivity was lost outright rather than merely
+  // qualified). Every OTHER name keeps its flat entry exactly as
+  // `_registerWantedClassesFrom` wrote it — unconditionally unambiguous,
+  // byte-identical to this generator's behavior before issue #110.
+  for (final name in classRegistryOrigins.keys) {
+    final origins = classRegistryOrigins[name]!;
+    final isAmbiguous = origins.length > 1 || declaredInUnit.contains(name);
+    if (!isAmbiguous) continue;
+    classRegistryShadowedNames.add(name);
+    classRegistry.remove(name);
+    classCollectionFields.remove(name);
   }
 }
 
@@ -1346,9 +1489,35 @@ Future<void> _populateCrossFileTypes(
 /// extension ([_populateCrossFileTypesOneHop], issue #108 fix review
 /// finding 1) so both apply IDENTICAL registration rules — including the
 /// "don't stop at the first same-named-but-unannotated decoy" discipline: a
-/// match with zero `@SolidState` members does NOT remove the name from
-/// [wantedTypes], so a caller that walks more than one import for the same
-/// name keeps looking.
+/// match with zero `@SolidState` members contributes nothing.
+///
+/// [wantedTypes] is NEVER mutated here (issue #110 — it used to remove a
+/// name as soon as one reactive match was found, which meant a SECOND
+/// distinct class sharing that same simple name, reached through a LATER
+/// import of the same file, was never even looked at). Every call site now
+/// keeps searching every one of its own imports for every wanted name, so a
+/// genuine same-simple-name collision across two distinct cross-file
+/// classes is fully discovered — each origin recorded into
+/// [classRegistryOrigins] / [classCollectionFieldsOrigins] — rather than
+/// silently resolved to whichever import happened to be scanned first. This
+/// is a bounded cost (this file's own import count, never transitive); a
+/// name found in exactly one import — the overwhelming common case — pays
+/// no extra cost beyond scanning the (typically short) remainder of the
+/// import list.
+///
+/// [classRegistry] / [classCollectionFields] / [classFieldTypes] receive
+/// EVERY match found, keyed by simple name only, exactly as before issue
+/// #110 — including a match under a name that turns out to be ambiguous.
+/// [_populateCrossFileTypes]'s finalize pass, which runs after every call
+/// site here has contributed, is what strips such a name back out of
+/// [classRegistry] / [classCollectionFields] once it recognizes the
+/// ambiguity; this function does not need to know about that decision.
+/// [classRegistryOrigins] / [classCollectionFieldsOrigins] accumulate every
+/// match's fields keyed by BOTH simple name and origin URI
+/// (`_sourceToLibAsset(importedAssetId).uri.toString()` — the same
+/// asset-derived URI form [crossClassFieldTypeOriginUris] already uses),
+/// unconditionally — this is the qualified data the finalize pass and
+/// `value_rewriter.dart`'s tier-1 URI match need for a name it flags.
 void _registerWantedClassesFrom(
   CompilationUnit imported,
   AssetId importedAssetId,
@@ -1359,6 +1528,8 @@ void _registerWantedClassesFrom(
   Map<String, Set<String>> classCollectionFields,
   Map<String, Map<String, String>> classFieldTypes,
   Map<String, Set<String>> crossClassFieldTypeOriginUris,
+  Map<String, Map<String, Set<String>>> classRegistryOrigins,
+  Map<String, Map<String, Set<String>>> classCollectionFieldsOrigins,
 ) {
   for (final decl in imported.declarations) {
     if (decl is! ClassDeclaration) continue;
@@ -1400,6 +1571,17 @@ void _registerWantedClassesFrom(
       if (fieldTypeTexts.isNotEmpty) {
         classFieldTypes[className] = fieldTypeTexts;
       }
+      // Origin-qualified counterpart (issue #110) — recorded unconditionally
+      // for every match, ambiguous or not; see this function's doc comment
+      // and [_populateCrossFileTypes]'s finalize pass.
+      final originUri = _sourceToLibAsset(importedAssetId).uri.toString();
+      (classRegistryOrigins[className] ??= <String, Set<String>>{})[originUri] =
+          scalarNames;
+      if (collectionNames.isNotEmpty) {
+        (classCollectionFieldsOrigins[className] ??=
+                <String, Set<String>>{})[originUri] =
+            collectionNames;
+      }
       // For each `@SolidState` field whose declared type is NOT declared
       // inside the same class file, capture the file's same-package import
       // URIs as candidate origins. The consumer's lib output will inject
@@ -1433,7 +1615,6 @@ void _registerWantedClassesFrom(
           );
         }
       }
-      wantedTypes.remove(className);
     }
   }
 }
@@ -1462,49 +1643,47 @@ void _registerWantedClassesFrom(
 /// one-hop extension exists ONLY to serve the superclass seeder, which
 /// itself only ever locates a same-package superclass in the first place.
 ///
-/// Consuming-unit shadow guard (issue #108 fix review addendum, finding 1):
-/// [declaredInConsumingUnit] is the ORIGINAL scanned file's own declared
-/// type names — computed once in [_populateCrossFileTypes] and threaded
-/// through unchanged. Filtering [wantedTypes] against [hostUnit]'s own
-/// declared names (below) is NOT enough on its own: this function runs
-/// *during* [_populateCrossFileTypes]'s per-declaration seeding loop,
-/// strictly BEFORE that function's own `wantedTypes.removeAll(
-/// declaredInUnit)` shadow filter runs at the end of the loop. Without this
-/// extra guard, a name the ORIGINAL consuming file declares locally (e.g.
-/// its own plain `class Foo`) could still be registered into
-/// [classRegistry] from a `@SolidState`-bearing same-named `Foo` reached
-/// through [hostUnit]'s imports — the registration is irreversible even
-/// though the name is removed from `wantedTypes` moments later, because
-/// [classRegistry] is a separate map already written by then. Filtering
-/// here, before [_registerWantedClassesFrom] ever runs, closes that
-/// ordering hole.
+/// Consuming-unit shadow (issue #108 fix review addendum, finding 1;
+/// repurposed by issue #110): a name the ORIGINAL scanned file declares
+/// locally (e.g. its own plain `class Foo`) used to be stripped from
+/// [wantedTypes] before this function even ran, so a match found here
+/// through [hostUnit]'s imports was never registered at all — silently
+/// dropping a genuinely reactive foreign class's fields (see the
+/// `cross_file_super_param_one_hop_local_shadow` fixture). This function no
+/// longer applies that guard: a match found here is registered exactly like
+/// any other, and [_populateCrossFileTypes]'s finalize pass — which runs
+/// once, after every one-hop call site here has already contributed to the
+/// SAME [classRegistryOrigins] / [classCollectionFieldsOrigins] instances —
+/// is what flags the name as ambiguous against the original file's own
+/// declared names, qualifying rather than discarding the registration.
 Future<void> _populateCrossFileTypesOneHop(
   CompilationUnit hostUnit,
   AssetId hostAssetId,
   BuildStep step,
   Set<String> wantedTypes,
-  Set<String> declaredInConsumingUnit,
   Map<String, Set<String>> classRegistry,
   Map<String, Set<String>> classCollectionFields,
   Map<String, Map<String, String>> classFieldTypes,
   Map<String, Set<String>> crossClassFieldTypeOriginUris,
+  Map<String, Map<String, Set<String>>> classRegistryOrigins,
+  Map<String, Map<String, Set<String>>> classCollectionFieldsOrigins,
 ) async {
-  // Same local-shadowing discipline the main walk applies to the original
-  // file, applied here relative to [hostUnit]: a name [hostUnit] declares
-  // itself can never be the wanted type's source via one of ITS imports —
-  // and in practice this is always already a no-op, since a name declared
-  // directly in [hostUnit] would already have been found by the main
-  // walk's own scan of [hostUnit]'s declarations before this function is
-  // ever reached. Kept for defense and to make the discipline explicit.
-  wantedTypes
-    ..removeAll(_collectDeclaredTypeNames(hostUnit))
-    // The guard this function actually exists to add — see the doc
-    // comment above.
-    ..removeAll(declaredInConsumingUnit);
+  // Same local-shadowing discipline the main walk once applied to the
+  // original file, applied here relative to [hostUnit] itself (distinct
+  // from the original file — see the doc comment above): a name [hostUnit]
+  // declares directly can never be the wanted type's source via one of ITS
+  // OWN imports, because within [hostUnit]'s own scope that name
+  // unambiguously resolves to [hostUnit]'s local declaration, full stop —
+  // this is ordinary Dart name resolution, not an issue-#110-style
+  // cross-FILE collision. In practice this is always already a no-op, since
+  // a name declared directly in [hostUnit] would already have been found by
+  // the main walk's own scan of [hostUnit]'s declarations before this
+  // function is ever reached. Kept for defense and to make the discipline
+  // explicit.
+  wantedTypes.removeAll(_collectDeclaredTypeNames(hostUnit));
   if (wantedTypes.isEmpty) return;
 
   for (final directive in hostUnit.directives.whereType<ImportDirective>()) {
-    if (wantedTypes.isEmpty) break;
     final uri = directive.uri.stringValue;
     if (uri == null || uri.startsWith('dart:')) continue;
     final assetId = _resolveImportToSourceAsset(uri, hostAssetId);
@@ -1534,6 +1713,8 @@ Future<void> _populateCrossFileTypesOneHop(
       classCollectionFields,
       classFieldTypes,
       crossClassFieldTypeOriginUris,
+      classRegistryOrigins,
+      classCollectionFieldsOrigins,
     );
   }
 }

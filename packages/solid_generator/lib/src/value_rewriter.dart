@@ -156,6 +156,22 @@ bool _isOnPrefixedCallbackName(String name) {
 /// inside the body is detected as a self-cycle and surfaced via
 /// [ValueRewriteResult.selfCycleFound]. Pass `null` for non-query callers
 /// (state getters, effects, build bodies).
+///
+/// [classRegistryOrigins] and [classCollectionFieldsOrigins] (issue #110)
+/// are the per-name origin-qualified counterparts of [classRegistry] /
+/// [classCollectionFields] — `name -> originUri -> fields` — populated by
+/// `builder.dart` ONLY for names it could not resolve unambiguously: two or
+/// more distinct cross-file classes sharing a simple name, or a cross-file
+/// class whose name is ALSO declared locally in the consuming file.
+/// [classRegistryShadowedNames] is the exact set of such flagged names.
+/// Every name NOT in that set is served from the flat, name-keyed maps
+/// exactly as before this issue existed; a flagged name rewrites only when
+/// the receiver's resolved `staticType` (tier 1) points at a library URI
+/// matching one of its recorded origins — see
+/// [_ValueRewriteVisitor._fieldsForCrossClassName] for the full invariant.
+/// Empty (the default) for every caller that has no
+/// origin data to offer, which degrades this exactly to the pre-#110
+/// name-only behavior.
 ValueRewriteResult collectValueEdits(
   AstNode node,
   Set<String> reactiveFields,
@@ -167,6 +183,9 @@ ValueRewriteResult collectValueEdits(
   Set<String> widgetBoundFields = const {},
   Set<String> collectionFields = const {},
   Map<String, Set<String>> classCollectionFields = const {},
+  Map<String, Map<String, Set<String>>> classRegistryOrigins = const {},
+  Map<String, Map<String, Set<String>>> classCollectionFieldsOrigins = const {},
+  Set<String> classRegistryShadowedNames = const {},
 }) {
   final visitor = _ValueRewriteVisitor(
     reactiveFields,
@@ -177,6 +196,9 @@ ValueRewriteResult collectValueEdits(
     widgetBoundFields,
     collectionFields,
     classCollectionFields,
+    classRegistryOrigins,
+    classCollectionFieldsOrigins,
+    classRegistryShadowedNames,
   );
   node.accept(visitor);
   return ValueRewriteResult(
@@ -210,6 +232,9 @@ String rewriteUserMethod(
   Map<String, String> environmentFields = const {},
   Set<String> collectionFields = const {},
   Map<String, Set<String>> classCollectionFields = const {},
+  Map<String, Map<String, Set<String>>> classRegistryOrigins = const {},
+  Map<String, Map<String, Set<String>>> classCollectionFieldsOrigins = const {},
+  Set<String> classRegistryShadowedNames = const {},
 }) {
   final result = collectValueEdits(
     method,
@@ -219,6 +244,9 @@ String rewriteUserMethod(
     environmentFields: environmentFields,
     collectionFields: collectionFields,
     classCollectionFields: classCollectionFields,
+    classRegistryOrigins: classRegistryOrigins,
+    classCollectionFieldsOrigins: classCollectionFieldsOrigins,
+    classRegistryShadowedNames: classRegistryShadowedNames,
   );
   return applyEditsToRange(
     source.substring(method.offset, method.end),
@@ -273,6 +301,48 @@ const Set<String> _signalApiGetters = {'value', 'hasValue', 'previousValue'};
 /// tracked to keep the enclosing widget subtree reactive to signal updates.
 const Set<String> _trackedSignalApiGetters = {'hasValue', 'previousValue'};
 
+/// Result of [_ValueRewriteVisitor._resolveReceiverType]: a cross-class
+/// receiver's simple type `name`, plus the declaring library's `libraryUri`
+/// — normalized via [_normalizeLibraryUri] — ONLY when a real resolved
+/// `staticType` (tier 1) backed the answer. `libraryUri == null` means the
+/// name came from an AST-only fallback (tiers 2-4) and therefore carries no
+/// proof of which same-named class it refers to; see
+/// [_ValueRewriteVisitor._fieldsForCrossClassName] (issue #110).
+typedef _ReceiverType = ({String name, String? libraryUri});
+
+/// Normalizes a resolved `LibraryElement.uri` into the same string form
+/// `builder.dart`'s `_registerWantedClassesFrom` stores as a cross-class
+/// registry entry's origin — `package:<pkg>/<lib-relative-path>`.
+///
+/// The two sides start from different vocabularies (issue #110 design
+/// note). A resolved element from another package (Flutter,
+/// flutter_solidart, a published dependency) already reports a `package:`
+/// URI, which matches the registry's format outright — returned unchanged.
+/// A resolved element from THIS package's own `source/` tree — the shape
+/// every cross-file `@SolidState` class this generator processes takes —
+/// reports an `asset:<pkg>/source/<rel>` URI instead: `build_resolvers`
+/// resolves the file at its PRE-transformation `source/` location, and
+/// `source/` is never a real `lib/` directory, so the analyzer can't mint a
+/// `package:` URI for it (verified empirically against this repo's own
+/// `testBuilder` harness). Both sides name the exact same file; this
+/// function rewrites the `asset:` form into the `package:` form — stripping
+/// the `source/` segment, mirroring `builder.dart`'s own
+/// `_sourceToLibAsset` — so the comparison in [_ValueRewriteVisitor.
+/// _fieldsForCrossClassName] is apples-to-apples. Returns `null` for any
+/// other shape (`dart:`, `file:`, or an `asset:` URI outside `source/`, none
+/// of which the registry ever produces an origin for) — a `null` result can
+/// never equal a recorded origin key, so it safely falls through to "no
+/// match" rather than guessing.
+String? _normalizeLibraryUri(Uri uri) {
+  if (uri.scheme == 'package') return uri.toString();
+  if (uri.scheme != 'asset') return null;
+  final segments = uri.pathSegments;
+  if (segments.length < 3 || segments[1] != 'source') return null;
+  final package = segments.first;
+  final relativePath = segments.skip(2).join('/');
+  return 'package:$package/$relativePath';
+}
+
 /// AST visitor that accumulates [ValueEdit]s for reactive-field identifiers.
 ///
 /// Scope tracking is name-based: a local variable, parameter, or function
@@ -292,6 +362,9 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
     this._widgetBoundFields,
     this._collectionFields,
     this._classCollectionFields,
+    this._classRegistryOrigins,
+    this._classCollectionFieldsOrigins,
+    this._classRegistryShadowedNames,
   );
 
   final Set<String> _reactiveFields;
@@ -349,6 +422,29 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
   /// `controller.todos.length` resolves to `ListSignal<Todo>.length` and
   /// must NOT receive a `.value` append between `todos` and `length`.
   final Map<String, Set<String>> _classCollectionFields;
+
+  /// Per-name origin-qualified counterpart of [_classRegistry] (issue #110)
+  /// — `name -> originUri -> reactive field/getter names` — populated by
+  /// `builder.dart` ONLY for a name it flagged in
+  /// [_classRegistryShadowedNames]. Consulted by [_fieldsForCrossClassName]
+  /// instead of [_classRegistry] for exactly those flagged names; empty
+  /// (the default) whenever the caller has no origin data to thread
+  /// through, in which case a flagged name simply never resolves (safe:
+  /// [_classRegistry] itself holds no entry for it either — see
+  /// `builder.dart::_populateCrossFileTypes`'s finalize pass).
+  final Map<String, Map<String, Set<String>>> _classRegistryOrigins;
+
+  /// Per-name origin-qualified counterpart of [_classCollectionFields],
+  /// parallel to [_classRegistryOrigins].
+  final Map<String, Map<String, Set<String>>> _classCollectionFieldsOrigins;
+
+  /// Names `builder.dart` could not resolve unambiguously by simple name
+  /// alone (issue #110) — either two-plus distinct cross-file classes share
+  /// the name, or a cross-file class's name is ALSO declared locally in the
+  /// file being rewritten. [_fieldsForCrossClassName] routes these names
+  /// through [_classRegistryOrigins] / [_classCollectionFieldsOrigins] with
+  /// a mandatory tier-1 library-URI match instead of the flat maps.
+  final Set<String> _classRegistryShadowedNames;
 
   final List<ValueEdit> edits = [];
 
@@ -512,11 +608,17 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
     // property=c), property=d); `getController().field` parses as
     // PropertyAccess(target=MethodInvocation, property=field). Both shapes
     // are caught here by resolving the receiver's `staticType` via
-    // [_resolveReceiverTypeName] and looking up the property name in
+    // [_resolveReceiverType] and looking up the property name in
     // [_classRegistry]. PrefixedIdentifier (the single-level `a.b` shape)
     // is handled by [_maybeRewriteCrossClass] above so the two paths don't
     // overlap.
-    if (_classRegistry.isNotEmpty && target != null) {
+    // A name issue #110 flagged as ambiguous is stripped from `_classRegistry`
+    // (see `builder.dart::_populateCrossFileTypes`'s finalize pass) — so an
+    // otherwise-`_classRegistry`-empty file whose ONLY cross-class candidate
+    // is such a flagged name would wrongly skip this branch entirely without
+    // also checking `_classRegistryShadowedNames`.
+    if ((_classRegistry.isNotEmpty || _classRegistryShadowedNames.isNotEmpty) &&
+        target != null) {
       _maybeRewriteCrossClassPropertyAccess(node);
     }
     super.visitPropertyAccess(node);
@@ -552,12 +654,16 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
       }
       return;
     }
-    final declaredTypeName = _resolveReceiverTypeName(target);
-    if (declaredTypeName == null) return;
-    final fieldsOfType = _classRegistry[declaredTypeName];
-    if (fieldsOfType == null) return;
+    final receiverType = _resolveReceiverType(target);
+    if (receiverType == null) return;
+    final resolved = _fieldsForCrossClassName(
+      receiverType.name,
+      receiverType.libraryUri,
+    );
+    if (resolved == null) return;
+    final fieldsOfType = resolved.fields;
     if (!fieldsOfType.contains(node.propertyName.name)) return;
-    final collectionFieldsOfType = _classCollectionFields[declaredTypeName];
+    final collectionFieldsOfType = resolved.collectionFields;
     final isCollection =
         collectionFieldsOfType != null &&
         collectionFieldsOfType.contains(node.propertyName.name);
@@ -598,7 +704,10 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
     // still requires the resolved-AST migration. We keep this branch
     // conservative — only single `<receiver>.<field>` shapes — so the
     // existing same-class goldens stay byte-identical.
-    if (_classRegistry.isNotEmpty) {
+    // See the matching comment in [visitPropertyAccess]: a name issue #110
+    // flagged as ambiguous is stripped from `_classRegistry`, so this guard
+    // must also open the door via `_classRegistryShadowedNames`.
+    if (_classRegistry.isNotEmpty || _classRegistryShadowedNames.isNotEmpty) {
       _maybeRewriteCrossClass(node);
     }
     super.visitPrefixedIdentifier(node);
@@ -606,7 +715,7 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
 
   /// Single-level `<receiver>.<reactiveField>` cross-class rewrite — the
   /// shipped slice of the chain-aware rule. The receiver type resolves via
-  /// [_resolveReceiverTypeName] (parameter / local / property-of-resolved-type)
+  /// [_resolveReceiverType] (parameter / local / property-of-resolved-type)
   /// then [_environmentFields] (`@SolidEnvironment` host-class field);
   /// parameter wins because method parameters shadow host-class fields in
   /// Dart and are not tracked by [_isShadowed] (which covers only
@@ -652,14 +761,18 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
       }
       return;
     }
+    final receiverType = _resolveReceiverType(node.prefix);
     final declaredTypeName =
-        _resolveReceiverTypeName(node.prefix) ??
-        _environmentFields[node.prefix.name];
+        receiverType?.name ?? _environmentFields[node.prefix.name];
     if (declaredTypeName == null) return;
-    final fieldsOfType = _classRegistry[declaredTypeName];
-    if (fieldsOfType == null) return;
+    final resolved = _fieldsForCrossClassName(
+      declaredTypeName,
+      receiverType?.libraryUri,
+    );
+    if (resolved == null) return;
+    final fieldsOfType = resolved.fields;
     if (!fieldsOfType.contains(node.identifier.name)) return;
-    final collectionFieldsOfType = _classCollectionFields[declaredTypeName];
+    final collectionFieldsOfType = resolved.collectionFields;
     final isCollection =
         collectionFieldsOfType != null &&
         collectionFieldsOfType.contains(node.identifier.name);
@@ -712,13 +825,20 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
   bool _isCrossClassChainPrefix(PrefixedIdentifier node) =>
       _isAnyChainTarget(node);
 
-  /// Returns the simple type name of [receiver], using four-tier resolution:
+  /// Returns the simple type name of [receiver] — using the same four-tier
+  /// resolution [_resolveReceiverType] documents — paired with the
+  /// declaring library's origin URI ONLY when tier 1 answered (see
+  /// [_ReceiverType]).
   ///
   ///  1. **Element-based.** When [Expression.staticType] is a resolved
-  ///     [InterfaceType], return its element name. Catches locals
-  ///     (`var c = controller; c.field`), method-call receivers
-  ///     (`getController().field`), and parameters identically — `staticType`
-  ///     is populated for every expression in resolved AST.
+  ///     [InterfaceType], return its element name AND (issue #110) the
+  ///     origin URI of the class's declaring library, normalized via
+  ///     [_normalizeLibraryUri] into the same form `builder.dart`'s registry
+  ///     origins use. Catches locals (`var c = controller; c.field`),
+  ///     method-call receivers (`getController().field`), and parameters
+  ///     identically — `staticType` is populated for every expression in
+  ///     resolved AST. This is the ONLY tier that can serve a name flagged
+  ///     in [_classRegistryShadowedNames] — see [_fieldsForCrossClassName].
   ///  2. **AST fallback (parameters).** When the resolver hasn't run
   ///     (parsed-AST fallback or test sandbox without the necessary SDK),
   ///     resolve [receiver] as a method/function parameter declared with a
@@ -727,7 +847,8 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
   ///     return `null` in this tier — a parameter name match with no
   ///     resolvable type still counts as "matched" and short-circuits tier 3
   ///     (a parameter shadows a same-named field; falling through to the
-  ///     field would rewrite the wrong receiver).
+  ///     field would rewrite the wrong receiver). No library URI is ever
+  ///     available here — this tier never has a resolved element to ask.
   ///  3. **AST fallback (instance fields).** When [receiver] is not a
   ///     parameter at all (matched or not), resolve it as a non-static field
   ///     of the enclosing [ClassDeclaration] declared with a [NamedType] —
@@ -745,28 +866,82 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
   ///     names a field; that is its purpose, and it must resolve to the
   ///     field even when a same-named parameter is in scope (unlike a bare
   ///     reference, which the parameter legitimately shadows).
-  String? _resolveReceiverTypeName(Expression receiver) {
+  _ReceiverType? _resolveReceiverType(Expression receiver) {
     final type = receiver.staticType;
-    if (type is InterfaceType) return type.element.name;
+    if (type is InterfaceType) {
+      final elementName = type.element.name;
+      if (elementName == null) return null;
+      return (
+        name: elementName,
+        libraryUri: _normalizeLibraryUri(type.element.library.uri),
+      );
+    }
     if (receiver is SimpleIdentifier) {
-      if (_isParameterName(receiver)) {
-        return _resolveParameterTypeNameFromAst(receiver);
-      }
-      return _resolveInstanceFieldTypeNameFromAst(receiver);
+      final name = _isParameterName(receiver)
+          ? _resolveParameterTypeNameFromAst(receiver)
+          : _resolveInstanceFieldTypeNameFromAst(receiver);
+      return name == null ? null : (name: name, libraryUri: null);
     }
     if (receiver is PropertyAccess && receiver.target is ThisExpression) {
-      return _resolveInstanceFieldTypeNameByName(
+      final name = _resolveInstanceFieldTypeNameByName(
         receiver.propertyName.name,
         receiver,
       );
+      return name == null ? null : (name: name, libraryUri: null);
     }
     return null;
+  }
+
+  /// Field-set resolver for a `<receiver>.<field>` (or longer chain)
+  /// cross-class candidate whose receiver's declared type resolved to
+  /// [declaredTypeName], given the receiver's [libraryUri] — non-null ONLY
+  /// when [_resolveReceiverType]'s tier 1 (a real resolved `staticType`)
+  /// answered the question.
+  ///
+  /// SAFETY INVARIANT (issue #110): [_classRegistryShadowedNames] contains
+  /// EXACTLY the names `builder.dart` could not resolve unambiguously by
+  /// simple name alone — two or more distinct cross-file classes sharing
+  /// the name, or a cross-file class whose name is ALSO declared locally in
+  /// the file being rewritten (the shadowing scenario the issue exists to
+  /// fix — previously dropped from the registry entirely, silently losing
+  /// the foreign class's reactivity). A name NOT in that set is served
+  /// straight from the flat [_classRegistry] / [_classCollectionFields] —
+  /// byte-identical to every rewrite this generator already performed
+  /// before issue #110, no URI check involved. A FLAGGED name can only
+  /// resolve when [libraryUri] is non-null (tier 1) AND matches one of the
+  /// origins [_classRegistryOrigins] recorded for [declaredTypeName]: an
+  /// AST-only receiver (tiers 2-4, [libraryUri] `null`) or a resolved
+  /// receiver whose library matches none of the recorded origins returns
+  /// `null` — no rewrite, the same conservative outcome the pre-#110
+  /// registry produced for this name (it held no entry for it at all).
+  /// Net effect: every rewrite that fired before issue #110 still fires
+  /// unchanged; a previously-blocked foreign read can newly fire, but ONLY
+  /// through a tier-1 library-URI match — no name-based guess is ever
+  /// upgraded into a rewrite without one.
+  ({Set<String> fields, Set<String>? collectionFields})?
+  _fieldsForCrossClassName(String declaredTypeName, String? libraryUri) {
+    if (!_classRegistryShadowedNames.contains(declaredTypeName)) {
+      final fields = _classRegistry[declaredTypeName];
+      if (fields == null) return null;
+      return (
+        fields: fields,
+        collectionFields: _classCollectionFields[declaredTypeName],
+      );
+    }
+    if (libraryUri == null) return null;
+    final fields = _classRegistryOrigins[declaredTypeName]?[libraryUri];
+    if (fields == null) return null;
+    return (
+      fields: fields,
+      collectionFields:
+          _classCollectionFieldsOrigins[declaredTypeName]?[libraryUri],
+    );
   }
 
   /// True if [prefix] names a parameter of the nearest enclosing
   /// [MethodDeclaration] / [FunctionExpression], regardless of whether that
   /// parameter's type is resolvable. Gates the tier-3 instance-field fallback
-  /// in [_resolveReceiverTypeName]: Dart scoping always prefers a parameter
+  /// in [_resolveReceiverType]: Dart scoping always prefers a parameter
   /// over a same-named field, so an unresolvable parameter type must produce
   /// "no rewrite" rather than silently resolving through the shadowed field.
   bool _isParameterName(SimpleIdentifier prefix) {
@@ -787,7 +962,7 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
     return false;
   }
 
-  /// AST-only parameter resolver — tier 2 of [_resolveReceiverTypeName].
+  /// AST-only parameter resolver — tier 2 of [_resolveReceiverType].
   /// Walks the prefix's enclosing [MethodDeclaration] / [FunctionExpression]
   /// for a matching [SimpleFormalParameter] and returns the declared
   /// [NamedType]'s lexeme.
@@ -814,7 +989,7 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
     return null;
   }
 
-  /// AST-only instance-field resolver — tier 3 of [_resolveReceiverTypeName].
+  /// AST-only instance-field resolver — tier 3 of [_resolveReceiverType].
   /// Covers the most common Flutter DI shape — a constructor-injected field
   /// (`final AuthRepository _authRepository;`) — that has no parameter
   /// counterpart. Callers gate this tier on [_isParameterName] returning
@@ -823,7 +998,7 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
       _resolveInstanceFieldTypeNameByName(prefix.name, prefix);
 
   /// Shared implementation of [_resolveInstanceFieldTypeNameFromAst] (tier 3)
-  /// and the `this.<field>` branch (tier 4) of [_resolveReceiverTypeName].
+  /// and the `this.<field>` branch (tier 4) of [_resolveReceiverType].
   /// Walks [anchor]'s enclosing [ClassDeclaration] for a matching non-static
   /// [FieldDeclaration] named [name] and returns the declared [NamedType]'s
   /// lexeme. Returns `null` when no field on the enclosing class matches
