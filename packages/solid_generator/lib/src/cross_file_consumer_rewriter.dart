@@ -57,18 +57,27 @@ PureConsumerLowering lowerPureConsumers(
   CompilationUnit unit, {
   required Map<String, Set<String>> classRegistry,
   required Map<String, Set<String>> classCollectionFields,
+  Map<String, Map<String, Set<String>>> classRegistryOrigins = const {},
+  Map<String, Map<String, Set<String>>> classCollectionFieldsOrigins = const {},
+  Set<String> classRegistryShadowedNames = const {},
 }) {
   final widgetResult = collectPureConsumerWidgetEdits(
     unit,
     text,
     classRegistry: classRegistry,
     classCollectionFields: classCollectionFields,
+    classRegistryOrigins: classRegistryOrigins,
+    classCollectionFieldsOrigins: classCollectionFieldsOrigins,
+    classRegistryShadowedNames: classRegistryShadowedNames,
   );
   final crossFileEdits = collectPureConsumerCrossFileEdits(
     unit,
     text,
     classRegistry: classRegistry,
     classCollectionFields: classCollectionFields,
+    classRegistryOrigins: classRegistryOrigins,
+    classCollectionFieldsOrigins: classCollectionFieldsOrigins,
+    classRegistryShadowedNames: classRegistryShadowedNames,
   );
   if (widgetResult.edits.isEmpty && crossFileEdits.isEmpty) {
     return (text: text, emittedSignalBuilder: false);
@@ -116,15 +125,23 @@ PureConsumerLowering lowerPureConsumers(
 ///    are a known, accepted gap: the reproduced issue and every reported
 ///    real-world shape are DI-shaped (a class holding another class).
 ///
-/// Returns an empty edit list when [classRegistry] is empty or no visited
-/// member contains a rewrite.
+/// Returns an empty edit list when [classRegistry] AND
+/// [classRegistryShadowedNames] are both empty (issue #110 — a name flagged
+/// as ambiguous is stripped from [classRegistry] but still needs a visit:
+/// see `builder.dart::_populateCrossFileTypes`'s finalize pass) or no
+/// visited member contains a rewrite.
 List<ValueEdit> collectPureConsumerCrossFileEdits(
   CompilationUnit unit,
   String text, {
   required Map<String, Set<String>> classRegistry,
   required Map<String, Set<String>> classCollectionFields,
+  Map<String, Map<String, Set<String>>> classRegistryOrigins = const {},
+  Map<String, Map<String, Set<String>>> classCollectionFieldsOrigins = const {},
+  Set<String> classRegistryShadowedNames = const {},
 }) {
-  if (classRegistry.isEmpty) return const <ValueEdit>[];
+  if (classRegistry.isEmpty && classRegistryShadowedNames.isEmpty) {
+    return const <ValueEdit>[];
+  }
   final edits = <ValueEdit>[];
   for (final decl in unit.declarations) {
     if (decl is! ClassDeclaration) continue;
@@ -141,6 +158,9 @@ List<ValueEdit> collectPureConsumerCrossFileEdits(
         text,
         classRegistry: classRegistry,
         classCollectionFields: classCollectionFields,
+        classRegistryOrigins: classRegistryOrigins,
+        classCollectionFieldsOrigins: classCollectionFieldsOrigins,
+        classRegistryShadowedNames: classRegistryShadowedNames,
       );
       edits.addAll(result.edits);
     }
@@ -184,15 +204,20 @@ List<ValueEdit> collectPureConsumerCrossFileEdits(
 ///    `widget.`-prefixing is needed.
 ///
 /// Returns `(edits: const [], emittedSignalBuilder: false)` when
-/// [classRegistry] is empty or no visited member contains a rewrite.
+/// [classRegistry] AND [classRegistryShadowedNames] are both empty (issue
+/// #110 — see [collectPureConsumerCrossFileEdits]'s doc comment) or no
+/// visited member contains a rewrite.
 ({List<ValueEdit> edits, bool emittedSignalBuilder})
 collectPureConsumerWidgetEdits(
   CompilationUnit unit,
   String text, {
   required Map<String, Set<String>> classRegistry,
   required Map<String, Set<String>> classCollectionFields,
+  Map<String, Map<String, Set<String>>> classRegistryOrigins = const {},
+  Map<String, Map<String, Set<String>>> classCollectionFieldsOrigins = const {},
+  Set<String> classRegistryShadowedNames = const {},
 }) {
-  if (classRegistry.isEmpty) {
+  if (classRegistry.isEmpty && classRegistryShadowedNames.isEmpty) {
     return (edits: const <ValueEdit>[], emittedSignalBuilder: false);
   }
   final edits = <ValueEdit>[];
@@ -212,6 +237,9 @@ collectPureConsumerWidgetEdits(
           text,
           classRegistry: classRegistry,
           classCollectionFields: classCollectionFields,
+          classRegistryOrigins: classRegistryOrigins,
+          classCollectionFieldsOrigins: classCollectionFieldsOrigins,
+          classRegistryShadowedNames: classRegistryShadowedNames,
         );
         if (rewritten.emittedWrap) emittedSignalBuilder = true;
         if (rewritten.text != original) {
@@ -227,6 +255,9 @@ collectPureConsumerWidgetEdits(
           text,
           classRegistry: classRegistry,
           classCollectionFields: classCollectionFields,
+          classRegistryOrigins: classRegistryOrigins,
+          classCollectionFieldsOrigins: classCollectionFieldsOrigins,
+          classRegistryShadowedNames: classRegistryShadowedNames,
         );
         edits.addAll(result.edits);
         continue;
@@ -238,6 +269,9 @@ collectPureConsumerWidgetEdits(
         text,
         classRegistry: classRegistry,
         classCollectionFields: classCollectionFields,
+        classRegistryOrigins: classRegistryOrigins,
+        classCollectionFieldsOrigins: classCollectionFieldsOrigins,
+        classRegistryShadowedNames: classRegistryShadowedNames,
       );
       edits.addAll(result.edits);
     }

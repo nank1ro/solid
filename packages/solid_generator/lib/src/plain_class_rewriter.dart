@@ -61,8 +61,11 @@ RewriteResult rewritePlainClass(
   Map<String, Set<String>> classRegistry,
   Map<String, Set<String>> classCollectionFields,
   Map<String, Map<String, String>> classFieldTypes,
-  String source,
-) {
+  String source, {
+  Map<String, Map<String, Set<String>>> classRegistryOrigins = const {},
+  Map<String, Map<String, Set<String>>> classCollectionFieldsOrigins = const {},
+  Set<String> classRegistryShadowedNames = const {},
+}) {
   final className = classDecl.name.lexeme;
   // `@SolidState` getters on plain classes (Computed lowering) ARE supported
   // via the same `emitComputedField` path the stateless rewriter uses — see
@@ -195,6 +198,9 @@ RewriteResult rewritePlainClass(
             source,
             collectionFields: collectionNames,
             classCollectionFields: classCollectionFields,
+            classRegistryOrigins: classRegistryOrigins,
+            classCollectionFieldsOrigins: classCollectionFieldsOrigins,
+            classRegistryShadowedNames: classRegistryShadowedNames,
           ),
         );
       }
@@ -238,6 +244,9 @@ RewriteResult rewritePlainClass(
       classRegistry: classRegistry,
       collectionFields: collectionNames,
       classCollectionFields: classCollectionFields,
+      classRegistryOrigins: classRegistryOrigins,
+      classCollectionFieldsOrigins: classCollectionFieldsOrigins,
+      classRegistryShadowedNames: classRegistryShadowedNames,
     );
     pieces[userCtorSlots[i]] = applyEditsToRange(
       mergedHeaderAndBody,

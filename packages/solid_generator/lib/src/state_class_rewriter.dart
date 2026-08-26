@@ -43,8 +43,11 @@ RewriteResult rewriteStateClass(
   Map<String, Set<String>> classRegistry,
   Map<String, Set<String>> classCollectionFields,
   Map<String, Map<String, String>> classFieldTypes,
-  String source,
-) {
+  String source, {
+  Map<String, Map<String, Set<String>>> classRegistryOrigins = const {},
+  Map<String, Map<String, Set<String>>> classCollectionFieldsOrigins = const {},
+  Set<String> classRegistryShadowedNames = const {},
+}) {
   final className = classDecl.name.lexeme;
   // getter→Computed only ships for `StatelessWidget`. The in-place merge
   // logic this rewriter is built around does not yet handle the
@@ -151,6 +154,9 @@ RewriteResult rewriteStateClass(
           environmentFields: environmentFields,
           collectionFields: collectionNames,
           classCollectionFields: classCollectionFields,
+          classRegistryOrigins: classRegistryOrigins,
+          classCollectionFieldsOrigins: classCollectionFieldsOrigins,
+          classRegistryShadowedNames: classRegistryShadowedNames,
         );
         pieces.add(buildRewrite.text);
         // `buildRewrite.emittedWrap` is sourced from `rewriteBuildMethod`'s
@@ -197,6 +203,9 @@ RewriteResult rewriteStateClass(
             environmentFields: environmentFields,
             collectionFields: collectionNames,
             classCollectionFields: classCollectionFields,
+            classRegistryOrigins: classRegistryOrigins,
+            classCollectionFieldsOrigins: classCollectionFieldsOrigins,
+            classRegistryShadowedNames: classRegistryShadowedNames,
           ),
         );
       }

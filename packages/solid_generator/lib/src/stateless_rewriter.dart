@@ -30,8 +30,11 @@ RewriteResult rewriteStatelessWidget(
   Map<String, Set<String>> classRegistry,
   Map<String, Set<String>> classCollectionFields,
   Map<String, Map<String, String>> classFieldTypes,
-  String source,
-) {
+  String source, {
+  Map<String, Map<String, Set<String>>> classRegistryOrigins = const {},
+  Map<String, Map<String, Set<String>>> classCollectionFieldsOrigins = const {},
+  Set<String> classRegistryShadowedNames = const {},
+}) {
   final className = classDecl.name.lexeme;
   final stateClassName = '_${className}State';
   final reactiveNames = <String>{
@@ -110,6 +113,9 @@ RewriteResult rewriteStatelessWidget(
     widgetBoundFields: widgetBoundForBuild,
     collectionFields: collectionNames,
     classCollectionFields: classCollectionFields,
+    classRegistryOrigins: classRegistryOrigins,
+    classCollectionFieldsOrigins: classCollectionFieldsOrigins,
+    classRegistryShadowedNames: classRegistryShadowedNames,
   );
   final buildMethodText = buildRewrite.text;
 
@@ -161,6 +167,9 @@ RewriteResult rewriteStatelessWidget(
               environmentFields: environmentFieldsMap,
               collectionFields: collectionNames,
               classCollectionFields: classCollectionFields,
+              classRegistryOrigins: classRegistryOrigins,
+              classCollectionFieldsOrigins: classCollectionFieldsOrigins,
+              classRegistryShadowedNames: classRegistryShadowedNames,
             )}',
       )
       .join('\n\n');
