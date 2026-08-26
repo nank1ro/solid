@@ -142,7 +142,7 @@ RewriteResult rewriteStateClass(
     if (member is MethodDeclaration) {
       final name = member.name.lexeme;
       if (name == 'build') {
-        final buildText = rewriteBuildMethod(
+        final buildRewrite = rewriteBuildMethod(
           member,
           reactiveNames,
           source,
@@ -152,8 +152,12 @@ RewriteResult rewriteStateClass(
           collectionFields: collectionNames,
           classCollectionFields: classCollectionFields,
         );
-        pieces.add(buildText);
-        if (buildText.contains('SignalBuilder(')) {
+        pieces.add(buildRewrite.text);
+        // `buildRewrite.emittedWrap` is sourced from `rewriteBuildMethod`'s
+        // own wrap-placement decision — not re-derived by scanning the
+        // returned text for the substring `SignalBuilder(`, which could
+        // misfire on a preserved source comment containing that text.
+        if (buildRewrite.emittedWrap) {
           buildHasSignalBuilder = true;
         }
       } else if (name == 'initState') {

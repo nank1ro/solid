@@ -6,6 +6,11 @@
 // (and even that was later filtered as an SDK name — see finding 5), so
 // `AuthRepository` never entered `wantedTypes` and the for-in loop variable
 // read below stayed un-lowered.
+//
+// `firstHasSession` covers the sibling `.first` receiver (same finding):
+// previously verified manually but had no persisted fixture — see
+// CHANGELOG. Same resolved-type mechanism as the for-in loop variable:
+// `repos.first` resolves to `AuthRepository` via `Expression.staticType`.
 import 'package:solid_annotations/solid_annotations.dart';
 
 import 'auth_repository.dart';
@@ -25,4 +30,6 @@ class Manager {
     }
     return false;
   }
+
+  bool firstHasSession() => repos.first.session != null;
 }

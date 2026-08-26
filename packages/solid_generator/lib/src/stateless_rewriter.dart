@@ -100,7 +100,7 @@ RewriteResult rewriteStatelessWidget(
   final widgetBoundForBuild = widgetBoundNames.difference(
     partitionExcludeNames,
   );
-  final buildMethodText = rewriteBuildMethod(
+  final buildRewrite = rewriteBuildMethod(
     members.buildMethod,
     reactiveNames,
     source,
@@ -111,6 +111,7 @@ RewriteResult rewriteStatelessWidget(
     collectionFields: collectionNames,
     classCollectionFields: classCollectionFields,
   );
+  final buildMethodText = buildRewrite.text;
 
   final reactiveBlock = _emitReactiveBlock(
     classDecl,
@@ -188,13 +189,15 @@ RewriteResult rewriteStatelessWidget(
   // own same-class reactive declaration OR the build body wraps a
   // cross-class tracked read in `SignalBuilder` (the env-injected receiver
   // shape — the consumer has no own state but reads through to a sibling
-  // class's `@SolidState`). The textual scan on `buildMethodText` catches
-  // the cross-class case without re-walking the AST.
+  // class's `@SolidState`). `buildRewrite.emittedWrap` catches the
+  // cross-class case without re-walking the AST or scanning `buildMethodText`
+  // for the substring `SignalBuilder(` (which could misfire on a preserved
+  // source comment containing that text).
   final hasReactive =
       solidFields.isNotEmpty ||
       solidGetters.isNotEmpty ||
       solidQueries.isNotEmpty;
-  final buildEmitsSignalBuilder = buildMethodText.contains('SignalBuilder(');
+  final buildEmitsSignalBuilder = buildRewrite.emittedWrap;
   // A field's emitted ctor is one of: Signal / ListSignal / SetSignal /
   // MapSignal. Collection emitters bypass `Signal` entirely, so the import
   // set follows the per-field decision rather than blanket-adding `Signal`.

@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:analyzer/dart/analysis/features.dart';
 import 'package:analyzer/dart/analysis/utilities.dart';
 import 'package:analyzer/dart/ast/ast.dart';
+import 'package:analyzer/dart/element/type.dart';
 import 'package:build/build.dart';
 import 'package:dart_style/dart_style.dart';
 import 'package:glob/glob.dart';
@@ -332,57 +333,72 @@ class _SolidBuilder implements Builder {
     );
     if (annotatedClasses.every((c) => c.hasNoAnnotations)) {
       // No reactive annotations resolved. The file may still need:
-      //  (a) `.value` lowering on a PURE CONSUMER plain class — one that
+      //  (a) `SignalBuilder`-wrap placement + `.value` lowering on a PURE
+      //      CONSUMER `StatelessWidget`/`State<X>` (issue #106 residual gap
+      //      survey, GAP 1),
+      //  (b) `.value` lowering on a PURE CONSUMER plain class — one that
       //      reaches a cross-file `@SolidState`-bearing class only through
       //      constructor injection / an instance field, with no `@Solid*`
       //      annotation of its own (issue #106; `sameFileRegistry` can be
       //      non-empty here purely from the cross-file seeding above, even
       //      though this file owns zero reactive members), and/or
-      //  (b) dispose-call-site injection at a `Provider(...)` /
+      //  (c) dispose-call-site injection at a `Provider(...)` /
       //      `.environment<T>()` call site (pre-existing).
-      // Neither path restructures the class: no `implements Disposable`, no
-      // synthesized `dispose()` — those only belong to a class that OWNS at
+      // None of the three restructures a class's `implements` clause or
+      // synthesizes `dispose()` — those only belong to a class that OWNS at
       // least one reactive member (handled by `_renderOutput` below, for
       // files where SOME class does).
       //
-      // ORDER MATTERS, and (a) must run first, against the pristine [source]
-      // with the still-valid [unit]. `lowerPureConsumerCrossFileReads`
-      // delegates to `value_rewriter.dart`'s receiver resolution, whose tier
-      // 1 (`Expression.staticType`) is the ONLY tier that can type a for-in
-      // LOOP VARIABLE (`for (final r in repos) { r.field }`) or any other
-      // receiver shape that isn't a bare parameter/field name — losing the
-      // resolved [unit] silently degrades such a read to "no rewrite", not a
-      // loud failure. `addProviderDisposeAtCallSites`, by contrast, is
-      // explicitly designed to tolerate an unresolved re-parse: its
+      // (a) and (b) are collected and applied TOGETHER by
+      // [lowerPureConsumers] against the pristine [source] and the
+      // still-resolved [unit] — see that function's doc comment for why: an
+      // earlier version ran them as two sequential text-mutating passes,
+      // which forced the second pass onto an unresolved re-parse whenever
+      // the first pass edited anything, silently degrading any tier-1-ONLY
+      // receiver resolution (a static-holder read, a for-in loop variable,
+      // `.first`) belonging to a DIFFERENT class in the same file. Merging
+      // both edit sets up front removes the ordering dependency entirely.
+      //
+      // (c) runs after, on the ALREADY-MERGED text:
+      // `addProviderDisposeAtCallSites` is explicitly designed to tolerate
+      // an unresolved re-parse — its
       // `_createdTypeHasDispose` four-tier rule falls back to same-file AST
       // tiers (2/3) or the inject-by-default tier 4 whenever `.staticType`
       // isn't populated — exactly what happens on the main annotated path in
       // `_renderOutput`, which invokes this same function on `combined`, a
       // freshly re-assembled text string with no `unit` argument at all.
-      // Running dispose-injection first (the previous order) would silently
-      // cost the lowering pass its only source of loop-variable / other
-      // non-parameter-non-field receiver resolution whenever the dispose
-      // pass actually edited the text — reproduced by the
-      // `cross_file_pure_consumer_with_provider` golden fixture.
-      var current = lowerPureConsumerCrossFileReads(
+      // Running dispose-injection BEFORE the pure-consumer lowering (an
+      // earlier order) would cost those passes their only source of
+      // loop-variable / other non-parameter-non-field receiver resolution
+      // whenever the dispose pass actually edited the text — reproduced by
+      // the `cross_file_pure_consumer_with_provider` golden fixture.
+      final lowered = lowerPureConsumers(
         source,
-        unit: unit,
+        unit,
         classRegistry: sameFileRegistry,
         classCollectionFields: sameFileCollections,
       );
+      var current = lowered.text;
       if (hasProviderHint) {
-        // Reuses `unit` only when the lowering pass above made no change
-        // (its edits, if any, shift offsets out from under `unit`) — the
-        // same reparse-per-pass convention `_renderOutput` already uses for
-        // its own multi-pass pipeline (`addProviderDisposeAtCallSites` →
-        // `addConstAtCallSites`, each re-parsing the previous pass's text).
-        // Safe per the ordering rationale above: this pass degrades
-        // gracefully on an unresolved re-parse.
         current = addProviderDisposeAtCallSites(
           current,
           unit: identical(current, source) ? unit : null,
           classRegistry: sameFileRegistry,
         );
+      }
+      // A pure-consumer widget's `SignalBuilder` wrap (GAP 1 above) needs
+      // `flutter_solidart` imported — this no-annotation branch otherwise
+      // never touches imports at all (unlike `_renderOutput`'s
+      // `computeOutputImports` call), since `.value`-only lowering
+      // introduces no new identifier that isn't already resolvable through
+      // the existing imports. `lowered.emittedSignalBuilder` is
+      // [lowerPureConsumers]'s own report of whether it placed a wrap — not
+      // a substring scan of `current`, which would both misfire on a
+      // preserved comment containing the text `SignalBuilder(` AND treat ANY
+      // existing `flutter_solidart` import as sufficient even when that
+      // import's `show`/`hide` combinators don't actually expose the name.
+      if (lowered.emittedSignalBuilder) {
+        current = _ensureSignalBuilderResolves(current, unit);
       }
       if (identical(current, source)) {
         await buildStep.writeAsString(outputId, source);
@@ -1149,7 +1165,15 @@ Future<void> _populateCrossFileTypes(
     if (decl is! ClassDeclaration) continue;
     for (final member in decl.members) {
       if (member is FieldDeclaration) {
-        if (member.isStatic) continue;
+        // `static` fields ARE seeded (issue #106 residual gap survey, GAP
+        // 2): a singleton-holder shape (`static final AuthRepository
+        // instance = …;`, consumed elsewhere as `Holder.instance.session`)
+        // is exactly as valid a DI source as an instance field. The
+        // original `isStatic` skip here carried no stated rationale in
+        // #104/#105's history — it silently mirrored `@SolidState`'s OWN
+        // instance-only restriction (Section 3.1), which is a rule about
+        // what `@SolidState` may annotate, not about what this unrelated
+        // seeding loop may harvest a type name from.
         final type = member.fields.type;
         if (type is! NamedType) continue;
         _seedWantedTypeRecursive(type, wantedTypes, classRegistry);
@@ -1164,18 +1188,32 @@ Future<void> _populateCrossFileTypes(
           } else if (inner is FieldFormalParameter) {
             paramType = inner.type;
           } else if (inner is SuperFormalParameter) {
-            // Only the explicit-type-annotation shape (`Foo(AuthRepository
-            // super.repo)`) is recoverable here: `inner.type` is populated
-            // straight from the source annotation, same as the two branches
-            // above. The far more common bare-shorthand form (`super.repo`,
-            // no type written) carries NO type annotation in the source at
-            // all — the type is only knowable by resolving `repo` against
-            // the superclass's matching parameter/field, which this
-            // syntactic AST walk does not do. That shape is a known,
-            // accepted gap (see CHANGELOG): such a parameter simply isn't a
-            // wantedTypes candidate from this loop, same as if the class had
-            // no matching field/param seeding it at all.
+            // The explicit-type-annotation shape (`Foo(AuthRepository
+            // super.repo)`) is recoverable syntactically: `inner.type` is
+            // populated straight from the source annotation, same as the
+            // two branches above. The far more common bare-shorthand form
+            // (`super.repo`, no type written) carries NO type annotation in
+            // the source at all — but on the RESOLVED path (this file has
+            // at least one `@Solid*` annotation or a provider hint of its
+            // own, so `unit` here is a fully-resolved `CompilationUnit`),
+            // `SuperFormalParameter.declaredFragment.element.type` IS
+            // populated even without a written annotation (issue #106
+            // residual gap survey, GAP 3; verified empirically against
+            // `package:analyzer`). `_seedFromResolvedSuperFormal` is the
+            // fallback for exactly that case.
+            //
+            // This resolved-only fallback is MOOT for a pure consumer whose
+            // ONLY link to the cross-file class is a bare `super.x`: such a
+            // file has no `@Solid*` annotation and no provider hint, so it
+            // takes the no-annotation fast path's UNRESOLVED syntactic
+            // probe first (`parsed.unit`, no `declaredFragment` available
+            // either) — an empty probe result short-circuits to a verbatim
+            // copy before this resolved call ever runs. The fallback only
+            // helps a file that reaches this function for another reason.
             paramType = inner.type;
+            if (paramType == null) {
+              _seedFromResolvedSuperFormal(inner, wantedTypes, classRegistry);
+            }
           } else {
             paramType = null;
           }
@@ -1468,6 +1506,165 @@ void _seedWantedTypeRecursive(
       _seedWantedTypeRecursive(arg, wantedTypes, classRegistry);
     }
   }
+}
+
+/// Ensures the `SignalBuilder` identifier [lowerPureConsumers] (issue #106
+/// residual gap survey, GAP 1) reported emitting via `emittedSignalBuilder`
+/// actually resolves in [text]. Callers already checked that flag — never a
+/// substring scan of [text] for `SignalBuilder(`, which both risks a
+/// false-positive on a preserved source comment and can't tell an EXPOSED
+/// existing import from a RESTRICTED one.
+///
+/// Three cases, keyed on whether [unit] already imports `flutter_solidart`
+/// and, if so, whether its combinators actually expose the name:
+///  * no `flutter_solidart` import at all → splice in a clean one
+///    ([_ensureFlutterSolidartImport], pre-existing behavior).
+///  * an import exists and already exposes `SignalBuilder`
+///    ([_importExposesName], reused from the cross-file registry walk) →
+///    no-op. This is the common case: an import added fresh by this same
+///    function always exposes every name, so only a HAND-WRITTEN `show`/
+///    `hide` on a pre-existing import can narrow it.
+///  * an import exists but does NOT expose `SignalBuilder` (a `show` list
+///    that omits it, or a `hide SignalBuilder`) — e.g. a file that already
+///    does `import '…/flutter_solidart.dart' show Signal;` for some
+///    unrelated hand-rolled signal before ever gaining a pure-consumer
+///    widget read — → repair that import's combinators in place
+///    ([_repairImportToExposeName]) rather than adding a second import of
+///    the same URI (which `dart analyze` would flag as `duplicate_import`).
+///
+/// Known, accepted gap: an `as`-PREFIXED existing import (`import '…' as
+/// sa;`) is not detected as non-exposing — [_importExposesName] only
+/// inspects `show`/`hide` combinators, not prefixes — so a file whose only
+/// `flutter_solidart` import is aliased would still emit an unresolvable
+/// bare `SignalBuilder(...)`. No reported real-world shape does this (the
+/// project's own convention forbids import aliases), and every one of this
+/// generator's OWN rewriters emits bare (unprefixed) `flutter_solidart`
+/// identifiers, so the gap only bites a hand-aliased pre-existing import.
+String _ensureSignalBuilderResolves(String text, CompilationUnit unit) {
+  ImportDirective? existing;
+  for (final directive in unit.directives.whereType<ImportDirective>()) {
+    if (directive.uri.stringValue == flutterSolidartUri) {
+      existing = directive;
+      break;
+    }
+  }
+  if (existing == null) return _ensureFlutterSolidartImport(text, unit);
+  if (_importExposesName(existing, 'SignalBuilder')) return text;
+  return _repairImportToExposeName(text, existing, 'SignalBuilder');
+}
+
+/// Splices [name] into [directive]'s combinators so it becomes visible,
+/// using the combinator nodes' own AST offsets rather than a fragile textual
+/// regex — robust regardless of whitespace/formatting:
+///  * an existing `show` combinator gains `, <name>` after its last shown
+///    name;
+///  * an existing `hide` combinator loses `<name>` — the whole `hide`
+///    clause is removed if [name] was its only hidden name, otherwise just
+///    `<name>` (and its separating comma) is spliced out.
+///
+/// Only called after [_importExposesName] has already confirmed [directive]
+/// does NOT expose [name], so exactly one of the two branches below applies
+/// — an import with neither combinator, or with a `show`/`hide` that
+/// already agrees the name is visible, would have made
+/// [_importExposesName] return `true` and this function would never run.
+/// Leaves [text] untouched (defensive fallback, not expected to be reached)
+/// if neither combinator matches.
+String _repairImportToExposeName(
+  String text,
+  ImportDirective directive,
+  String name,
+) {
+  for (final combinator in directive.combinators) {
+    if (combinator is ShowCombinator) {
+      if (combinator.shownNames.any((id) => id.name == name)) continue;
+      final last = combinator.shownNames.last;
+      return '${text.substring(0, last.end)}, '
+          '$name${text.substring(last.end)}';
+    }
+    if (combinator is HideCombinator) {
+      final hidden = combinator.hiddenNames;
+      final idx = hidden.indexWhere((id) => id.name == name);
+      if (idx == -1) continue;
+      if (hidden.length == 1) {
+        return text.substring(0, combinator.offset) +
+            text.substring(combinator.end);
+      }
+      if (idx == 0) {
+        return text.substring(0, hidden[0].offset) +
+            text.substring(hidden[1].offset);
+      }
+      return text.substring(0, hidden[idx - 1].end) +
+          text.substring(hidden[idx].end);
+    }
+  }
+  return text;
+}
+
+/// Ensures `package:flutter_solidart/flutter_solidart.dart` is imported in
+/// [text] when no existing import of it is present at all. Called by
+/// [_ensureSignalBuilderResolves] for that one case; the other two (an
+/// existing import that already exposes the name, or one that needs
+/// combinator repair) are handled directly there.
+///
+/// Unlike `_renderOutput`'s main annotated path, this no-annotation branch
+/// never runs [computeOutputImports] against a freshly reassembled import
+/// block — there is no per-class rewrite result to aggregate. This is a
+/// narrow, text-level splice instead: [unit]'s import-directive offsets are
+/// still valid against [text] because every edit the pure-consumer lowering
+/// passes make lands inside a class member, strictly after the last import
+/// directive — so the import section itself is never touched by them.
+String _ensureFlutterSolidartImport(String text, CompilationUnit unit) {
+  final directives = unit.directives.whereType<ImportDirective>().toList();
+  final sourceUris = <String>[];
+  final sourceDirectiveText = <String, String>{};
+  for (final directive in directives) {
+    final uri = directive.uri.stringValue;
+    if (uri == null) continue;
+    sourceUris.add(uri);
+    sourceDirectiveText[uri] = directive.toSource();
+  }
+  final imports = computeOutputImports(
+    sourceUris,
+    addSolidart: true,
+    referencesSolidAnnotations: true,
+  );
+  final importBlock = imports
+      .map((uri) => sourceDirectiveText[uri] ?? "import '$uri';")
+      .join('\n');
+  if (directives.isEmpty) {
+    return '$importBlock\n\n$text';
+  }
+  return text.substring(0, directives.first.offset) +
+      importBlock +
+      text.substring(directives.last.end);
+}
+
+/// Resolved-path fallback for a BARE `super.` formal parameter (issue #106
+/// residual gap survey, GAP 3): [param]'s own AST carries no type
+/// annotation, but on a fully-resolved [CompilationUnit],
+/// `declaredFragment.element.type` still resolves to the forwarded
+/// parameter's real type (verified empirically against `package:analyzer`
+/// directly — the analyzer resolves a super-initializer parameter's type
+/// from the superclass constructor's matching parameter even when nothing
+/// is written at this position). Seeds [wantedTypes] the same way
+/// [_seedWantedTypeRecursive] would if the source had spelled the type out.
+///
+/// No-ops when the unit isn't resolved (`declaredFragment` unpopulated) or
+/// the resolved type isn't an [InterfaceType] (e.g. a dynamic/unresolved
+/// forward) — the caller already has nothing to add in that case, same as
+/// today's syntactic-only behavior.
+void _seedFromResolvedSuperFormal(
+  SuperFormalParameter param,
+  Set<String> wantedTypes,
+  Map<String, Set<String>> classRegistry,
+) {
+  final type = param.declaredFragment?.element.type;
+  if (type is! InterfaceType) return;
+  final typeText = type.element.name;
+  if (typeText == null) return;
+  if (_coreSdkTypeNames.contains(typeText)) return;
+  if (classRegistry.containsKey(typeText)) return;
+  wantedTypes.add(typeText);
 }
 
 /// Translates a `source/<rel>` AssetId to its `lib/<rel>` sibling. The
