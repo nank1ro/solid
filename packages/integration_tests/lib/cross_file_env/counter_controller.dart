@@ -4,7 +4,7 @@ import 'package:solid_annotations/solid_annotations.dart';
 class Counter implements Disposable {
   final value = Signal<int>(0, name: 'value');
 
-  final history = ListSignal<int>(const [], name: 'history');
+  final history = ListSignal<int>([], name: 'history');
 
   @override
   void dispose() {

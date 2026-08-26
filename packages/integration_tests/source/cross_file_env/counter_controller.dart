@@ -11,7 +11,7 @@ class Counter {
   int value = 0;
 
   @SolidState()
-  List<int> history = const [];
+  List<int> history = [];
 
   // Empty stub — the source-layer analyzer needs to resolve `c.dispose()` in
   // the `.environment<Counter>(... dispose: (_, c) => c.dispose())` callback.

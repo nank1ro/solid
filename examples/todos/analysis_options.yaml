@@ -30,6 +30,14 @@ analyzer:
     # `Foo` from the generic call but `very_good_analysis` treats this as
     # non-obvious. The type IS clear from the receiver; suppress here.
     specify_nonobvious_property_types: ignore
+  exclude:
+    - build/**
+    - android/**
+    - ios/**
+    - web/**
+    - windows/**
+    - macos/**
+    - linux/**
 linter:
   rules:
     public_member_api_docs: false

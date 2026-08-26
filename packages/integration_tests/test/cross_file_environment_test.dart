@@ -1,11 +1,11 @@
 // Runtime fence for the cross-file `@SolidEnvironment` chain rewrite.
 // `Counter` is declared in `source/cross_file_env/counter_controller.dart`
 // and consumed by `CounterDisplay` in `source/cross_file_env/counter_display.dart`
-// via `package:integration_tests/cross_file_env/...`. The two files are
-// generated independently — the generator's resolver pass redirects the
-// same-package `lib/` URI back to `source/` so the rewriter sees the
-// pre-transformation `@SolidState` annotations even though Dart resolves
-// the import to `lib/`.
+// via a relative URI. The two files are generated independently — the
+// generator's resolver pass redirects relative source imports to their
+// `lib/` counterparts so the rewriter sees the pre-transformation
+// `@SolidState` annotations even though Dart resolves the import to
+// `lib/`.
 //
 // This test asserts that the SignalBuilder placements emitted in
 // `counter_display.dart` actually subscribe to the live ListSignal/Signal

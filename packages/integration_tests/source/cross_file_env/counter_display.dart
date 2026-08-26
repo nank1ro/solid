@@ -1,12 +1,13 @@
 // Cross-file env-injection consumer — imports `Counter` from a sibling
-// source file via `package:integration_tests/cross_file_env/...`. The
-// generator's resolver pass redirects same-package `lib/` URIs back to
-// `source/` so the `@SolidState` annotations are visible to the rewriter
-// even though the import resolves to `lib/cross_file_env/...` post-build.
+// source file via a relative URI. The generator's resolver pass redirects
+// relative source imports to their `lib/` counterparts so the
+// `@SolidState` annotations are visible to the rewriter even though the
+// import resolves to `lib/cross_file_env/...` post-build.
 
 import 'package:flutter/material.dart';
-import 'package:integration_tests/cross_file_env/counter_controller.dart';
 import 'package:solid_annotations/solid_annotations.dart';
+
+import 'counter_controller.dart';
 
 class CounterDisplay extends StatelessWidget {
   CounterDisplay({super.key});
