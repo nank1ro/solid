@@ -7,6 +7,21 @@ analyzer:
     avoid_print: ignore
     unnecessary_statements: ignore
     always_use_package_imports: ignore
+    # The generator's const-call-site rewriter is per-file: it can't know
+    # that a sibling file's class became const-eligible after lowering
+    # (e.g. `CounterPage` gains a const constructor once its `@SolidState`
+    # fields move to a generated State class), and `source/` can't carry
+    # the `const` pre-lowering since the class isn't const-eligible there.
+    # Generated call sites legitimately lack `const` in this case.
+    prefer_const_constructors: ignore
+  exclude:
+    - build/**
+    - android/**
+    - ios/**
+    - web/**
+    - windows/**
+    - macos/**
+    - linux/**
 linter:
   rules:
     public_member_api_docs: false

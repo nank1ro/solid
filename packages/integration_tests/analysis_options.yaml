@@ -27,3 +27,12 @@ analyzer:
 linter:
   rules:
     public_member_api_docs: false
+    # `source/` uses relative imports for same-package siblings, and the
+    # generator mirrors those paths 1:1 into `lib/`. Turn off
+    # `very_good_analysis`'s default `always_use_package_imports` so the
+    # generated `lib/` imports stay relative. Unlike `example/`, don't
+    # enable `prefer_relative_imports` as a tripwire here: `test/`
+    # deliberately imports the generated code via `package:integration_tests/...`
+    # (it exercises the public, generated `lib/` API, not a same-package
+    # sibling), so the rule would flag those intentional imports.
+    always_use_package_imports: false

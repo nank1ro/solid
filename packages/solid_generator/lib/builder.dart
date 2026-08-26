@@ -1124,6 +1124,11 @@ Future<void> _populateCrossFileTypes(
   // present in [classRegistry] are skipped (the same-file pass is the
   // source of truth there).
   final wantedTypes = <String>{};
+  // Computed up front (issue #108 fix review finding 1): a name [unit]
+  // itself declares always shadows a same-name import, no matter how many
+  // hops away the import lives — see the `wantedTypes.removeAll(...)` call
+  // below, and [_populateCrossFileTypesOneHop]'s use of this same set.
+  final declaredInUnit = _collectDeclaredTypeNames(unit);
   for (final decl in unit.declarations) {
     if (decl is! ClassDeclaration) continue;
     for (final member in decl.members) {
@@ -1202,17 +1207,71 @@ Future<void> _populateCrossFileTypes(
             // `package:analyzer`). `_seedFromResolvedSuperFormal` is the
             // fallback for exactly that case.
             //
-            // This resolved-only fallback is MOOT for a pure consumer whose
+            // The resolved fallback above is MOOT for a pure consumer whose
             // ONLY link to the cross-file class is a bare `super.x`: such a
             // file has no `@Solid*` annotation and no provider hint, so it
             // takes the no-annotation fast path's UNRESOLVED syntactic
             // probe first (`parsed.unit`, no `declaredFragment` available
-            // either) — an empty probe result short-circuits to a verbatim
-            // copy before this resolved call ever runs. The fallback only
-            // helps a file that reaches this function for another reason.
+            // either) — the resolved call above is a no-op there. Issue
+            // #108 closes exactly that gap with a purely syntactic
+            // counterpart, [_seedFromSyntacticSuperFormal]: it walks
+            // [decl]'s own `extends` clause to find the superclass
+            // declaration (locally or via this same import-walk
+            // discipline, same-package-only — issue #108 fix review
+            // finding 2), matches [inner] against the super-constructor
+            // the enclosing constructor's initializer list targets, and
+            // seeds the matched parameter's (or, for a `this.x` field
+            // formal, the same-named instance field's) declared type. When
+            // the located superclass lives in another file entirely (the
+            // common case: a pure consumer's own file rarely declares its
+            // own base class), that file's declaration may itself only
+            // reference the wanted type through ONE of ITS OWN imports —
+            // [_populateCrossFileTypesOneHop] below is that one purposeful
+            // extra hop (issue #108 fix review finding 1), not a general
+            // transitive walk.
             paramType = inner.type;
             if (paramType == null) {
-              _seedFromResolvedSuperFormal(inner, wantedTypes, classRegistry);
+              // Finding 2 also cuts a real perf corner here: skip the
+              // syntactic walk entirely once the resolved path already
+              // found this parameter's type. The syntactic walk exists
+              // ONLY to cover the unresolved fast path where the resolved
+              // call is a guaranteed no-op (see above); running it anyway
+              // after a successful resolution is a wasted import-and-parse
+              // walk for a name already seeded — and, left unconditional,
+              // this walk fires for EVERY bare `super.` parameter on the
+              // RESOLVED path too, including the ubiquitous `{super.key}`
+              // on a Flutter widget, where it would otherwise chase
+              // `StatefulWidget`/`State` into `package:flutter` itself.
+              final resolvedHere = _seedFromResolvedSuperFormal(
+                inner,
+                wantedTypes,
+                classRegistry,
+              );
+              if (!resolvedHere) {
+                final hop = await _seedFromSyntacticSuperFormal(
+                  inner,
+                  decl,
+                  member,
+                  unit,
+                  step.inputId,
+                  step,
+                  wantedTypes,
+                  classRegistry,
+                );
+                if (hop != null) {
+                  await _populateCrossFileTypesOneHop(
+                    hop.$1,
+                    hop.$2,
+                    step,
+                    wantedTypes,
+                    declaredInUnit,
+                    classRegistry,
+                    classCollectionFields,
+                    classFieldTypes,
+                    crossClassFieldTypeOriginUris,
+                  );
+                }
+              }
             }
           } else {
             paramType = null;
@@ -1232,7 +1291,7 @@ Future<void> _populateCrossFileTypes(
   // simple-name shadowing collision: a local plain `class Address` plus an
   // unrelated imported `@SolidState`-annotated `class Address` elsewhere
   // must not attribute the import's reactive fields to the local class).
-  wantedTypes.removeAll(_collectDeclaredTypeNames(unit));
+  wantedTypes.removeAll(declaredInUnit);
   if (wantedTypes.isEmpty) return;
 
   for (final directive in unit.directives.whereType<ImportDirective>()) {
@@ -1259,79 +1318,223 @@ Future<void> _populateCrossFileTypes(
     } on Object {
       continue;
     }
-    for (final decl in imported.declarations) {
-      if (decl is! ClassDeclaration) continue;
-      final className = decl.name.lexeme;
-      if (!wantedTypes.contains(className)) continue;
-      if (!_importExposesName(directive, className)) continue;
-      final scalarNames = <String>{};
-      final collectionNames = <String>{};
-      final fieldTypeTexts = <String, String>{};
-      for (final member in decl.members) {
-        if (member is FieldDeclaration) {
-          if (!hasAnnotation(solidStateName, member.metadata)) continue;
-          final variable = member.fields.variables.first;
-          final fieldName = variable.name.lexeme;
-          scalarNames.add(fieldName);
-          fieldTypeTexts[fieldName] = member.fields.type?.toSource() ?? '';
-          // Mirror the collection-detection rule in signal_emitter.dart so
-          // the cross-file collection set agrees with the same-file one:
-          // collection signals are emitted for any non-nullable `List<T>`
-          // / `Set<T>` / `Map<K, V>` field — `late` does not exclude.
-          final type = member.fields.type;
-          if (type == null) continue;
-          if (type.question != null) continue;
-          if (parseCollectionTypeText(type.toSource()) != null) {
-            collectionNames.add(fieldName);
-          }
-        } else if (member is MethodDeclaration && member.isGetter) {
-          if (!hasAnnotation(solidStateName, member.metadata)) continue;
-          scalarNames.add(member.name.lexeme);
-          fieldTypeTexts[member.name.lexeme] =
-              member.returnType?.toSource() ?? '';
+    _registerWantedClassesFrom(
+      imported,
+      assetId,
+      directive,
+      step,
+      wantedTypes,
+      classRegistry,
+      classCollectionFields,
+      classFieldTypes,
+      crossClassFieldTypeOriginUris,
+    );
+  }
+}
+
+/// Scans [imported]'s top-level class declarations for names still present
+/// in [wantedTypes], registering every match that carries at least one
+/// `@SolidState` field or getter into [classRegistry] (and
+/// [classCollectionFields] / [classFieldTypes] /
+/// [crossClassFieldTypeOriginUris] alongside it). [directive] supplies the
+/// `show`/`hide` combinators that gate whether [imported] may be credited
+/// as [wantedTypes]'s source; [importedAssetId] anchors the field-type-
+/// origin URI resolution below to [imported]'s own location, not the
+/// original file being built.
+///
+/// Shared by [_populateCrossFileTypes]'s own directive walk and its one-hop
+/// extension ([_populateCrossFileTypesOneHop], issue #108 fix review
+/// finding 1) so both apply IDENTICAL registration rules — including the
+/// "don't stop at the first same-named-but-unannotated decoy" discipline: a
+/// match with zero `@SolidState` members does NOT remove the name from
+/// [wantedTypes], so a caller that walks more than one import for the same
+/// name keeps looking.
+void _registerWantedClassesFrom(
+  CompilationUnit imported,
+  AssetId importedAssetId,
+  ImportDirective directive,
+  BuildStep step,
+  Set<String> wantedTypes,
+  Map<String, Set<String>> classRegistry,
+  Map<String, Set<String>> classCollectionFields,
+  Map<String, Map<String, String>> classFieldTypes,
+  Map<String, Set<String>> crossClassFieldTypeOriginUris,
+) {
+  for (final decl in imported.declarations) {
+    if (decl is! ClassDeclaration) continue;
+    final className = decl.name.lexeme;
+    if (!wantedTypes.contains(className)) continue;
+    if (!_importExposesName(directive, className)) continue;
+    final scalarNames = <String>{};
+    final collectionNames = <String>{};
+    final fieldTypeTexts = <String, String>{};
+    for (final member in decl.members) {
+      if (member is FieldDeclaration) {
+        if (!hasAnnotation(solidStateName, member.metadata)) continue;
+        final variable = member.fields.variables.first;
+        final fieldName = variable.name.lexeme;
+        scalarNames.add(fieldName);
+        fieldTypeTexts[fieldName] = member.fields.type?.toSource() ?? '';
+        // Mirror the collection-detection rule in signal_emitter.dart so
+        // the cross-file collection set agrees with the same-file one:
+        // collection signals are emitted for any non-nullable `List<T>`
+        // / `Set<T>` / `Map<K, V>` field — `late` does not exclude.
+        final type = member.fields.type;
+        if (type == null) continue;
+        if (type.question != null) continue;
+        if (parseCollectionTypeText(type.toSource()) != null) {
+          collectionNames.add(fieldName);
         }
-      }
-      if (scalarNames.isNotEmpty) {
-        classRegistry[className] = scalarNames;
-        if (collectionNames.isNotEmpty) {
-          classCollectionFields[className] = collectionNames;
-        }
-        if (fieldTypeTexts.isNotEmpty) {
-          classFieldTypes[className] = fieldTypeTexts;
-        }
-        // For each `@SolidState` field whose declared type is NOT declared
-        // inside the same class file, capture the file's same-package import
-        // URIs as candidate origins. The consumer's lib output will inject
-        // these so the synthesized Record-Computed `Computed<(…, T, …)>`
-        // resolves at lib-time even when the consumer's source never
-        // textually references `T`.
-        final declaredHere = _collectDeclaredTypeNames(imported);
-        final localCandidateUris = <String>{};
-        for (final directive
-            in imported.directives.whereType<ImportDirective>()) {
-          final uri = directive.uri.stringValue;
-          if (uri == null) continue;
-          final importedAsset = _resolveImportToSourceAsset(uri, assetId);
-          if (importedAsset == null) continue;
-          if (importedAsset.package != step.inputId.package) continue;
-          if (!importedAsset.path.startsWith('source/')) continue;
-          localCandidateUris.add(
-            _sourceToLibAsset(importedAsset).uri.toString(),
-          );
-        }
-        if (localCandidateUris.isNotEmpty) {
-          for (final entry in fieldTypeTexts.entries) {
-            final typeText = entry.value;
-            if (typeText.isEmpty) continue;
-            if (declaredHere.contains(typeText)) continue;
-            (crossClassFieldTypeOriginUris[typeText] ??= <String>{}).addAll(
-              localCandidateUris,
-            );
-          }
-        }
-        wantedTypes.remove(className);
+      } else if (member is MethodDeclaration && member.isGetter) {
+        if (!hasAnnotation(solidStateName, member.metadata)) continue;
+        scalarNames.add(member.name.lexeme);
+        fieldTypeTexts[member.name.lexeme] =
+            member.returnType?.toSource() ?? '';
       }
     }
+    if (scalarNames.isNotEmpty) {
+      classRegistry[className] = scalarNames;
+      if (collectionNames.isNotEmpty) {
+        classCollectionFields[className] = collectionNames;
+      }
+      if (fieldTypeTexts.isNotEmpty) {
+        classFieldTypes[className] = fieldTypeTexts;
+      }
+      // For each `@SolidState` field whose declared type is NOT declared
+      // inside the same class file, capture the file's same-package import
+      // URIs as candidate origins. The consumer's lib output will inject
+      // these so the synthesized Record-Computed `Computed<(…, T, …)>`
+      // resolves at lib-time even when the consumer's source never
+      // textually references `T`.
+      final declaredHere = _collectDeclaredTypeNames(imported);
+      final localCandidateUris = <String>{};
+      for (final innerDirective
+          in imported.directives.whereType<ImportDirective>()) {
+        final innerUri = innerDirective.uri.stringValue;
+        if (innerUri == null) continue;
+        final importedAsset = _resolveImportToSourceAsset(
+          innerUri,
+          importedAssetId,
+        );
+        if (importedAsset == null) continue;
+        if (importedAsset.package != step.inputId.package) continue;
+        if (!importedAsset.path.startsWith('source/')) continue;
+        localCandidateUris.add(
+          _sourceToLibAsset(importedAsset).uri.toString(),
+        );
+      }
+      if (localCandidateUris.isNotEmpty) {
+        for (final entry in fieldTypeTexts.entries) {
+          final typeText = entry.value;
+          if (typeText.isEmpty) continue;
+          if (declaredHere.contains(typeText)) continue;
+          (crossClassFieldTypeOriginUris[typeText] ??= <String>{}).addAll(
+            localCandidateUris,
+          );
+        }
+      }
+      wantedTypes.remove(className);
+    }
+  }
+}
+
+/// One-hop extension of [_populateCrossFileTypes]'s cross-file registry
+/// walk (issue #108 fix review finding 1): a name
+/// [_seedFromSyntacticSuperFormal] derives from a superclass declared in
+/// ANOTHER file than the one being scanned can only be declared in one of
+/// TWO places — [hostUnit] itself (already covered by the main walk above,
+/// since [hostUnit] is one of the scanned file's own imports and the main
+/// walk visits it directly) or one of [hostUnit]'s OWN imports, a file the
+/// scanned file never directly imports and the main walk therefore never
+/// reaches. This function is that one additional hop: same registration
+/// rule as the main walk ([_registerWantedClassesFrom]), anchored at
+/// [hostUnit] / [hostAssetId] instead of the original file. Deliberately
+/// NOT a general transitive walk — this function never calls itself, and
+/// its only caller passes the immediate superclass's own host file, never
+/// anything further removed.
+///
+/// Same-package guard (issue #108 fix review finding 2): a cross-package
+/// import (e.g. `package:flutter/...`) can never host this package's
+/// `@SolidState` classes, so it's skipped before any read or parse. The
+/// pre-existing main walk above carries no such restriction (out of scope
+/// for this fix — it seeds from names written directly in the scanned
+/// file, never from a syntactically-derived superclass chase), but this
+/// one-hop extension exists ONLY to serve the superclass seeder, which
+/// itself only ever locates a same-package superclass in the first place.
+///
+/// Consuming-unit shadow guard (issue #108 fix review addendum, finding 1):
+/// [declaredInConsumingUnit] is the ORIGINAL scanned file's own declared
+/// type names — computed once in [_populateCrossFileTypes] and threaded
+/// through unchanged. Filtering [wantedTypes] against [hostUnit]'s own
+/// declared names (below) is NOT enough on its own: this function runs
+/// *during* [_populateCrossFileTypes]'s per-declaration seeding loop,
+/// strictly BEFORE that function's own `wantedTypes.removeAll(
+/// declaredInUnit)` shadow filter runs at the end of the loop. Without this
+/// extra guard, a name the ORIGINAL consuming file declares locally (e.g.
+/// its own plain `class Foo`) could still be registered into
+/// [classRegistry] from a `@SolidState`-bearing same-named `Foo` reached
+/// through [hostUnit]'s imports — the registration is irreversible even
+/// though the name is removed from `wantedTypes` moments later, because
+/// [classRegistry] is a separate map already written by then. Filtering
+/// here, before [_registerWantedClassesFrom] ever runs, closes that
+/// ordering hole.
+Future<void> _populateCrossFileTypesOneHop(
+  CompilationUnit hostUnit,
+  AssetId hostAssetId,
+  BuildStep step,
+  Set<String> wantedTypes,
+  Set<String> declaredInConsumingUnit,
+  Map<String, Set<String>> classRegistry,
+  Map<String, Set<String>> classCollectionFields,
+  Map<String, Map<String, String>> classFieldTypes,
+  Map<String, Set<String>> crossClassFieldTypeOriginUris,
+) async {
+  // Same local-shadowing discipline the main walk applies to the original
+  // file, applied here relative to [hostUnit]: a name [hostUnit] declares
+  // itself can never be the wanted type's source via one of ITS imports —
+  // and in practice this is always already a no-op, since a name declared
+  // directly in [hostUnit] would already have been found by the main
+  // walk's own scan of [hostUnit]'s declarations before this function is
+  // ever reached. Kept for defense and to make the discipline explicit.
+  wantedTypes
+    ..removeAll(_collectDeclaredTypeNames(hostUnit))
+    // The guard this function actually exists to add — see the doc
+    // comment above.
+    ..removeAll(declaredInConsumingUnit);
+  if (wantedTypes.isEmpty) return;
+
+  for (final directive in hostUnit.directives.whereType<ImportDirective>()) {
+    if (wantedTypes.isEmpty) break;
+    final uri = directive.uri.stringValue;
+    if (uri == null || uri.startsWith('dart:')) continue;
+    final assetId = _resolveImportToSourceAsset(uri, hostAssetId);
+    if (assetId == null) continue;
+    if (assetId.package != step.inputId.package) continue;
+    if (!assetId.path.endsWith('.dart')) continue;
+    bool exists;
+    try {
+      exists = await step.canRead(assetId);
+    } on Object {
+      continue;
+    }
+    if (!exists) continue;
+    final CompilationUnit imported;
+    try {
+      imported = await step.resolver.compilationUnitFor(assetId);
+    } on Object {
+      continue;
+    }
+    _registerWantedClassesFrom(
+      imported,
+      assetId,
+      directive,
+      step,
+      wantedTypes,
+      classRegistry,
+      classCollectionFields,
+      classFieldTypes,
+      crossClassFieldTypeOriginUris,
+    );
   }
 }
 
@@ -1653,18 +1856,381 @@ String _ensureFlutterSolidartImport(String text, CompilationUnit unit) {
 /// the resolved type isn't an [InterfaceType] (e.g. a dynamic/unresolved
 /// forward) — the caller already has nothing to add in that case, same as
 /// today's syntactic-only behavior.
-void _seedFromResolvedSuperFormal(
+///
+/// Returns whether [param] was resolved at all (an [InterfaceType] was
+/// found), regardless of whether the type text turned out to be a core-SDK
+/// name or already in the registry — the caller (issue #108 fix review
+/// finding 2) uses this to skip [_seedFromSyntacticSuperFormal] entirely
+/// once this resolved path has already answered the question; running the
+/// syntactic import-and-parse walk anyway on a fully-resolved unit is pure
+/// waste.
+bool _seedFromResolvedSuperFormal(
   SuperFormalParameter param,
   Set<String> wantedTypes,
   Map<String, Set<String>> classRegistry,
 ) {
   final type = param.declaredFragment?.element.type;
-  if (type is! InterfaceType) return;
+  if (type is! InterfaceType) return false;
   final typeText = type.element.name;
-  if (typeText == null) return;
-  if (_coreSdkTypeNames.contains(typeText)) return;
-  if (classRegistry.containsKey(typeText)) return;
+  if (typeText == null) return false;
+  if (_coreSdkTypeNames.contains(typeText)) return true;
+  if (classRegistry.containsKey(typeText)) return true;
   wantedTypes.add(typeText);
+  return true;
+}
+
+/// Depth bound for [_seedFromSyntacticSuperFormal]'s chain recursion (issue
+/// #108 fix review addendum finding B): a bare super-formal parameter can
+/// itself forward through another bare super-formal parameter one or more
+/// superclasses further up (`GrandChild(super.x) extends Child(super.x)
+/// extends Base(this.x)`). Five hops is generous for any real inheritance
+/// chain while still bounding the walk — same rationale as any other
+/// bounded search in this file, never expected to bite in practice.
+const int _kMaxSuperFormalChainDepth = 5;
+
+/// Syntactic counterpart to [_seedFromResolvedSuperFormal] for a bare
+/// `super.x` in a file that never reaches a resolved unit — the PURE
+/// CONSUMER shape issue #108 reports: a file with no `@Solid*` annotation
+/// and no provider hint takes the no-annotation fast path's UNRESOLVED
+/// probe, where `param.declaredFragment` is never populated.
+///
+/// Resolves [param]'s type from the AST alone: reads [subclass]'s own
+/// `extends` clause for the superclass's simple name, locates that class's
+/// declaration — checking [unit]'s own top-level declarations first (a
+/// local declaration always shadows a same-name import, mirroring the
+/// shadowing rule [_populateCrossFileTypes] itself applies to `wantedTypes`
+/// — skipped entirely when the `extends` clause is itself import-prefixed,
+/// since a prefixed reference can never resolve to a local declaration)
+/// and otherwise walking [unit]'s imports — alias-aware (issue #108 fix
+/// review finding 3): an unprefixed `extends Base` is skipped past any
+/// `import ... as x;` directive (such an import can never bring an
+/// unprefixed name into scope), and a prefixed `extends x.Base` considers
+/// ONLY the import whose own prefix is `x`; same-package-only (finding 2:
+/// a cross-package file can never host this package's `@SolidState`
+/// classes — critically, this is what keeps `{super.key}` on an ordinary
+/// widget from ever chasing `StatefulWidget`/`State` into
+/// `package:flutter`); and never commits to the first import that merely
+/// LOOKS like it could expose the name — scanning continues past a
+/// resolvable import whose target file doesn't actually declare the class,
+/// exactly like [_populateCrossFileTypes]'s own main walk does for a
+/// same-named decoy.
+///
+/// Then finds the super-constructor [constructor]'s initializer list
+/// targets (`super.named(...)` names a named constructor; no explicit
+/// invocation at all means the implicit call to the unnamed constructor)
+/// and matches [param] against that target's corresponding parameter:
+/// positional by position among [constructor]'s OTHER positional `super.`
+/// siblings (mirrors the language's own rule that only super-formal
+/// parameters, in declaration order, populate the implicit super call —
+/// Dart itself rejects mixing a positional `super.x` with an explicit
+/// positional argument in the same invocation, so this position is never
+/// ambiguous for code that compiles), named by matching name. When the
+/// matched parameter is itself a `this.x` field formal with no type written
+/// at that position either, falls back to the superclass's same-named
+/// instance field's declared type. When the matched parameter is ITSELF a
+/// bare `super.x` (the chain shape from finding B above), this function
+/// recurses one level further up the inheritance chain — rooted at the
+/// located superclass as the new subclass, the matched constructor as the
+/// new constructor, and the matched parameter as the new target — up to
+/// [_kMaxSuperFormalChainDepth] hops; beyond that bound it gives up the
+/// chase and falls back to [_seedAllFromSuperclass] at the last class
+/// reached, same as any other ambiguity below.
+///
+/// On any other ambiguity — the superclass declaration can't be located,
+/// the targeted constructor can't be pinned down, or the matched parameter
+/// resolves to no usable [NamedType] and isn't a further super-formal —
+/// delegates to [_seedAllFromSuperclass], which seeds every candidate name
+/// from the located superclass instead of guessing or skipping silently.
+///
+/// Returns the `(CompilationUnit, AssetId)` of whichever file the located
+/// superclass (at whatever depth the resolution bottomed out on) is
+/// declared in, but ONLY when that file differs from [unit]/[hostAssetId]
+/// — i.e. exactly when the caller needs the one-hop extension
+/// ([_populateCrossFileTypesOneHop]) to find the derived name's own
+/// declaration, because [unit]'s own import walk (the one this function
+/// runs to locate the superclass) never reaches that file directly.
+/// Returns `null` when the superclass couldn't be located at all, or was
+/// found locally in [unit] (no hop needed — [unit]'s own directives are
+/// already covered by the caller's main walk).
+Future<(CompilationUnit, AssetId)?> _seedFromSyntacticSuperFormal(
+  SuperFormalParameter param,
+  ClassDeclaration subclass,
+  ConstructorDeclaration constructor,
+  CompilationUnit unit,
+  AssetId hostAssetId,
+  BuildStep step,
+  Set<String> wantedTypes,
+  Map<String, Set<String>> classRegistry, {
+  int depth = 0,
+}) async {
+  if (depth > _kMaxSuperFormalChainDepth) return null;
+
+  final superclass = subclass.extendsClause?.superclass;
+  final superclassName = superclass?.name.lexeme;
+  if (superclassName == null) return null;
+  final requiredPrefix = superclass?.importPrefix?.name.lexeme;
+
+  ClassDeclaration? superDecl;
+  CompilationUnit? superDeclUnit;
+  AssetId? superDeclAssetId;
+
+  // A prefixed reference (`extends x.Base`) can never resolve to a local,
+  // unprefixed top-level declaration — only the import-walk branch below
+  // can satisfy it.
+  if (requiredPrefix == null) {
+    superDecl = unit.declarations
+        .whereType<ClassDeclaration>()
+        .where((d) => d.name.lexeme == superclassName)
+        .firstOrNull;
+  }
+
+  if (superDecl == null) {
+    for (final directive in unit.directives.whereType<ImportDirective>()) {
+      final uri = directive.uri.stringValue;
+      if (uri == null || uri.startsWith('dart:')) continue;
+      // Alias-aware filtering (finding 3): an unprefixed name can only come
+      // from an unprefixed import; a prefixed name only from the import
+      // carrying that exact prefix. `_importExposesName` alone can't tell
+      // these apart — it only inspects show/hide combinators, never the
+      // `as` clause — so a prefixed decoy import would otherwise pass its
+      // check for an unprefixed name it can never actually expose.
+      final directivePrefix = directive.prefix?.name;
+      if (requiredPrefix == null) {
+        if (directivePrefix != null) continue;
+      } else if (directivePrefix != requiredPrefix) {
+        continue;
+      }
+      if (!_importExposesName(directive, superclassName)) continue;
+      final assetId = _resolveImportToSourceAsset(uri, hostAssetId);
+      if (assetId == null || !assetId.path.endsWith('.dart')) continue;
+      // Same-package guard (finding 2): this package's `@SolidState`
+      // classes can never live in a cross-package file, so cross-package
+      // imports (`package:flutter/...`, any other dependency) are skipped
+      // before the read/parse cost is paid at all.
+      if (assetId.package != step.inputId.package) continue;
+      bool exists;
+      try {
+        exists = await step.canRead(assetId);
+      } on Object {
+        continue;
+      }
+      if (!exists) continue;
+      final CompilationUnit imported;
+      try {
+        imported = await step.resolver.compilationUnitFor(assetId);
+      } on Object {
+        continue;
+      }
+      // Keep scanning past a resolvable import whose target file simply
+      // doesn't declare the class — same "don't commit to the first URI
+      // that merely looks promising" discipline the main registry walk
+      // applies to a same-named-but-unannotated decoy (finding 3).
+      final match = imported.declarations
+          .whereType<ClassDeclaration>()
+          .where((d) => d.name.lexeme == superclassName)
+          .firstOrNull;
+      if (match == null) continue;
+      superDecl = match;
+      superDeclUnit = imported;
+      superDeclAssetId = assetId;
+      break;
+    }
+  }
+  if (superDecl == null) return null;
+
+  // The file hosting whatever candidate this call ultimately seeds from —
+  // the located superclass's own file when it came from an import, else
+  // `null` (found in `unit` itself, no one-hop needed).
+  (CompilationUnit, AssetId)? hopInfo() =>
+      superDeclUnit != null ? (superDeclUnit, superDeclAssetId!) : null;
+
+  // The target super-constructor's name: `null` for the unnamed
+  // constructor, which is also the correct default when [constructor] has
+  // no explicit `super(...)`/`super.named(...)` invocation at all — Dart's
+  // implicit super call always targets the unnamed constructor.
+  String? targetName;
+  var sawSuperInvocation = false;
+  for (final initializer in constructor.initializers) {
+    if (initializer is SuperConstructorInvocation) {
+      sawSuperInvocation = true;
+      targetName = initializer.constructorName?.name;
+    }
+  }
+  final targetCtor = sawSuperInvocation
+      ? superDecl.members
+            .whereType<ConstructorDeclaration>()
+            .where((c) => c.name?.lexeme == targetName)
+            .firstOrNull
+      : superDecl.members
+            .whereType<ConstructorDeclaration>()
+            .where((c) => c.name == null)
+            .firstOrNull;
+  if (targetCtor == null) {
+    _seedAllFromSuperclass(superDecl, wantedTypes, classRegistry);
+    return hopInfo();
+  }
+
+  FormalParameter? matchedParam;
+  if (param.isNamed) {
+    matchedParam = targetCtor.parameters.parameters
+        .where((p) => p.isNamed && p.name?.lexeme == param.name.lexeme)
+        .firstOrNull;
+  } else {
+    final positionalSuperSiblings = constructor.parameters.parameters.where((
+      p,
+    ) {
+      final inner = p is DefaultFormalParameter ? p.parameter : p;
+      return inner is SuperFormalParameter && inner.isPositional;
+    }).toList();
+    final index = positionalSuperSiblings.indexWhere((p) {
+      final inner = p is DefaultFormalParameter ? p.parameter : p;
+      return identical(inner, param);
+    });
+    final targetPositional = targetCtor.parameters.parameters
+        .where((p) => p.isPositional)
+        .toList();
+    if (index >= 0 && index < targetPositional.length) {
+      matchedParam = targetPositional[index];
+    }
+  }
+  if (matchedParam == null) {
+    _seedAllFromSuperclass(superDecl, wantedTypes, classRegistry);
+    return hopInfo();
+  }
+
+  final matchedInner = matchedParam is DefaultFormalParameter
+      ? matchedParam.parameter
+      : matchedParam;
+
+  // Chain case (addendum finding B): the matched parameter is itself a bare
+  // super-formal, forwarding one level further up the inheritance chain
+  // (`GrandChild(super.x) extends Child(super.x) extends Base(this.x)`).
+  // Recurse rooted at the located superclass, bounded by
+  // [_kMaxSuperFormalChainDepth]; beyond the bound, fall back to
+  // over-seeding at the last class actually reached rather than silently
+  // dropping the chain.
+  if (matchedInner is SuperFormalParameter) {
+    if (depth + 1 > _kMaxSuperFormalChainDepth) {
+      _seedAllFromSuperclass(superDecl, wantedTypes, classRegistry);
+      return hopInfo();
+    }
+    return _seedFromSyntacticSuperFormal(
+      matchedInner,
+      superDecl,
+      targetCtor,
+      superDeclUnit ?? unit,
+      superDeclAssetId ?? hostAssetId,
+      step,
+      wantedTypes,
+      classRegistry,
+      depth: depth + 1,
+    );
+  }
+
+  TypeAnnotation? matchedType;
+  if (matchedInner is SimpleFormalParameter) {
+    matchedType = matchedInner.type;
+  } else if (matchedInner is FieldFormalParameter) {
+    matchedType =
+        matchedInner.type ??
+        _fieldTypeInClass(superDecl, matchedInner.name.lexeme);
+  }
+  if (matchedType is! NamedType) {
+    _seedAllFromSuperclass(superDecl, wantedTypes, classRegistry);
+    return hopInfo();
+  }
+  // Generic superclass type-parameter mapping (issue #108 fix review
+  // addendum finding 2): `matchedType`'s name may itself be one of
+  // [superDecl]'s own declared type parameters (`class Base<T> {
+  // Base(this.repo); final T repo; }`) rather than a real class name — a
+  // bare type-parameter reference is a perfectly ordinary [NamedType], so
+  // it passes the `matchedType is! NamedType` ambiguity gate above
+  // undetected, and seeding it verbatim would add the literal placeholder
+  // name (`"T"`) to `wantedTypes`, matching no class anywhere and silently
+  // dropping the real dependency. Map it BY INDEX to the type argument
+  // [subclass] itself supplies in its `extends Base<AuthRepository>`
+  // clause instead, then seed THAT (recursing through
+  // [_seedWantedTypeRecursive] handles further nesting, e.g. `extends
+  // Base<List<AuthRepository>>`). Falls back to [_seedAllFromSuperclass]
+  // — never a bare type-parameter name — when the extends clause supplies
+  // no type arguments at all, or fewer than [superDecl] declares.
+  final matchedTypeName = matchedType.name.lexeme;
+  final declaredTypeParams = superDecl.typeParameters?.typeParameters;
+  final typeParamIndex = declaredTypeParams?.indexWhere(
+    (p) => p.name.lexeme == matchedTypeName,
+  );
+  if (typeParamIndex != null && typeParamIndex != -1) {
+    final typeArgs = superclass?.typeArguments?.arguments;
+    final resolvedArg = typeArgs != null && typeParamIndex < typeArgs.length
+        ? typeArgs[typeParamIndex]
+        : null;
+    if (resolvedArg is NamedType) {
+      _seedWantedTypeRecursive(resolvedArg, wantedTypes, classRegistry);
+    } else {
+      _seedAllFromSuperclass(superDecl, wantedTypes, classRegistry);
+    }
+    return hopInfo();
+  }
+  _seedWantedTypeRecursive(matchedType, wantedTypes, classRegistry);
+  return hopInfo();
+}
+
+/// Ambiguity fallback for [_seedFromSyntacticSuperFormal]: seeds every
+/// candidate type name from [superDecl] — every instance field's declared
+/// type, plus every constructor parameter's declared type across every
+/// constructor — rather than guessing a single (possibly wrong) match or
+/// skipping silently. Mirrors the annotation-blind, over-seeding-is-harmless
+/// contract the rest of [_populateCrossFileTypes]'s seeding already relies
+/// on: a candidate name that matches no `@SolidState`-bearing class is
+/// simply never consumed downstream. Widens the pre-existing same-simple-
+/// name registry-collision surface a little further (§4.9's residual risk
+/// of the name-based registry design): every field/param type name on
+/// [superDecl] enters `wantedTypes`, including names that would otherwise
+/// never have been proposed as candidates for this file at all.
+void _seedAllFromSuperclass(
+  ClassDeclaration superDecl,
+  Set<String> wantedTypes,
+  Map<String, Set<String>> classRegistry,
+) {
+  for (final member in superDecl.members) {
+    if (member is FieldDeclaration) {
+      final type = member.fields.type;
+      if (type is NamedType) {
+        _seedWantedTypeRecursive(type, wantedTypes, classRegistry);
+      }
+    } else if (member is ConstructorDeclaration) {
+      for (final param in member.parameters.parameters) {
+        final inner = param is DefaultFormalParameter ? param.parameter : param;
+        TypeAnnotation? type;
+        if (inner is SimpleFormalParameter) {
+          type = inner.type;
+        } else if (inner is FieldFormalParameter) {
+          type = inner.type;
+        }
+        if (type is NamedType) {
+          _seedWantedTypeRecursive(type, wantedTypes, classRegistry);
+        }
+      }
+    }
+  }
+}
+
+/// Returns the declared [TypeAnnotation] of [classDecl]'s instance field
+/// named [fieldName], or `null` if no such field exists. Fallback for a
+/// `this.x` field-formal constructor parameter written with no type of its
+/// own — the common shape (`Foo(this.x); final AuthRepository x;`), where
+/// the type lives on the field declaration, not the parameter.
+TypeAnnotation? _fieldTypeInClass(
+  ClassDeclaration classDecl,
+  String fieldName,
+) {
+  for (final member in classDecl.members) {
+    if (member is! FieldDeclaration) continue;
+    for (final variable in member.fields.variables) {
+      if (variable.name.lexeme == fieldName) return member.fields.type;
+    }
+  }
+  return null;
 }
 
 /// Translates a `source/<rel>` AssetId to its `lib/<rel>` sibling. The

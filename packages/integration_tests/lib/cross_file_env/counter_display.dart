@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
-import 'package:integration_tests/cross_file_env/counter_controller.dart';
 import 'package:provider/provider.dart';
+import 'counter_controller.dart';
 
 class CounterDisplay extends StatefulWidget {
   const CounterDisplay({super.key});

@@ -155,6 +155,11 @@ const List<String> goldenNames = <String>[
   'cross_file_pure_consumer_widget',
   'cross_file_pure_consumer_widget_and_static',
   'cross_file_pure_consumer_widget_show_restricted_import',
+  'cross_file_super_param_bare_pure_consumer',
+  'cross_file_super_param_bare_no_state',
+  'cross_file_super_param_bare_chain',
+  'cross_file_super_param_one_hop_local_shadow',
+  'cross_file_super_param_generic_base',
 ];
 
 /// Memoized golden directory resolution. Resolved relative to the package
