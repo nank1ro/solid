@@ -1,6 +1,6 @@
 ## 3.0.0-dev.2
 
-- **DOCS**: Update `WidgetEnvironment.environment()` doc comment — `solid_generator` now only auto-injects `dispose:` when the created type is recognized as needing it (has a provable `dispose()`, or is `@Solid*`-annotated — same-file or cross-file); omitting `dispose:` on a type provably without one injects nothing instead of a call that previously failed source-layer typechecking with a compile-time `undefined_method` error on `.dispose()`.
+- **DOCS**: Update `WidgetEnvironment.environment()` doc comment for `solid_generator`'s type-aware `dispose:` auto-injection.
 
 ## 3.0.0-dev.1
 
