@@ -23,6 +23,13 @@ class SourceEdit {
   final String replacement;
 }
 
+/// Return type of [rewriteBuildMethod]: the rewritten build-method text
+/// (`text`) plus whether a `SignalBuilder` wrap was actually placed
+/// (`emittedWrap`). See [rewriteBuildMethod]'s doc comment for why callers
+/// should use `emittedWrap` instead of scanning `text` for the substring
+/// `SignalBuilder(`.
+typedef BuildMethodRewrite = ({String text, bool emittedWrap});
+
 /// Rewrites the `build()` method source text by applying reactive-read rules.
 ///
 /// The rewrite comprises four passes composed in the order they are visible
@@ -81,10 +88,17 @@ class SourceEdit {
 /// collection-signal slice: `<envField>.<collectionField>` shapes skip
 /// `.value` and resolve through the mixin on the receiver chain directly.
 ///
-/// [source] is the full source text of the input file. The returned string
-/// is the rewritten build method (from `@override` through the closing `}`),
-/// ready for the caller to embed into the emitted `State` class.
-String rewriteBuildMethod(
+/// [source] is the full source text of the input file. The returned
+/// record's `text` is the rewritten build method (from `@override` through
+/// the closing `}`), ready for the caller to embed into the emitted `State`
+/// class. Its `emittedWrap` is true iff this call placed at least one
+/// `SignalBuilder` wrap (an outermost wrap node, or the unanchored-reads
+/// fallback) — callers use this to decide whether `flutter_solidart` needs
+/// importing without re-deriving the same fact by scanning the returned
+/// text for the substring `SignalBuilder(`, which can misfire on a
+/// preserved source comment or string literal that happens to contain that
+/// text.
+BuildMethodRewrite rewriteBuildMethod(
   MethodDeclaration buildMethod,
   Set<String> reactiveFields,
   String source, {
@@ -216,7 +230,7 @@ String rewriteBuildMethod(
       methodStart: methodStart,
     );
   }
-  return result;
+  return (text: result, emittedWrap: wrapNodes.isNotEmpty || hasUnanchored);
 }
 
 /// Wraps the build method's body in an outer `SignalBuilder` when one or

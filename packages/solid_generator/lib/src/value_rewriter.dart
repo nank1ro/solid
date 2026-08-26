@@ -826,18 +826,87 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
   /// and the `this.<field>` branch (tier 4) of [_resolveReceiverTypeName].
   /// Walks [anchor]'s enclosing [ClassDeclaration] for a matching non-static
   /// [FieldDeclaration] named [name] and returns the declared [NamedType]'s
-  /// lexeme. Returns `null` for `var`/inferred-typed fields, static fields,
-  /// and when no field on the enclosing class matches [name].
+  /// lexeme. Returns `null` when no field on the enclosing class matches
+  /// [name] at all.
+  ///
+  /// When a matching field IS found but is declared with no type annotation
+  /// (`final _service;` — infers `dynamic` under Dart's own rules, which
+  /// does NOT consult a same-named constructor parameter's explicit type),
+  /// falls back to [_resolveFieldTypeFromConstructorParams] (issue #106
+  /// residual gap survey, GAP 4) rather than returning `null` outright.
   String? _resolveInstanceFieldTypeNameByName(String name, AstNode anchor) {
     final classDecl = anchor.thisOrAncestorOfType<ClassDeclaration>();
     if (classDecl == null) return null;
+    var untypedFieldFound = false;
     for (final member in classDecl.members) {
       if (member is! FieldDeclaration) continue;
       if (member.isStatic) continue;
-      final type = member.fields.type;
-      if (type is! NamedType) continue;
       for (final variable in member.fields.variables) {
-        if (variable.name.lexeme == name) return type.name.lexeme;
+        if (variable.name.lexeme != name) continue;
+        final type = member.fields.type;
+        if (type is NamedType) return type.name.lexeme;
+        untypedFieldFound = true;
+      }
+    }
+    if (!untypedFieldFound) return null;
+    return _resolveFieldTypeFromConstructorParams(classDecl, name);
+  }
+
+  /// Fallback for an untyped instance field (`final _service;` — infers
+  /// `dynamic`): recovers the real type from a constructor that initializes
+  /// it, covering two simple, unambiguous shapes:
+  ///
+  ///  1. A field-formal parameter with an explicit type
+  ///     (`Foo(AuthService this._service)`).
+  ///  2. A plain typed parameter assigned to the field in the same
+  ///     constructor's initializer list, via a bare-identifier RHS
+  ///     (`Foo(AuthService service) : _service = service;`).
+  ///
+  /// Scans every constructor. If two constructors supply DIFFERENT types for
+  /// [fieldName], the result is ambiguous and this bails to `null`
+  /// (unresolved) rather than guess — the same "unknown wins over wrong
+  /// guess" posture the rest of this file's resolution tiers take.
+  String? _resolveFieldTypeFromConstructorParams(
+    ClassDeclaration classDecl,
+    String fieldName,
+  ) {
+    String? found;
+    for (final member in classDecl.members) {
+      if (member is! ConstructorDeclaration) continue;
+      final candidate = _fieldTypeFromConstructor(member, fieldName);
+      if (candidate == null) continue;
+      if (found != null && found != candidate) return null;
+      found = candidate;
+    }
+    return found;
+  }
+
+  /// Returns the type [fieldName] resolves to from [ctor]'s field-formal
+  /// parameter or initializer-list assignment, or `null` if neither shape
+  /// is present. See [_resolveFieldTypeFromConstructorParams] for the two
+  /// shapes covered.
+  String? _fieldTypeFromConstructor(
+    ConstructorDeclaration ctor,
+    String fieldName,
+  ) {
+    for (final param in ctor.parameters.parameters) {
+      final inner = param is DefaultFormalParameter ? param.parameter : param;
+      if (inner is FieldFormalParameter && inner.name.lexeme == fieldName) {
+        final type = inner.type;
+        if (type is NamedType) return type.name.lexeme;
+      }
+    }
+    for (final initializer in ctor.initializers) {
+      if (initializer is! ConstructorFieldInitializer) continue;
+      if (initializer.fieldName.name != fieldName) continue;
+      final expr = initializer.expression;
+      if (expr is! SimpleIdentifier) continue;
+      for (final param in ctor.parameters.parameters) {
+        final inner = param is DefaultFormalParameter ? param.parameter : param;
+        if (inner is SimpleFormalParameter && inner.name?.lexeme == expr.name) {
+          final type = inner.type;
+          if (type is NamedType) return type.name.lexeme;
+        }
       }
     }
     return null;

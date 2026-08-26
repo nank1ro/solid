@@ -1,23 +1,17 @@
 import 'package:flutter_solidart/flutter_solidart.dart';
 import 'package:solid_annotations/solid_annotations.dart';
 import 'auth_repository.dart';
+import 'base_repository.dart';
 
-class Manager implements Disposable {
-  Manager(this.repos);
-
-  final List<AuthRepository> repos;
+class CustomersRepository extends BaseRepository implements Disposable {
+  CustomersRepository(super.authRepository);
 
   final loadCount = Signal<int>(0, name: 'loadCount');
 
-  bool anyHasSession() {
+  bool hasSession() {
     loadCount.value = loadCount.value + 1;
-    for (final repo in repos) {
-      if (repo.session.value != null) return true;
-    }
-    return false;
+    return authRepository.session.value != null;
   }
-
-  bool firstHasSession() => repos.first.session.value != null;
 
   @override
   void dispose() {
