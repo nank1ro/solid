@@ -11,6 +11,7 @@ import 'package:solid_generator/src/annotation_reader.dart';
 import 'package:solid_generator/src/ast_compat.dart';
 import 'package:solid_generator/src/class_kind.dart';
 import 'package:solid_generator/src/const_call_site_rewriter.dart';
+import 'package:solid_generator/src/cross_file_consumer_rewriter.dart';
 import 'package:solid_generator/src/effect_model.dart';
 import 'package:solid_generator/src/empty_dir_pruner.dart';
 import 'package:solid_generator/src/environment_model.dart';
@@ -32,9 +33,13 @@ import 'package:solid_generator/src/transformation_error.dart';
 Builder solidBuilder(BuilderOptions options) => _SolidBuilder();
 
 /// Substring that must appear in any source file carrying a Solid annotation.
-/// A file without this substring cannot possibly need transformation and is
-/// skipped before `parseString` — the hot-path short-circuit for the typical
-/// unannotated file.
+/// A file without this substring cannot need transformation via an
+/// annotation of its own. It does NOT skip `parseString`, though: the file
+/// may still need the `Provider`/`.environment` auto-dispose pass, or (since
+/// #106) the cross-file pure-consumer probe below, either of which needs a
+/// parsed unit to decide. The true zero-parse short-circuit this hint used
+/// to gate no longer exists; see `build()`'s fast-path comment for what is
+/// (and isn't) still cheap for the typical unannotated file.
 ///
 /// `solid_annotations` (the package name) is the chosen hint because every
 /// file that uses any `@Solid*` annotation must import this package — both
@@ -128,25 +133,86 @@ class _SolidBuilder implements Builder {
       buildStep.inputId.path,
     );
 
-    // Files without any @Solid* annotation pass through verbatim — UNLESS they
-    // contain a `Provider(...)` or `.environment<T>()` call site, which the
-    // auto-dispose pass must visit. A `source.contains` check is a cheap
-    // pre-parse guard — if neither marker is present the file cannot need
-    // transformation.
+    // Files without any @Solid* annotation pass through verbatim — UNLESS
+    // they contain a `Provider(...)` or `.environment<T>()` call site (the
+    // auto-dispose pass must visit those), OR they are a PURE CONSUMER — a
+    // file that holds a cross-file `@SolidState`-bearing class through plain
+    // constructor injection / an instance field, with no `@Solid*`
+    // annotation and no provider call site of its own (issue #106). A
+    // `source.contains` check is a cheap pre-parse guard for the first two
+    // conditions; the third needs the cheap SYNTACTIC (unresolved) parse and
+    // the #105 cross-file registry seeding below to decide.
     final hasSolidAnnotation = source.contains(_solidAnnotationHint);
     final hasProviderHint =
         source.contains(_providerCallHint) ||
         source.contains(_environmentCallHint);
-    if (!hasSolidAnnotation && !hasProviderHint) {
-      await buildStep.writeAsString(outputId, source);
-      return;
-    }
 
     final parsed = parseString(
       content: source,
       featureSet: FeatureSet.latestLanguageVersion(),
       throwIfDiagnostics: false,
     );
+
+    // Populated only when the fast-path probe below actually runs AND finds
+    // something — i.e. only on the `!hasSolidAnnotation && !hasProviderHint`
+    // path, and only past the early return. When non-null, these are the
+    // FULLY POPULATED results of a cross-file import walk this function
+    // already paid for; the pipeline below (`_populateCrossFileTypes` at its
+    // second call site) reuses them instead of walking the same imports
+    // again — see the merge just before that call.
+    Map<String, Set<String>>? probedCrossFileRegistry;
+    Map<String, Set<String>>? probedCrossFileCollections;
+    Map<String, Map<String, String>>? probedCrossFileFieldTypes;
+    Map<String, Set<String>>? probedCrossFileOriginUris;
+
+    if (!hasSolidAnnotation && !hasProviderHint) {
+      // Cheap syntactic pre-check (#106): seed candidate cross-file wanted
+      // types from this file's instance fields / constructor params — the
+      // same rule `_populateCrossFileTypes` applies below for annotated
+      // files — against the UNRESOLVED parsed unit. No
+      // `buildStep.resolver.libraryFor` semantic resolution runs here; that
+      // is the expensive step this fast path exists to avoid.
+      //
+      // Honest cost accounting (this fast path's guarantee is NARROWER than
+      // it used to be — see [_solidAnnotationHint]'s doc comment): `parsed`
+      // above is now computed for EVERY hint-free file, annotated or not —
+      // this branch could not exist without a parsed unit to probe. What
+      // remains zero-cost is `_populateCrossFileTypes` itself: it exits
+      // before touching any import once its wanted-type set is empty, so a
+      // file with no custom-typed fields/params at all (only core-SDK /
+      // self-declared types, per `_coreSdkTypeNames`) pays only the parse
+      // plus this one field/param scan — no import walk, no resolver call.
+      // A file whose field/param DOES name an externally-declared type pays
+      // a BOUNDED import walk below — bounded by this file's own import
+      // count, not by anything global — and that walk does NOT stop early
+      // just because one import's same-named class turns out non-reactive:
+      // `wantedTypes` only drops a name once a `@SolidState`-bearing match
+      // is found (see the `cross_file_constructor_injected_no_state`
+      // shape), so a non-reactive same-named class in an early import does
+      // not short-circuit the scan of later imports for that name.
+      final probeRegistry = <String, Set<String>>{};
+      final probeCollections = <String, Set<String>>{};
+      final probeFieldTypes = <String, Map<String, String>>{};
+      final probeOriginUris = <String, Set<String>>{};
+      await _populateCrossFileTypes(
+        parsed.unit,
+        buildStep,
+        probeRegistry,
+        probeCollections,
+        probeFieldTypes,
+        probeOriginUris,
+        const {},
+      );
+      if (probeRegistry.isEmpty) {
+        await buildStep.writeAsString(outputId, source);
+        return;
+      }
+      probedCrossFileRegistry = probeRegistry;
+      probedCrossFileCollections = probeCollections;
+      probedCrossFileFieldTypes = probeFieldTypes;
+      probedCrossFileOriginUris = probeOriginUris;
+    }
+
     for (final diagnostic in parsed.errors) {
       log.warning(
         '${buildStep.inputId}: ${diagnostic.message} '
@@ -229,15 +295,34 @@ class _SolidBuilder implements Builder {
     // branch below relies on that entry to recognize the type as
     // Solid-lowered) — same contract as the same-file pass, but for types
     // declared in other source files.
-    await _populateCrossFileTypes(
-      unit,
-      buildStep,
-      sameFileRegistry,
-      sameFileCollections,
-      sameFileFieldTypes,
-      crossClassFieldTypeOriginUris,
-      hasProviderHint ? collectProviderCreatedTypeNames(unit) : const {},
-    );
+    //
+    // Skipped when the fast-path probe above already ran this exact walk
+    // (only possible when `!hasSolidAnnotation && !hasProviderHint`, in
+    // which case `extraWantedTypes` below is `const {}` either way, and
+    // `sameFileRegistry`/etc are still empty from the same-file prescan
+    // above — `hasSolidAnnotation` being false rules out any same-file
+    // `@SolidState` class). `_populateCrossFileTypes` never reads
+    // `Expression.staticType` — it is a purely syntactic AST + import scan —
+    // so re-running it against the resolved [unit] here would produce
+    // byte-identical results to the probe's run against the unresolved
+    // `parsed.unit`; merging the probe's output is exactly equivalent to
+    // (and cheaper than) calling it again.
+    if (probedCrossFileRegistry != null) {
+      sameFileRegistry.addAll(probedCrossFileRegistry);
+      sameFileCollections.addAll(probedCrossFileCollections!);
+      sameFileFieldTypes.addAll(probedCrossFileFieldTypes!);
+      crossClassFieldTypeOriginUris.addAll(probedCrossFileOriginUris!);
+    } else {
+      await _populateCrossFileTypes(
+        unit,
+        buildStep,
+        sameFileRegistry,
+        sameFileCollections,
+        sameFileFieldTypes,
+        crossClassFieldTypeOriginUris,
+        hasProviderHint ? collectProviderCreatedTypeNames(unit) : const {},
+      );
+    }
 
     final annotatedClasses = _collectAnnotatedClasses(
       unit,
@@ -246,23 +331,64 @@ class _SolidBuilder implements Builder {
       sameFileCollections,
     );
     if (annotatedClasses.every((c) => c.hasNoAnnotations)) {
-      // No reactive annotations resolved. The file may still contain a
-      // `Provider(...)` or `.environment<T>()` call site that the auto-dispose
-      // pass must visit; otherwise pass through verbatim.
+      // No reactive annotations resolved. The file may still need:
+      //  (a) `.value` lowering on a PURE CONSUMER plain class — one that
+      //      reaches a cross-file `@SolidState`-bearing class only through
+      //      constructor injection / an instance field, with no `@Solid*`
+      //      annotation of its own (issue #106; `sameFileRegistry` can be
+      //      non-empty here purely from the cross-file seeding above, even
+      //      though this file owns zero reactive members), and/or
+      //  (b) dispose-call-site injection at a `Provider(...)` /
+      //      `.environment<T>()` call site (pre-existing).
+      // Neither path restructures the class: no `implements Disposable`, no
+      // synthesized `dispose()` — those only belong to a class that OWNS at
+      // least one reactive member (handled by `_renderOutput` below, for
+      // files where SOME class does).
+      //
+      // ORDER MATTERS, and (a) must run first, against the pristine [source]
+      // with the still-valid [unit]. `lowerPureConsumerCrossFileReads`
+      // delegates to `value_rewriter.dart`'s receiver resolution, whose tier
+      // 1 (`Expression.staticType`) is the ONLY tier that can type a for-in
+      // LOOP VARIABLE (`for (final r in repos) { r.field }`) or any other
+      // receiver shape that isn't a bare parameter/field name — losing the
+      // resolved [unit] silently degrades such a read to "no rewrite", not a
+      // loud failure. `addProviderDisposeAtCallSites`, by contrast, is
+      // explicitly designed to tolerate an unresolved re-parse: its
+      // `_createdTypeHasDispose` four-tier rule falls back to same-file AST
+      // tiers (2/3) or the inject-by-default tier 4 whenever `.staticType`
+      // isn't populated — exactly what happens on the main annotated path in
+      // `_renderOutput`, which invokes this same function on `combined`, a
+      // freshly re-assembled text string with no `unit` argument at all.
+      // Running dispose-injection first (the previous order) would silently
+      // cost the lowering pass its only source of loop-variable / other
+      // non-parameter-non-field receiver resolution whenever the dispose
+      // pass actually edited the text — reproduced by the
+      // `cross_file_pure_consumer_with_provider` golden fixture.
+      var current = lowerPureConsumerCrossFileReads(
+        source,
+        unit: unit,
+        classRegistry: sameFileRegistry,
+        classCollectionFields: sameFileCollections,
+      );
       if (hasProviderHint) {
-        final withDispose = addProviderDisposeAtCallSites(
-          source,
-          unit: unit,
+        // Reuses `unit` only when the lowering pass above made no change
+        // (its edits, if any, shift offsets out from under `unit`) — the
+        // same reparse-per-pass convention `_renderOutput` already uses for
+        // its own multi-pass pipeline (`addProviderDisposeAtCallSites` →
+        // `addConstAtCallSites`, each re-parsing the previous pass's text).
+        // Safe per the ordering rationale above: this pass degrades
+        // gracefully on an unresolved re-parse.
+        current = addProviderDisposeAtCallSites(
+          current,
+          unit: identical(current, source) ? unit : null,
           classRegistry: sameFileRegistry,
         );
-        if (identical(withDispose, source)) {
-          await buildStep.writeAsString(outputId, source);
-          return;
-        }
-        await buildStep.writeAsString(outputId, _formatter.format(withDispose));
+      }
+      if (identical(current, source)) {
+        await buildStep.writeAsString(outputId, source);
         return;
       }
-      await buildStep.writeAsString(outputId, source);
+      await buildStep.writeAsString(outputId, _formatter.format(current));
       return;
     }
 
