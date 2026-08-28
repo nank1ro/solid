@@ -201,6 +201,27 @@ extension RefreshFuture<T> on Future<T> Function() {
   Future<T>? get previousState {
     throw Exception(_stubMessage);
   }
+
+  /// Source-time stub for `<query>.previousReady` on a Future-form query. After
+  /// lowering, `<query>` is a `Resource<T>` and this resolves to
+  /// `Resource.previousReady` — the most recent `ResourceReady<T>?` the
+  /// resource held, retained across ANY number of intervening failures/refreshes
+  /// (unlike [previousState], the single prior state). Read as
+  /// `<query>.previousReady?.value` to keep a UI populated across even repeated
+  /// failures: `<query>().asReady?.value ?? <query>.previousReady?.value`.
+  // ignore: library_private_types_in_public_api
+  _AsReadyResult<T>? get previousReady {
+    throw Exception(_stubMessage);
+  }
+
+  /// Source-time stub for `<query>.previousError` on a Future-form query — the
+  /// most recent `ResourceError<T>?` the resource held (the counterpart of
+  /// [previousReady]). Read as `<query>.previousError?.error` /
+  /// `<query>.previousError?.stackTrace`.
+  // ignore: library_private_types_in_public_api
+  _AsErrorResult<T>? get previousError {
+    throw Exception(_stubMessage);
+  }
 }
 
 /// Stub `.refresh()` on a `Stream<T> Function()` tear-off. Same shape as
@@ -214,6 +235,20 @@ extension RefreshStream<T> on Stream<T> Function() {
   /// Source-time stub for `<query>.previousState` on a Stream-form query. See
   /// [RefreshFuture.previousState].
   Stream<T>? get previousState {
+    throw Exception(_stubMessage);
+  }
+
+  /// Source-time stub for `<query>.previousReady` on a Stream-form query. See
+  /// [RefreshFuture.previousReady].
+  // ignore: library_private_types_in_public_api
+  _AsReadyResult<T>? get previousReady {
+    throw Exception(_stubMessage);
+  }
+
+  /// Source-time stub for `<query>.previousError` on a Stream-form query. See
+  /// [RefreshFuture.previousError].
+  // ignore: library_private_types_in_public_api
+  _AsErrorResult<T>? get previousError {
     throw Exception(_stubMessage);
   }
 }
