@@ -1,3 +1,7 @@
+## 3.0.0-dev.3
+
+- **FEAT**: Add a `previousState` source-time stub on the `@SolidQuery` tear-off (`<query>.previousState`), mirroring `Resource.previousState` — the `ResourceState<T>?` immediately before the current one. With the default `useRefreshing: true` this retains the last `ready` value across a failed refresh (a `ResourceError` otherwise drops it); with `useRefreshing: false` a refresh re-enters `loading` immediately, so `previousState` is loading during that window, not the last ready value. Reads as `<query>.previousState?.asReady?.value` and typechecks identically source- and lib-side via the existing `FutureWhen`/`StreamWhen` state accessors.
+
 ## 3.0.0-dev.2
 
 - **DOCS**: Update `WidgetEnvironment.environment()` doc comment for `solid_generator`'s type-aware `dispose:` auto-injection.
