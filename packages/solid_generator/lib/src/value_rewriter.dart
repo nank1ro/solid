@@ -172,6 +172,26 @@ bool _isOnPrefixedCallbackName(String name) {
 /// Empty (the default) for every caller that has no
 /// origin data to offer, which degrades this exactly to the pre-#110
 /// name-only behavior.
+///
+/// [classQueryNames] is the cross-class `@SolidQuery` name map (class name →
+/// `@SolidQuery` method names) — the query counterpart of [classRegistry].
+/// A zero-arg cross-instance `<receiver>.<queryName>()` call whose
+/// receiver's resolved declared type names a class in this map is a tracked
+/// read (offset recorded, same as a same-class query call) but receives NO
+/// source edit: the call already lowers to `Resource.call() => state` and
+/// every trailing `.isLoading`/`.asReady`/`.asError` chain resolves through
+/// upstream `flutter_solidart` extensions unchanged. Empty (the default)
+/// for every caller that has not opted into cross-class query recognition —
+/// currently only build-method callers.
+///
+/// [classQueryNamesOrigins] and [classQueryNamesShadowedNames] are the query
+/// counterparts of [classRegistryOrigins] / [classRegistryShadowedNames]
+/// (issue #110) — a name `builder.dart` could not resolve unambiguously by
+/// simple name alone (two-plus distinct cross-file query-bearing classes
+/// sharing the name, or a cross-file class whose name is ALSO declared
+/// locally) routes through [classQueryNamesOrigins] with a mandatory tier-1
+/// library-URI match instead of the flat [classQueryNames] — see
+/// [_ValueRewriteVisitor._queryNamesForCrossClassName].
 ValueRewriteResult collectValueEdits(
   AstNode node,
   Set<String> reactiveFields,
@@ -186,6 +206,9 @@ ValueRewriteResult collectValueEdits(
   Map<String, Map<String, Set<String>>> classRegistryOrigins = const {},
   Map<String, Map<String, Set<String>>> classCollectionFieldsOrigins = const {},
   Set<String> classRegistryShadowedNames = const {},
+  Map<String, Set<String>> classQueryNames = const {},
+  Map<String, Map<String, Set<String>>> classQueryNamesOrigins = const {},
+  Set<String> classQueryNamesShadowedNames = const {},
 }) {
   final visitor = _ValueRewriteVisitor(
     reactiveFields,
@@ -199,6 +222,9 @@ ValueRewriteResult collectValueEdits(
     classRegistryOrigins,
     classCollectionFieldsOrigins,
     classRegistryShadowedNames,
+    classQueryNames,
+    classQueryNamesOrigins,
+    classQueryNamesShadowedNames,
   );
   node.accept(visitor);
   return ValueRewriteResult(
@@ -365,6 +391,9 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
     this._classRegistryOrigins,
     this._classCollectionFieldsOrigins,
     this._classRegistryShadowedNames,
+    this._classQueryNames,
+    this._classQueryNamesOrigins,
+    this._classQueryNamesShadowedNames,
   );
 
   final Set<String> _reactiveFields;
@@ -445,6 +474,25 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
   /// through [_classRegistryOrigins] / [_classCollectionFieldsOrigins] with
   /// a mandatory tier-1 library-URI match instead of the flat maps.
   final Set<String> _classRegistryShadowedNames;
+
+  /// Cross-class `@SolidQuery` name map (class name → `@SolidQuery` method
+  /// names) — the query counterpart of [_classRegistry]. Drives
+  /// [_isCrossClassQueryCall]; empty map → the cross-instance query branch
+  /// no-ops.
+  final Map<String, Set<String>> _classQueryNames;
+
+  /// Per-name origin-qualified counterpart of [_classQueryNames] (issue
+  /// #110) — `name -> originUri -> query method names` — populated by
+  /// `builder.dart` ONLY for a name it flagged in
+  /// [_classQueryNamesShadowedNames]. Mirrors [_classRegistryOrigins].
+  final Map<String, Map<String, Set<String>>> _classQueryNamesOrigins;
+
+  /// Names `builder.dart` could not resolve unambiguously by simple name
+  /// alone for [_classQueryNames] (issue #110) — mirrors
+  /// [_classRegistryShadowedNames]. [_queryNamesForCrossClassName] routes
+  /// these names through [_classQueryNamesOrigins] with a mandatory tier-1
+  /// library-URI match instead of the flat [_classQueryNames].
+  final Set<String> _classQueryNamesShadowedNames;
 
   final List<ValueEdit> edits = [];
 
@@ -551,8 +599,60 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
       // resolves to upstream extensions.
       _recordTrackedRead(node.offset, node.methodName.name);
       _recordTrackedQueryName(node.methodName.name);
+    } else if (_untrackedDepth == 0 && _isCrossClassQueryCall(node)) {
+      // Cross-instance `<receiver>.<queryName>()` — the query counterpart of
+      // [_maybeRewriteCrossClass]'s `<receiver>.<reactiveField>` shape. NO
+      // source edit: the call is byte-identical because it lowers to
+      // `Resource<T>.call() -> ResourceState<T>` and the trailing
+      // `.isLoading`/`.asReady`/`.asError` chain resolves through upstream
+      // `flutter_solidart` extensions unchanged. Only the offset is recorded
+      // so SignalBuilder placement wraps the enclosing widget subtree.
+      _recordTrackedRead(node.offset, node.methodName.name);
     }
     super.visitMethodInvocation(node);
+  }
+
+  /// True if [node] is a cross-instance `<receiver>.<queryName>()` call: a
+  /// zero-arg `MethodInvocation` with a target (never bare — that shape is
+  /// [_isQueryShape]'s same-class branch above), not shadowed when the
+  /// target is a bare identifier, whose receiver's declared type — resolved
+  /// the same way [_maybeRewriteCrossClass] resolves a `<receiver>.<field>`
+  /// prefix — names a class in [_queryNamesForCrossClassName] whose set
+  /// contains the called method's name.
+  bool _isCrossClassQueryCall(MethodInvocation node) {
+    final target = node.target;
+    if (target == null) return false;
+    if (node.argumentList.arguments.isNotEmpty) return false;
+    if (target is SimpleIdentifier && _isShadowed(target.name)) return false;
+    final receiverType = _resolveReceiverType(target);
+    final declaredTypeName =
+        receiverType?.name ??
+        (target is SimpleIdentifier ? _environmentFields[target.name] : null);
+    if (declaredTypeName == null) return false;
+    final queryNamesOfType = _queryNamesForCrossClassName(
+      declaredTypeName,
+      receiverType?.libraryUri,
+    );
+    return queryNamesOfType?.contains(node.methodName.name) ?? false;
+  }
+
+  /// Query-name resolver for [declaredTypeName] — the query counterpart of
+  /// [_fieldsForCrossClassName]. Same safety invariant (issue #110): a name
+  /// NOT in [_classQueryNamesShadowedNames] is served straight from the flat
+  /// [_classQueryNames]; a FLAGGED name only resolves when [libraryUri] is
+  /// non-null (tier 1 — a real resolved `staticType`) AND matches one of the
+  /// origins [_classQueryNamesOrigins] recorded for [declaredTypeName]. See
+  /// [_fieldsForCrossClassName]'s doc comment for the full invariant this
+  /// mirrors.
+  Set<String>? _queryNamesForCrossClassName(
+    String declaredTypeName,
+    String? libraryUri,
+  ) {
+    if (!_classQueryNamesShadowedNames.contains(declaredTypeName)) {
+      return _classQueryNames[declaredTypeName];
+    }
+    if (libraryUri == null) return null;
+    return _classQueryNamesOrigins[declaredTypeName]?[libraryUri];
   }
 
   /// True if [node] is a zero-arg `MethodInvocation` with a bare

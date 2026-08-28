@@ -60,6 +60,9 @@ PureConsumerLowering lowerPureConsumers(
   Map<String, Map<String, Set<String>>> classRegistryOrigins = const {},
   Map<String, Map<String, Set<String>>> classCollectionFieldsOrigins = const {},
   Set<String> classRegistryShadowedNames = const {},
+  Map<String, Set<String>> classQueryNames = const {},
+  Map<String, Map<String, Set<String>>> classQueryNamesOrigins = const {},
+  Set<String> classQueryNamesShadowedNames = const {},
 }) {
   final widgetResult = collectPureConsumerWidgetEdits(
     unit,
@@ -69,6 +72,9 @@ PureConsumerLowering lowerPureConsumers(
     classRegistryOrigins: classRegistryOrigins,
     classCollectionFieldsOrigins: classCollectionFieldsOrigins,
     classRegistryShadowedNames: classRegistryShadowedNames,
+    classQueryNames: classQueryNames,
+    classQueryNamesOrigins: classQueryNamesOrigins,
+    classQueryNamesShadowedNames: classQueryNamesShadowedNames,
   );
   final crossFileEdits = collectPureConsumerCrossFileEdits(
     unit,
@@ -78,6 +84,9 @@ PureConsumerLowering lowerPureConsumers(
     classRegistryOrigins: classRegistryOrigins,
     classCollectionFieldsOrigins: classCollectionFieldsOrigins,
     classRegistryShadowedNames: classRegistryShadowedNames,
+    classQueryNames: classQueryNames,
+    classQueryNamesOrigins: classQueryNamesOrigins,
+    classQueryNamesShadowedNames: classQueryNamesShadowedNames,
   );
   if (widgetResult.edits.isEmpty && crossFileEdits.isEmpty) {
     return (text: text, emittedSignalBuilder: false);
@@ -138,8 +147,14 @@ List<ValueEdit> collectPureConsumerCrossFileEdits(
   Map<String, Map<String, Set<String>>> classRegistryOrigins = const {},
   Map<String, Map<String, Set<String>>> classCollectionFieldsOrigins = const {},
   Set<String> classRegistryShadowedNames = const {},
+  Map<String, Set<String>> classQueryNames = const {},
+  Map<String, Map<String, Set<String>>> classQueryNamesOrigins = const {},
+  Set<String> classQueryNamesShadowedNames = const {},
 }) {
-  if (classRegistry.isEmpty && classRegistryShadowedNames.isEmpty) {
+  if (classRegistry.isEmpty &&
+      classRegistryShadowedNames.isEmpty &&
+      classQueryNames.isEmpty &&
+      classQueryNamesShadowedNames.isEmpty) {
     return const <ValueEdit>[];
   }
   final edits = <ValueEdit>[];
@@ -161,6 +176,9 @@ List<ValueEdit> collectPureConsumerCrossFileEdits(
         classRegistryOrigins: classRegistryOrigins,
         classCollectionFieldsOrigins: classCollectionFieldsOrigins,
         classRegistryShadowedNames: classRegistryShadowedNames,
+        classQueryNames: classQueryNames,
+        classQueryNamesOrigins: classQueryNamesOrigins,
+        classQueryNamesShadowedNames: classQueryNamesShadowedNames,
       );
       edits.addAll(result.edits);
     }
@@ -216,8 +234,14 @@ collectPureConsumerWidgetEdits(
   Map<String, Map<String, Set<String>>> classRegistryOrigins = const {},
   Map<String, Map<String, Set<String>>> classCollectionFieldsOrigins = const {},
   Set<String> classRegistryShadowedNames = const {},
+  Map<String, Set<String>> classQueryNames = const {},
+  Map<String, Map<String, Set<String>>> classQueryNamesOrigins = const {},
+  Set<String> classQueryNamesShadowedNames = const {},
 }) {
-  if (classRegistry.isEmpty && classRegistryShadowedNames.isEmpty) {
+  if (classRegistry.isEmpty &&
+      classRegistryShadowedNames.isEmpty &&
+      classQueryNames.isEmpty &&
+      classQueryNamesShadowedNames.isEmpty) {
     return (edits: const <ValueEdit>[], emittedSignalBuilder: false);
   }
   final edits = <ValueEdit>[];
@@ -240,6 +264,9 @@ collectPureConsumerWidgetEdits(
           classRegistryOrigins: classRegistryOrigins,
           classCollectionFieldsOrigins: classCollectionFieldsOrigins,
           classRegistryShadowedNames: classRegistryShadowedNames,
+          classQueryNames: classQueryNames,
+          classQueryNamesOrigins: classQueryNamesOrigins,
+          classQueryNamesShadowedNames: classQueryNamesShadowedNames,
         );
         if (rewritten.emittedWrap) emittedSignalBuilder = true;
         if (rewritten.text != original) {
@@ -258,6 +285,9 @@ collectPureConsumerWidgetEdits(
           classRegistryOrigins: classRegistryOrigins,
           classCollectionFieldsOrigins: classCollectionFieldsOrigins,
           classRegistryShadowedNames: classRegistryShadowedNames,
+          classQueryNames: classQueryNames,
+          classQueryNamesOrigins: classQueryNamesOrigins,
+          classQueryNamesShadowedNames: classQueryNamesShadowedNames,
         );
         edits.addAll(result.edits);
         continue;
@@ -272,6 +302,9 @@ collectPureConsumerWidgetEdits(
         classRegistryOrigins: classRegistryOrigins,
         classCollectionFieldsOrigins: classCollectionFieldsOrigins,
         classRegistryShadowedNames: classRegistryShadowedNames,
+        classQueryNames: classQueryNames,
+        classQueryNamesOrigins: classQueryNamesOrigins,
+        classQueryNamesShadowedNames: classQueryNamesShadowedNames,
       );
       edits.addAll(result.edits);
     }

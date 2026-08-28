@@ -34,6 +34,9 @@ RewriteResult rewriteStatelessWidget(
   Map<String, Map<String, Set<String>>> classRegistryOrigins = const {},
   Map<String, Map<String, Set<String>>> classCollectionFieldsOrigins = const {},
   Set<String> classRegistryShadowedNames = const {},
+  Map<String, Set<String>> classQueryNames = const {},
+  Map<String, Map<String, Set<String>>> classQueryNamesOrigins = const {},
+  Set<String> classQueryNamesShadowedNames = const {},
 }) {
   final className = classDecl.name.lexeme;
   final stateClassName = '_${className}State';
@@ -116,6 +119,9 @@ RewriteResult rewriteStatelessWidget(
     classRegistryOrigins: classRegistryOrigins,
     classCollectionFieldsOrigins: classCollectionFieldsOrigins,
     classRegistryShadowedNames: classRegistryShadowedNames,
+    classQueryNames: classQueryNames,
+    classQueryNamesOrigins: classQueryNamesOrigins,
+    classQueryNamesShadowedNames: classQueryNamesShadowedNames,
   );
   final buildMethodText = buildRewrite.text;
 

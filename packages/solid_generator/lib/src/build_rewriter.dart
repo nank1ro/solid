@@ -58,6 +58,15 @@ typedef BuildMethodRewrite = ({String text, bool emittedWrap});
 /// as tracked reads for SignalBuilder placement without mutating the call
 /// expression itself.
 ///
+/// [classQueryNames] is the cross-class `@SolidQuery` name map (class name →
+/// `@SolidQuery` method names) — the query counterpart of [classRegistry].
+/// A zero-arg `<receiver>.<queryName>()` call whose receiver's declared type
+/// names a class in this map is recorded as a tracked read the same way,
+/// with no call-site edit. Empty map → no-op for the cross-instance query
+/// branch. [classQueryNamesOrigins] / [classQueryNamesShadowedNames] are its
+/// origin-qualified counterparts (issue #110), mirroring
+/// [classRegistryOrigins] / [classRegistryShadowedNames].
+///
 /// [classRegistry] is the cross-class reactivity map (class name → reactive
 /// field/getter names). Threaded through to the value-rewrite visitor so the
 /// single-level `<param>.<reactiveField>` cross-class rewrite fires. Empty
@@ -111,6 +120,9 @@ BuildMethodRewrite rewriteBuildMethod(
   Map<String, Map<String, Set<String>>> classRegistryOrigins = const {},
   Map<String, Map<String, Set<String>>> classCollectionFieldsOrigins = const {},
   Set<String> classRegistryShadowedNames = const {},
+  Map<String, Set<String>> classQueryNames = const {},
+  Map<String, Map<String, Set<String>>> classQueryNamesOrigins = const {},
+  Set<String> classQueryNamesShadowedNames = const {},
 }) {
   final methodStart = buildMethod.offset;
   final methodEnd = buildMethod.end;
@@ -129,6 +141,9 @@ BuildMethodRewrite rewriteBuildMethod(
     classRegistryOrigins: classRegistryOrigins,
     classCollectionFieldsOrigins: classCollectionFieldsOrigins,
     classRegistryShadowedNames: classRegistryShadowedNames,
+    classQueryNames: classQueryNames,
+    classQueryNamesOrigins: classQueryNamesOrigins,
+    classQueryNamesShadowedNames: classQueryNamesShadowedNames,
   );
   final wrapPlan = computeWrapPlan(
     buildMethod,

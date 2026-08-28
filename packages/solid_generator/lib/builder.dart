@@ -174,6 +174,18 @@ class _SolidBuilder implements Builder {
     Map<String, Map<String, Set<String>>>? probedClassRegistryOrigins;
     Map<String, Map<String, Set<String>>>? probedClassCollectionFieldsOrigins;
     Set<String>? probedClassRegistryShadowedNames;
+    // Cross-class `@SolidQuery` name map (issue: cross-instance query
+    // consumption) — the query counterpart of `probedCrossFileRegistry`.
+    // Populated in lockstep with the maps above; a pure-query ViewModel
+    // (zero `@SolidState` members) contributes ONLY here, never to
+    // `probedCrossFileRegistry`, so the short-circuit below must consult
+    // this map independently.
+    Map<String, Set<String>>? probedCrossFileQueryNames;
+    // Origin-qualified counterparts of `probedCrossFileQueryNames` (issue
+    // #110 parity) — populated in lockstep, same discipline as
+    // `probedClassRegistryOrigins` / `probedClassRegistryShadowedNames`.
+    Map<String, Map<String, Set<String>>>? probedCrossFileQueryNamesOrigins;
+    Set<String>? probedCrossFileQueryNamesShadowedNames;
 
     if (!hasSolidAnnotation && !hasProviderHint) {
       // Cheap syntactic pre-check (#106): seed candidate cross-file wanted
@@ -207,6 +219,9 @@ class _SolidBuilder implements Builder {
       final probeRegistryOrigins = <String, Map<String, Set<String>>>{};
       final probeCollectionFieldsOrigins = <String, Map<String, Set<String>>>{};
       final probeShadowedNames = <String>{};
+      final probeQueryNames = <String, Set<String>>{};
+      final probeQueryNamesOrigins = <String, Map<String, Set<String>>>{};
+      final probeQueryNamesShadowedNames = <String>{};
       await _populateCrossFileTypes(
         parsed.unit,
         buildStep,
@@ -218,6 +233,9 @@ class _SolidBuilder implements Builder {
         probeRegistryOrigins,
         probeCollectionFieldsOrigins,
         probeShadowedNames,
+        probeQueryNames,
+        probeQueryNamesOrigins,
+        probeQueryNamesShadowedNames,
       );
       // A name issue #110's finalize pass flagged as ambiguous (shadowed by
       // a local declaration, or collided across two-plus cross-file
@@ -227,8 +245,15 @@ class _SolidBuilder implements Builder {
       // file's ONLY cross-file find is a shadowed name. Bailing out here on
       // `probeRegistry.isEmpty` alone (its pre-#110 condition) would treat
       // that file as having nothing to lower at all, silently reintroducing
-      // the bug this issue fixes.
-      if (probeRegistry.isEmpty && probeShadowedNames.isEmpty) {
+      // the bug this issue fixes. `probeQueryNames` gets the same treatment,
+      // plus its own shadowed-names set: a pure-query ViewModel consumer (no
+      // `@SolidState` anywhere) — possibly reached only via an ambiguous,
+      // origin-qualified query name — would otherwise be wrongly bailed out
+      // here too.
+      if (probeRegistry.isEmpty &&
+          probeShadowedNames.isEmpty &&
+          probeQueryNames.isEmpty &&
+          probeQueryNamesShadowedNames.isEmpty) {
         await buildStep.writeAsString(outputId, source);
         return;
       }
@@ -239,6 +264,9 @@ class _SolidBuilder implements Builder {
       probedClassRegistryOrigins = probeRegistryOrigins;
       probedClassCollectionFieldsOrigins = probeCollectionFieldsOrigins;
       probedClassRegistryShadowedNames = probeShadowedNames;
+      probedCrossFileQueryNames = probeQueryNames;
+      probedCrossFileQueryNamesOrigins = probeQueryNamesOrigins;
+      probedCrossFileQueryNamesShadowedNames = probeQueryNamesShadowedNames;
     }
 
     for (final diagnostic in parsed.errors) {
@@ -305,6 +333,15 @@ class _SolidBuilder implements Builder {
     final sameFileRegistry = _prescanClassRegistry(unit);
     final sameFileCollections = _prescanClassCollectionFields(unit);
     final sameFileFieldTypes = _prescanClassFieldTypes(unit);
+    // Cross-class `@SolidQuery` name map (class name → `@SolidQuery` method
+    // names) — the query counterpart of `sameFileRegistry`, kept as a
+    // SEPARATE registry (see `_prescanClassQueryNames`'s doc comment).
+    final sameFileQueryNames = _prescanClassQueryNames(unit);
+    // Origin-qualified counterpart of `sameFileQueryNames` (issue #110
+    // parity) plus the shadowed-name set — mirrors `sameFileRegistryOrigins`
+    // / `sameFileShadowedNames` below, but for queries.
+    final sameFileQueryNamesOrigins = <String, Map<String, Set<String>>>{};
+    final sameFileQueryNamesShadowedNames = <String>{};
     // Captures, per cross-class `@SolidState` field type text, the
     // `package:<self>/<lib-relative>` URIs that bring that type into scope
     // on the env-field's class file. Used by [_renderOutput] to inject the
@@ -355,6 +392,11 @@ class _SolidBuilder implements Builder {
         probedClassCollectionFieldsOrigins!,
       );
       sameFileShadowedNames.addAll(probedClassRegistryShadowedNames!);
+      sameFileQueryNames.addAll(probedCrossFileQueryNames!);
+      sameFileQueryNamesOrigins.addAll(probedCrossFileQueryNamesOrigins!);
+      sameFileQueryNamesShadowedNames.addAll(
+        probedCrossFileQueryNamesShadowedNames!,
+      );
     } else {
       await _populateCrossFileTypes(
         unit,
@@ -367,6 +409,9 @@ class _SolidBuilder implements Builder {
         sameFileRegistryOrigins,
         sameFileCollectionFieldsOrigins,
         sameFileShadowedNames,
+        sameFileQueryNames,
+        sameFileQueryNamesOrigins,
+        sameFileQueryNamesShadowedNames,
       );
     }
 
@@ -428,6 +473,9 @@ class _SolidBuilder implements Builder {
         classRegistryOrigins: sameFileRegistryOrigins,
         classCollectionFieldsOrigins: sameFileCollectionFieldsOrigins,
         classRegistryShadowedNames: sameFileShadowedNames,
+        classQueryNames: sameFileQueryNames,
+        classQueryNamesOrigins: sameFileQueryNamesOrigins,
+        classQueryNamesShadowedNames: sameFileQueryNamesShadowedNames,
       );
       var current = lowered.text;
       if (hasProviderHint) {
@@ -475,6 +523,9 @@ class _SolidBuilder implements Builder {
       sameFileRegistryOrigins,
       sameFileCollectionFieldsOrigins,
       sameFileShadowedNames,
+      sameFileQueryNames,
+      sameFileQueryNamesOrigins,
+      sameFileQueryNamesShadowedNames,
     );
     await buildStep.writeAsString(outputId, transformed);
   }
@@ -516,6 +567,30 @@ Map<String, Set<String>> _prescanClassRegistry(CompilationUnit unit) {
         }
       }
     }
+    if (names.isNotEmpty) registry[decl.name.lexeme] = names;
+  }
+  return registry;
+}
+
+/// Pre-scans every `ClassDeclaration` in [unit] and returns the cross-class
+/// `@SolidQuery` name map (class name → `@SolidQuery` method names) — the
+/// query counterpart of [_prescanClassRegistry]. Reuses
+/// [_collectClassQueryNames] (the same per-class scan
+/// `_collectAnnotatedClasses` already runs) so a class's query names are
+/// derived identically whether consulted same-file or cross-file.
+///
+/// Kept as a SEPARATE registry from [_prescanClassRegistry] — never merged
+/// into it — because a query name and a `@SolidState` field name are
+/// consumed differently downstream: `value_rewriter.dart` appends `.value`
+/// to a resolved `classRegistry` field but emits NO edit for a
+/// `classQueryNames` call (see `_ValueRewriteVisitor._isCrossClassQueryCall`).
+/// Mixing the two maps would wrongly append `.value` to a bare
+/// `viewModel.customers` tear-off read.
+Map<String, Set<String>> _prescanClassQueryNames(CompilationUnit unit) {
+  final registry = <String, Set<String>>{};
+  for (final decl in unit.declarations) {
+    if (decl is! ClassDeclaration) continue;
+    final names = _collectClassQueryNames(decl);
     if (names.isNotEmpty) registry[decl.name.lexeme] = names;
   }
   return registry;
@@ -906,6 +981,9 @@ String _renderOutput(
   Map<String, Map<String, Set<String>>> classRegistryOrigins,
   Map<String, Map<String, Set<String>>> classCollectionFieldsOrigins,
   Set<String> classRegistryShadowedNames,
+  Map<String, Set<String>> classQueryNames,
+  Map<String, Map<String, Set<String>>> classQueryNamesOrigins,
+  Set<String> classQueryNamesShadowedNames,
 ) {
   // Walk `unit.declarations` in source order. Class declarations are paired
   // with `annotatedClasses` (which `_collectAnnotatedClasses` populates in
@@ -926,6 +1004,9 @@ String _renderOutput(
           classRegistryOrigins,
           classCollectionFieldsOrigins,
           classRegistryShadowedNames,
+          classQueryNames,
+          classQueryNamesOrigins,
+          classQueryNamesShadowedNames,
         )
       else
         _passthroughResult(decl, source),
@@ -1068,6 +1149,9 @@ RewriteResult _resultForClass(
   Map<String, Map<String, Set<String>>> classRegistryOrigins,
   Map<String, Map<String, Set<String>>> classCollectionFieldsOrigins,
   Set<String> classRegistryShadowedNames,
+  Map<String, Set<String>> classQueryNames,
+  Map<String, Map<String, Set<String>>> classQueryNamesOrigins,
+  Set<String> classQueryNamesShadowedNames,
 ) {
   if (c.hasNoAnnotations) return _passthroughResult(c.decl, source);
   return _rewriteClass(
@@ -1084,6 +1168,9 @@ RewriteResult _resultForClass(
     classRegistryOrigins,
     classCollectionFieldsOrigins,
     classRegistryShadowedNames,
+    classQueryNames,
+    classQueryNamesOrigins,
+    classQueryNamesShadowedNames,
   );
 }
 
@@ -1118,6 +1205,9 @@ RewriteResult _rewriteClass(
   Map<String, Map<String, Set<String>>> classRegistryOrigins,
   Map<String, Map<String, Set<String>>> classCollectionFieldsOrigins,
   Set<String> classRegistryShadowedNames,
+  Map<String, Set<String>> classQueryNames,
+  Map<String, Map<String, Set<String>>> classQueryNamesOrigins,
+  Set<String> classQueryNamesShadowedNames,
 ) {
   final kind = classKindOf(decl);
   final className = decl.name.lexeme;
@@ -1137,6 +1227,9 @@ RewriteResult _rewriteClass(
         classRegistryOrigins: classRegistryOrigins,
         classCollectionFieldsOrigins: classCollectionFieldsOrigins,
         classRegistryShadowedNames: classRegistryShadowedNames,
+        classQueryNames: classQueryNames,
+        classQueryNamesOrigins: classQueryNamesOrigins,
+        classQueryNamesShadowedNames: classQueryNamesShadowedNames,
       );
     case ClassKind.plainClass:
       return rewritePlainClass(
@@ -1169,6 +1262,9 @@ RewriteResult _rewriteClass(
         classRegistryOrigins: classRegistryOrigins,
         classCollectionFieldsOrigins: classCollectionFieldsOrigins,
         classRegistryShadowedNames: classRegistryShadowedNames,
+        classQueryNames: classQueryNames,
+        classQueryNamesOrigins: classQueryNamesOrigins,
+        classQueryNamesShadowedNames: classQueryNamesShadowedNames,
       );
     case ClassKind.statefulWidget:
       throw CodeGenerationError(
@@ -1231,6 +1327,9 @@ Future<void> _populateCrossFileTypes(
   Map<String, Map<String, Set<String>>> classRegistryOrigins,
   Map<String, Map<String, Set<String>>> classCollectionFieldsOrigins,
   Set<String> classRegistryShadowedNames,
+  Map<String, Set<String>> classQueryNames,
+  Map<String, Map<String, Set<String>>> classQueryNamesOrigins,
+  Set<String> classQueryNamesShadowedNames,
 ) async {
   // Walk every `@SolidEnvironment` field declaration in the unit. The
   // builder pre-scan does NOT pre-build env-field models — the readers do
@@ -1392,6 +1491,8 @@ Future<void> _populateCrossFileTypes(
                     crossClassFieldTypeOriginUris,
                     classRegistryOrigins,
                     classCollectionFieldsOrigins,
+                    classQueryNames,
+                    classQueryNamesOrigins,
                   );
                 }
               }
@@ -1447,6 +1548,8 @@ Future<void> _populateCrossFileTypes(
       crossClassFieldTypeOriginUris,
       classRegistryOrigins,
       classCollectionFieldsOrigins,
+      classQueryNames,
+      classQueryNamesOrigins,
     );
   }
 
@@ -1472,6 +1575,18 @@ Future<void> _populateCrossFileTypes(
     classRegistryShadowedNames.add(name);
     classRegistry.remove(name);
     classCollectionFields.remove(name);
+  }
+  // Query counterpart of the finalize pass above — same ambiguity rule,
+  // applied to [classQueryNamesOrigins] / [classQueryNames] instead. A
+  // pure-query class (no `@SolidState` members at all) is registered ONLY
+  // here — [classRegistryOrigins] never sees it — so this loop cannot be
+  // skipped even when the loop above found nothing to strip.
+  for (final name in classQueryNamesOrigins.keys) {
+    final origins = classQueryNamesOrigins[name]!;
+    final isAmbiguous = origins.length > 1 || declaredInUnit.contains(name);
+    if (!isAmbiguous) continue;
+    classQueryNamesShadowedNames.add(name);
+    classQueryNames.remove(name);
   }
 }
 
@@ -1518,6 +1633,14 @@ Future<void> _populateCrossFileTypes(
 /// asset-derived URI form [crossClassFieldTypeOriginUris] already uses),
 /// unconditionally — this is the qualified data the finalize pass and
 /// `value_rewriter.dart`'s tier-1 URI match need for a name it flags.
+///
+/// [classQueryNames] receives every matched class's `@SolidQuery` method
+/// names — UNCONDITIONALLY, not gated on `scalarNames.isNotEmpty` like the
+/// `@SolidState` registration above: a pure-query ViewModel (zero
+/// `@SolidState` members) is exactly as valid a cross-instance query source
+/// as one that also happens to own reactive state. [classQueryNamesOrigins]
+/// is its origin-qualified counterpart (issue #110 parity), populated
+/// unconditionally alongside it exactly like [classRegistryOrigins].
 void _registerWantedClassesFrom(
   CompilationUnit imported,
   AssetId importedAssetId,
@@ -1530,12 +1653,29 @@ void _registerWantedClassesFrom(
   Map<String, Set<String>> crossClassFieldTypeOriginUris,
   Map<String, Map<String, Set<String>>> classRegistryOrigins,
   Map<String, Map<String, Set<String>>> classCollectionFieldsOrigins,
+  Map<String, Set<String>> classQueryNames,
+  Map<String, Map<String, Set<String>>> classQueryNamesOrigins,
 ) {
   for (final decl in imported.declarations) {
     if (decl is! ClassDeclaration) continue;
     final className = decl.name.lexeme;
     if (!wantedTypes.contains(className)) continue;
     if (!_importExposesName(directive, className)) continue;
+    // Computed once per matched class and shared by both the state and
+    // query origin maps below — same asset-derived URI form
+    // [crossClassFieldTypeOriginUris] already uses.
+    final originUri = _sourceToLibAsset(importedAssetId).uri.toString();
+    final queryNamesFound = _collectClassQueryNames(decl);
+    if (queryNamesFound.isNotEmpty) {
+      (classQueryNames[className] ??= <String>{}).addAll(queryNamesFound);
+      // Origin-qualified counterpart (issue #110 parity) — recorded
+      // unconditionally for every match, ambiguous or not; see this
+      // function's doc comment and [_populateCrossFileTypes]'s finalize
+      // pass.
+      (classQueryNamesOrigins[className] ??=
+              <String, Set<String>>{})[originUri] =
+          queryNamesFound;
+    }
     final scalarNames = <String>{};
     final collectionNames = <String>{};
     final fieldTypeTexts = <String, String>{};
@@ -1574,7 +1714,6 @@ void _registerWantedClassesFrom(
       // Origin-qualified counterpart (issue #110) — recorded unconditionally
       // for every match, ambiguous or not; see this function's doc comment
       // and [_populateCrossFileTypes]'s finalize pass.
-      final originUri = _sourceToLibAsset(importedAssetId).uri.toString();
       (classRegistryOrigins[className] ??= <String, Set<String>>{})[originUri] =
           scalarNames;
       if (collectionNames.isNotEmpty) {
@@ -1667,6 +1806,8 @@ Future<void> _populateCrossFileTypesOneHop(
   Map<String, Set<String>> crossClassFieldTypeOriginUris,
   Map<String, Map<String, Set<String>>> classRegistryOrigins,
   Map<String, Map<String, Set<String>>> classCollectionFieldsOrigins,
+  Map<String, Set<String>> classQueryNames,
+  Map<String, Map<String, Set<String>>> classQueryNamesOrigins,
 ) async {
   // Same local-shadowing discipline the main walk once applied to the
   // original file, applied here relative to [hostUnit] itself (distinct
@@ -1715,6 +1856,8 @@ Future<void> _populateCrossFileTypesOneHop(
       crossClassFieldTypeOriginUris,
       classRegistryOrigins,
       classCollectionFieldsOrigins,
+      classQueryNames,
+      classQueryNamesOrigins,
     );
   }
 }
