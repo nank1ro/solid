@@ -1,3 +1,7 @@
+## 3.0.0-dev.6
+
+- **FEAT**: A widget `build()` can read another class's `@SolidQuery` method cross-instance (e.g. `viewModel.customers().isLoading`) and now gets the `SignalBuilder` wrap and `flutter_solidart` import it needs, while the `query()` call sites and the `query.refresh` tear-off stay byte-identical (no `.value` rewrite). Previously only the class declaring a query could consume it, even though cross-instance `@SolidState` reads already worked. The cross-file query-name registry is origin-qualified exactly like the `@SolidState` registry (#110 parity): an ambiguous simple name resolves only on a receiver's resolved-library match, so a same-named non-query method is never spuriously tracked.
+
 ## 3.0.0-dev.5
 
 - **FIX**: Bare `super.x` constructor parameters now seed the cross-file registry: the superclass is located syntactically (alias-aware, same-package imports only), the matched constructor parameter's type is resolved (recursing through super-formal chains, mapping generic type parameters to the extends-clause type arguments), and the registry walk also searches the located superclass file's own imports one hop further (#108).
