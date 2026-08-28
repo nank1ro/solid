@@ -55,6 +55,8 @@ const List<String> goldenNames = <String>[
   'query_when_in_build',
   'query_refresh_in_onpressed',
   'query_previous_state_alone_in_build',
+  'query_previous_ready_alone_in_build',
+  'cross_file_pure_consumer_widget_query_previous_ready',
   'query_on_state_class',
   'query_on_plain_class',
   'query_with_one_signal_dep',

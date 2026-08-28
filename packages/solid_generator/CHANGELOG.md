@@ -1,3 +1,7 @@
+## 3.0.0-dev.8
+
+- **FEAT**: Recognize `<query>.previousReady` and `<query>.previousError` (alongside the existing `previousState`) as tracked reads, so a `build()` reading only a retained-state getter gets the `SignalBuilder` wrap + `flutter_solidart` import. Same-class and cross-instance (origin-qualified). Backs solidart 3.0.0-dev.2's new `Resource.previousReady`/`previousError`.
+
 ## 3.0.0-dev.7
 
 - **FEAT**: A `build()` reading `<query>.previousState` (the `solid_annotations` `previousState` tear-off) now gets a `SignalBuilder` wrap and `flutter_solidart` import even with no `<query>()` call anywhere in the same build — same-class and cross-instance — since `Resource.previousState` is reactive at the signal level. No source edit; the tear-off resolves to `Resource.previousState` unchanged. `<query>.refresh` stays untracked.
