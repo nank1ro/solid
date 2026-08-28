@@ -187,6 +187,20 @@ extension RefreshFuture<T> on Future<T> Function() {
   Future<void> refresh() {
     throw Exception(_stubMessage);
   }
+
+  /// Source-time stub for `<query>.previousState` on a Future-form query. After
+  /// lowering, `<query>` is a `Resource<T>` and this resolves to
+  /// `Resource.previousState` — the `ResourceState<T>?` just before the current
+  /// one. With the default `@SolidQuery(useRefreshing: true)`, this retains the
+  /// last `ready` value across a failed refresh (a `ResourceError` otherwise
+  /// drops it). With `useRefreshing: false`, a refresh re-enters `loading`
+  /// immediately, so `previousState` is `ResourceLoading` during that window —
+  /// NOT the last ready value. The `Future<T>?` return reuses the [FutureWhen]
+  /// state accessors, so `<query>.previousState?.asReady?.value` typechecks
+  /// identically source- and lib-side.
+  Future<T>? get previousState {
+    throw Exception(_stubMessage);
+  }
 }
 
 /// Stub `.refresh()` on a `Stream<T> Function()` tear-off. Same shape as
@@ -194,6 +208,12 @@ extension RefreshFuture<T> on Future<T> Function() {
 extension RefreshStream<T> on Stream<T> Function() {
   /// Source-time stub for `<query>.refresh()` on a Stream-form query.
   Future<void> refresh() {
+    throw Exception(_stubMessage);
+  }
+
+  /// Source-time stub for `<query>.previousState` on a Stream-form query. See
+  /// [RefreshFuture.previousState].
+  Stream<T>? get previousState {
     throw Exception(_stubMessage);
   }
 }

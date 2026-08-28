@@ -314,6 +314,20 @@ const String _untrackedValueGetterName = 'untrackedValue';
 /// tracking context.
 const String _untrackedStateGetterName = 'untrackedState';
 
+/// The `previousState` getter `solid_annotations` exposes on the
+/// `RefreshFuture<T>`/`RefreshStream<T>` query tear-off
+/// (`<query>.previousState`). After lowering this resolves directly to
+/// `Resource.previousState`, which IS reactive at the signal level
+/// (`ReadSignal.previousValue` reports observed) — so a bare
+/// `<query>.previousState` read (same-class) or
+/// `<receiver>.<queryName>.previousState` read (cross-instance) is a
+/// tracked read for `SignalBuilder` placement, mirroring
+/// [_trackedSignalApiGetters]'s `.hasValue` / `.previousValue` treatment of
+/// a `@SolidState` field. Query counterpart of [_untrackedStateGetterName];
+/// must NOT be confused with `<query>.refresh`, which stays untracked (an
+/// action, not a reactive read).
+const String _queryPreviousStateGetterName = 'previousState';
+
 /// `SignalBase<T>` getter names that take a reactive receiver as-is, so a
 /// bare tracked-field access followed by any of them must skip the `.value`
 /// append. A type-driven rewriter would derive this from the resolved
@@ -703,6 +717,13 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
       // [_isUntrackedQueryCall].
       return;
     }
+    // Cross-instance `<receiver>.<queryName>.previousState` — the
+    // PropertyAccess counterpart of [visitPrefixedIdentifier]'s same-class
+    // branch. A tracked read with NO source edit.
+    if (node.propertyName.name == _queryPreviousStateGetterName &&
+        _untrackedDepth == 0) {
+      _maybeRecordCrossClassPreviousState(node);
+    }
     // Multi-level cross-class chain rewrite. `a.b.c.d` parses as
     // PropertyAccess(target=PropertyAccess(target=PrefixedIdentifier(a, b),
     // property=c), property=d); `getController().field` parses as
@@ -776,6 +797,36 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
     }
   }
 
+  /// Cross-instance `<receiver>.<queryName>.previousState` detector — the
+  /// query counterpart of [_isCrossClassQueryCall], but for the
+  /// PropertyAccess tear-off shape (`.previousState`) instead of the
+  /// MethodInvocation call shape (`()`). [node] is the outer `.previousState`
+  /// PropertyAccess; its target must be the `<receiver>.<queryName>`
+  /// PrefixedIdentifier — the only chain shape recognized here, mirroring
+  /// the single-level scope [_maybeRewriteCrossClass] keeps for
+  /// `@SolidState` fields. Records the tracked-read offset with NO source
+  /// edit when the target prefix's resolved declared type names a class
+  /// whose query set (via [_queryNamesForCrossClassName]) contains the
+  /// target identifier's name.
+  void _maybeRecordCrossClassPreviousState(PropertyAccess node) {
+    final target = node.target;
+    if (target is! PrefixedIdentifier) return;
+    if (_isShadowed(target.prefix.name)) return;
+    final receiverType = _resolveReceiverType(target.prefix);
+    final declaredTypeName =
+        receiverType?.name ?? _environmentFields[target.prefix.name];
+    if (declaredTypeName == null) return;
+    final queryNamesOfType = _queryNamesForCrossClassName(
+      declaredTypeName,
+      receiverType?.libraryUri,
+    );
+    if (queryNamesOfType == null ||
+        !queryNamesOfType.contains(target.identifier.name)) {
+      return;
+    }
+    _recordTrackedRead(node.offset, target.identifier.name);
+  }
+
   @override
   void visitPrefixedIdentifier(PrefixedIdentifier node) {
     // Rewrite `<reactiveField>.untracked` to `<field>.untrackedValue` (the
@@ -795,6 +846,17 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
       // Skip super: descending would let visitSimpleIdentifier append `.value`
       // to the prefix, corrupting the replacement just emitted.
       return;
+    }
+    // Same-class `<queryName>.previousState` — a tracked read with NO
+    // source edit (see [_queryPreviousStateGetterName]). Must be an exact
+    // name match against `previousState`, never `refresh` — the tear-off
+    // shape is otherwise identical (`<queryName>.<getterOrMethod>`) and
+    // `refresh` must stay untracked.
+    if (node.identifier.name == _queryPreviousStateGetterName &&
+        _queryNames.contains(node.prefix.name) &&
+        !_isShadowed(node.prefix.name) &&
+        _untrackedDepth == 0) {
+      _recordTrackedRead(node.offset, node.prefix.name);
     }
     // Cross-class single-level slice: if the prefix is a `SimpleIdentifier`
     // resolving to either a method parameter OR a host-class
