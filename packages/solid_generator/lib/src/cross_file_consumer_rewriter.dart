@@ -99,6 +99,110 @@ PureConsumerLowering lowerPureConsumers(
   );
 }
 
+/// Per-class counterpart of [lowerPureConsumers]: lowers ONE pure-consumer
+/// class's slice.
+///
+/// [lowerPureConsumers] only runs when the WHOLE file carries no reactive
+/// annotations. A pure consumer co-located with annotated classes in a MIXED
+/// file (e.g. a presentation `StatelessWidget` that writes another object's
+/// `@SolidState` through a plain constructor field, declared next to the
+/// annotated widget that owns the query) never reaches it, so its cross-class
+/// reads/writes stay un-lowered — a `vm.field = x` write then hits
+/// `assignment_to_final` on the generated `final Signal`. `builder.dart` calls
+/// this per no-annotation class so the same lowering fires there too.
+///
+/// [decl] is the consumer class; [text] is the full source (edit offsets are
+/// absolute, rebased onto the returned slice). Returns the (possibly unchanged)
+/// class slice and whether a `SignalBuilder` wrap was placed on its `build`.
+/// Only [ClassKind.statelessWidget] / [ClassKind.stateClass] (via `build`) and
+/// [ClassKind.plainClass] (via its constructors/methods) are lowered — the same
+/// scope [collectPureConsumerWidgetEdits] / [collectPureConsumerCrossFileEdits]
+/// cover whole-file; any other kind round-trips verbatim.
+({String text, bool emittedSignalBuilder}) lowerPureConsumerClass(
+  ClassDeclaration decl,
+  String text, {
+  required Map<String, Set<String>> classRegistry,
+  required Map<String, Set<String>> classCollectionFields,
+  Map<String, Map<String, Set<String>>> classRegistryOrigins = const {},
+  Map<String, Map<String, Set<String>>> classCollectionFieldsOrigins = const {},
+  Set<String> classRegistryShadowedNames = const {},
+  Map<String, Set<String>> classQueryNames = const {},
+  Map<String, Map<String, Set<String>>> classQueryNamesOrigins = const {},
+  Set<String> classQueryNamesShadowedNames = const {},
+}) {
+  final slice = text.substring(decl.offset, decl.end);
+  // Nothing to resolve receivers against → verbatim (mirrors the collectors'
+  // guard; issue #110 keeps shadowed-name sets in the condition).
+  if (classRegistry.isEmpty &&
+      classRegistryShadowedNames.isEmpty &&
+      classQueryNames.isEmpty &&
+      classQueryNamesShadowedNames.isEmpty) {
+    return (text: slice, emittedSignalBuilder: false);
+  }
+  final kind = classKindOf(decl);
+  final isWidget =
+      kind == ClassKind.statelessWidget || kind == ClassKind.stateClass;
+  if (!isWidget && kind != ClassKind.plainClass) {
+    return (text: slice, emittedSignalBuilder: false);
+  }
+
+  final edits = <ValueEdit>[];
+  var emittedSignalBuilder = false;
+  for (final member in decl.members) {
+    // A widget's `build` needs the `SignalBuilder`-wrap placement (a bare
+    // `.value` read would look fixed while staying non-reactive), so it goes
+    // through [rewriteBuildMethod]; every other member gets the plain
+    // per-identifier `.value` lowering.
+    if (isWidget &&
+        member is MethodDeclaration &&
+        member.name.lexeme == 'build') {
+      final original = text.substring(member.offset, member.end);
+      final rewritten = rewriteBuildMethod(
+        member,
+        const <String>{},
+        text,
+        classRegistry: classRegistry,
+        classCollectionFields: classCollectionFields,
+        classRegistryOrigins: classRegistryOrigins,
+        classCollectionFieldsOrigins: classCollectionFieldsOrigins,
+        classRegistryShadowedNames: classRegistryShadowedNames,
+        classQueryNames: classQueryNames,
+        classQueryNamesOrigins: classQueryNamesOrigins,
+        classQueryNamesShadowedNames: classQueryNamesShadowedNames,
+      );
+      if (rewritten.emittedWrap) emittedSignalBuilder = true;
+      if (rewritten.text != original) {
+        edits.add(ValueEdit(member.offset, member.end, rewritten.text));
+      }
+      continue;
+    }
+    if (member is ConstructorDeclaration) {
+      if (member.factoryKeyword != null) continue;
+    } else if (member is! MethodDeclaration) {
+      continue;
+    }
+    final result = collectValueEdits(
+      member,
+      const <String>{},
+      text,
+      classRegistry: classRegistry,
+      classCollectionFields: classCollectionFields,
+      classRegistryOrigins: classRegistryOrigins,
+      classCollectionFieldsOrigins: classCollectionFieldsOrigins,
+      classRegistryShadowedNames: classRegistryShadowedNames,
+      classQueryNames: classQueryNames,
+      classQueryNamesOrigins: classQueryNamesOrigins,
+      classQueryNamesShadowedNames: classQueryNamesShadowedNames,
+    );
+    edits.addAll(result.edits);
+  }
+  if (edits.isEmpty) return (text: slice, emittedSignalBuilder: false);
+  return (
+    text: applyEditsToRange(slice, edits, decl.offset),
+    emittedSignalBuilder: emittedSignalBuilder,
+  );
+}
+
 /// Collects `.value`-lowering edits for a PURE CONSUMER plain class — one
 /// that reaches a cross-file `@SolidState`-bearing class only through
 /// constructor injection or a plain instance field, while declaring NO
