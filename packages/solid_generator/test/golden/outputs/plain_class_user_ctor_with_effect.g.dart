@@ -5,14 +5,14 @@ class Counter implements Disposable {
   Counter({int init = 0}) {
     value.value = init;
 
-    log;
+    log = Effect(() {
+      print('value: ${value.value}');
+    }, name: 'log');
   }
 
   late final value = Signal<int>.lazy(name: 'value');
 
-  late final log = Effect(() {
-    print('value: ${value.value}');
-  }, name: 'log');
+  late final Effect log;
 
   @override
   void dispose() {

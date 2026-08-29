@@ -11,15 +11,15 @@ class HistoryRecorder extends StatefulWidget {
 class _HistoryRecorderState extends State<HistoryRecorder> {
   final counter = Signal<int>(0, name: 'counter');
   final history = ListSignal<int>([], name: 'history');
-  late final recordHistory = Effect(() {
-    final c = counter.value;
-    untracked(() => history.value = [...history.value, c]);
-  }, name: 'recordHistory');
+  late final Effect recordHistory;
 
   @override
   void initState() {
     super.initState();
-    recordHistory;
+    recordHistory = Effect(() {
+      final c = counter.value;
+      untracked(() => history.value = [...history.value, c]);
+    }, name: 'recordHistory');
   }
 
   @override

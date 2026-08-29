@@ -22,24 +22,24 @@ class _BreadthState extends State<Breadth> {
   );
   late final hasOne = Computed<bool>(() => tags.contains(1), name: 'hasOne');
   late final keys = Computed<Iterable<String>>(() => counts.keys, name: 'keys');
-  late final log = Effect(() {
-    print(
-      'len=${xs.length} '
-      'first=${xs.first} '
-      'idx0=${xs[0]} '
-      'has-one=${tags.contains(1)} '
-      'keys=${counts.keys} '
-      'a=${counts['a']} '
-      'has-a=${counts.containsKey('a')} '
-      'indexOf=${xs.indexOf(0)} '
-      'indexWhere=${xs.indexWhere((i) => i > 5)}',
-    );
-  }, name: 'log');
+  late final Effect log;
 
   @override
   void initState() {
     super.initState();
-    log;
+    log = Effect(() {
+      print(
+        'len=${xs.length} '
+        'first=${xs.first} '
+        'idx0=${xs[0]} '
+        'has-one=${tags.contains(1)} '
+        'keys=${counts.keys} '
+        'a=${counts['a']} '
+        'has-a=${counts.containsKey('a')} '
+        'indexOf=${xs.indexOf(0)} '
+        'indexWhere=${xs.indexWhere((i) => i > 5)}',
+      );
+    }, name: 'log');
   }
 
   @override

@@ -12,14 +12,14 @@ class TempLogger extends StatefulWidget {
 
 class _TempLoggerState extends State<TempLogger> {
   final celsius = Signal<double>(0, name: 'celsius');
-  late final logTemp = Effect(() {
-    debugPrint('${widget.label} is at ${celsius.value}');
-  }, name: 'logTemp');
+  late final Effect logTemp;
 
   @override
   void initState() {
     super.initState();
-    logTemp;
+    logTemp = Effect(() {
+      debugPrint('${widget.label} is at ${celsius.value}');
+    }, name: 'logTemp');
   }
 
   @override

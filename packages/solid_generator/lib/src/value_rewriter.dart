@@ -583,6 +583,17 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
   }
 
   @override
+  void visitComment(Comment node) {
+    // Do NOT descend into documentation comments. A doc-comment reference
+    // (`/// … [count] …`) is a `CommentReference` whose identifier would
+    // otherwise be visited like any code read and get a `.value` append —
+    // producing `[count.value]`, an invalid reference that trips
+    // `comment_references`. Comment references never need the reactive
+    // rewrite (they resolve as declarations, not runtime reads) and must
+    // not count as tracked reads, so the whole subtree is skipped.
+  }
+
+  @override
   void visitMethodInvocation(MethodInvocation node) {
     // `untracked(() => ...)` passes through verbatim and resolves to
     // flutter_solidart's `untracked` at runtime; the depth bump suppresses

@@ -14,14 +14,14 @@ class _EffectWithDepsState extends State<EffectWithDeps> {
     () => counter.value * 2,
     name: 'doubleCounter',
   );
-  late final logBoth = Effect(() {
-    print('${counter.value} / ${doubleCounter.value}');
-  }, name: 'logBoth');
+  late final Effect logBoth;
 
   @override
   void initState() {
     super.initState();
-    logBoth;
+    logBoth = Effect(() {
+      print('${counter.value} / ${doubleCounter.value}');
+    }, name: 'logBoth');
   }
 
   @override

@@ -1,3 +1,8 @@
+## 3.0.0-dev.9
+
+- **FIX**: A documentation-comment reference to a reactive field (`/// … [count] …`) is no longer rewritten to `[count.value]` — the value rewriter skips comment references (which resolve as declarations, not runtime reads), so the generated doc comment stays a valid reference. The member body still gets its `.value` append.
+- **FIX**: `@SolidEffect` now lowers to a declared `late final Effect <name>;` field assigned at its materialization site (`<name> = Effect(...)` in the synthesized constructor / `initState`) instead of a `late final <name> = Effect(...)` field plus a bare `<name>;` touch. The old touch tripped `unnecessary_statements` in the generated output; the assignment does not. Behaviour is unchanged (same closure, same materialization timing).
+
 ## 3.0.0-dev.8
 
 - **FEAT**: Recognize `<query>.previousReady` and `<query>.previousError` (alongside the existing `previousState`) as tracked reads, so a `build()` reading only a retained-state getter gets the `SignalBuilder` wrap + `flutter_solidart` import. Same-class and cross-instance (origin-qualified). Backs solidart 3.0.0-dev.2's new `Resource.previousReady`/`previousError`.

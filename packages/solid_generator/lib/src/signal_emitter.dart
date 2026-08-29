@@ -168,19 +168,36 @@ String emitComputedField(GetterModel g) {
   return '  late final ${g.getterName} = $ctor;';
 }
 
-/// Emits one `late final <name> = Effect(<closure>, name: '<debug>');` line.
-/// Mirrors [emitComputedField] (same closure shape, same `late final`
-/// rationale, same body-text contract); the only differences are the absent
-/// type parameter and the `Effect` ctor.
+/// Emits the field DECLARATION for one `@SolidEffect` —
+/// `late final Effect <name>;` — without an initializer. The `Effect(...)`
+/// construction is emitted separately as an assignment at the materialization
+/// site ([emitInitState] / [emitConstructor] and their merge variants) via
+/// [emitEffectInit].
 ///
-/// `Effect(...)` takes a zero-param `void Function()` callback per the
-/// upstream `flutter_solidart` API and returns an `Effect` object whose
-/// `.dispose()` joins the unified disposal list emitted by [emitDispose].
-String emitEffectField(EffectModel e) {
+/// Split declaration + assignment (the canonical `flutter_solidart` idiom:
+/// declare the field, create the `Effect` in `initState` / the constructor)
+/// instead of `late final <name> = Effect(...)` + a bare `<name>;` touch: the
+/// touch is a no-value expression statement that trips `unnecessary_statements`
+/// in the generated output, whereas an assignment does not. The Effect closure
+/// also reads instance members (sibling Signals), which a NON-late field
+/// initializer cannot — so the field stays `late final`.
+///
+/// `Effect` (from `flutter_solidart`) is non-generic; its `.dispose()` joins
+/// the unified disposal list emitted by [emitDispose].
+String emitEffectField(EffectModel e) => '  late final Effect ${e.methodName};';
+
+/// Emits the materialization ASSIGNMENT for one `@SolidEffect` —
+/// `<name> = Effect(<closure>, name: '<debug>');`. Spliced (indented, in
+/// source-declaration order) into the synthesized/merged constructor or
+/// `initState` by the callers below. Assigning the `late final` field there
+/// both runs the `Effect(...)` autorun once and registers dependencies —
+/// the plain-class / State-class analogue of the old bare-read touch, minus
+/// the `unnecessary_statements` lint. Mirrors [emitEffectField]'s closure
+/// shape and body-text contract.
+String emitEffectInit(EffectModel e) {
   final debugName = e.annotationName ?? e.methodName;
   final closure = e.isBlockBody ? '() ${e.bodyText}' : '() => ${e.bodyText}';
-  final ctor = "Effect($closure, name: '$debugName')";
-  return '  late final ${e.methodName} = $ctor;';
+  return "${e.methodName} = Effect($closure, name: '$debugName');";
 }
 
 /// Emits one `late final <name> = Resource<T>(<closure>, name: '<debug>');`
@@ -488,40 +505,36 @@ String mergeDispose(
       '${source.substring(lbrace + 1, method.end)}';
 }
 
-/// Emits an `initState()` method that materializes every `late final` Effect
-/// field by reading it as a bare-identifier statement (`<effectName>;`), in
-/// source-declaration order.
+/// Emits an `initState()` method that materializes every `late final Effect`
+/// field by assigning it (`<name> = Effect(...);`), in source-declaration
+/// order.
 ///
-/// In Dart, `late final field = expr` defers the initializer until the field
-/// is first read. Without this synthesized read, the Effect's factory
-/// constructor — and its `effect.run()` autorun, which registers reactive
-/// dependencies — would never fire during the widget's mounted lifetime. The
-/// `dispose()` body's `<effectName>.dispose()` call is the first read, by
-/// which point signal mutations have already happened.
+/// The Effect's factory constructor — and its `effect.run()` autorun, which
+/// registers reactive dependencies — fires when the field is assigned. Doing
+/// that assignment in `initState` runs the autorun once with the initial
+/// signal values, at mount time, and subscribes to subsequent changes. The
+/// fields are declared uninitialized ([emitEffectField]) precisely so this
+/// site owns their construction.
 ///
-/// Touching each Effect by name in `initState` triggers the `late final`
-/// initializer at mount time, so `Effect(...)`'s autorun runs once with the
-/// initial signal values and subscribes to subsequent changes.
-///
-/// [effectNamesInDeclarationOrder] should mirror the source order of the
-/// emitted `late final … = Effect(...)` fields. Caller is responsible for
-/// only invoking this when the list is non-empty — the resulting `initState`
-/// is otherwise a pure-overhead `super.initState()` no-op.
-String emitInitState(List<String> effectNamesInDeclarationOrder) {
+/// [effectsInDeclarationOrder] should mirror the source order of the emitted
+/// `late final Effect …;` field declarations. Caller is responsible for only
+/// invoking this when the list is non-empty — the resulting `initState` is
+/// otherwise a pure-overhead `super.initState()` no-op.
+String emitInitState(List<EffectModel> effectsInDeclarationOrder) {
   final buffer = StringBuffer()
     ..writeln('  @override')
     ..writeln('  void initState() {')
     ..writeln('    super.initState();');
-  for (final name in effectNamesInDeclarationOrder) {
-    buffer.writeln('    $name;');
+  for (final e in effectsInDeclarationOrder) {
+    buffer.writeln('    ${emitEffectInit(e)}');
   }
   buffer.write('  }');
   return buffer.toString();
 }
 
-/// Splices Effect-materialization reads (`<effectName>;`, in declaration
-/// order) into an existing `initState()` body immediately after the
-/// `super.initState();` call, so Effects subscribe to signals before any
+/// Splices Effect-materialization assignments (`<name> = Effect(...);`, in
+/// declaration order) into an existing `initState()` body immediately after
+/// the `super.initState();` call, so Effects subscribe to signals before any
 /// user code in `initState` runs.
 ///
 /// Splice point: the end of the first statement when it is recognised as
@@ -534,7 +547,7 @@ String emitInitState(List<String> effectNamesInDeclarationOrder) {
 /// expression body (`=> …`) — the merge is only well-defined for a block.
 String mergeInitState(
   MethodDeclaration method,
-  List<String> effectNamesInDeclarationOrder,
+  List<EffectModel> effectsInDeclarationOrder,
   String source,
   String className,
 ) {
@@ -553,8 +566,8 @@ String mergeInitState(
   } else {
     insertAt = body.block.leftBracket.offset + 1;
   }
-  final reads = effectNamesInDeclarationOrder
-      .map((name) => '    $name;')
+  final reads = effectsInDeclarationOrder
+      .map((e) => '    ${emitEffectInit(e)}')
       .join('\n');
   // Auto-add `@override` if the user omitted it — mirrors mergeDispose. The
   // lift path (`StatelessWidget` source has no `initState` to override, so
@@ -578,38 +591,37 @@ bool _isSuperInitStateCall(Statement stmt) {
   return expr.target is SuperExpression && expr.methodName.name == 'initState';
 }
 
-/// Emits a no-arg constructor whose body materializes every `late final`
-/// Effect field by reading it as a bare-identifier statement
-/// (`<effectName>;`), in source-declaration order.
+/// Emits a no-arg constructor whose body materializes every `late final Effect`
+/// field by assigning it (`<name> = Effect(...);`), in source-declaration
+/// order.
 ///
 /// A plain Dart class has no `initState` lifecycle hook, but the same
-/// `late final` Effect-materialization rule applies — without a synthesized
-/// read, the Effect's factory constructor never runs and the autorun never
-/// registers dependencies. Reading each Effect inside the generated
-/// constructor body is the plain-class analogue of [emitInitState] for State
-/// classes: the Effects activate at construction time, so a `Counter()`
-/// instantiation is enough to start the autoruns.
+/// materialization rule applies — without the assignment, the Effect is never
+/// constructed and its autorun never registers dependencies. Assigning each
+/// Effect inside the generated constructor body is the plain-class analogue of
+/// [emitInitState] for State classes: the Effects activate at construction
+/// time, so a `Counter()` instantiation is enough to start the autoruns.
 ///
 /// Caller is responsible for only invoking this when
-/// [effectNamesInDeclarationOrder] is non-empty — otherwise an empty
-/// constructor is emitted, which is just noise relative to Dart's implicit
-/// default constructor for a Signal-only class (see `rewritePlainClass`).
+/// [effectsInDeclarationOrder] is non-empty — otherwise an empty constructor is
+/// emitted, which is just noise relative to Dart's implicit default constructor
+/// for a Signal-only class (see `rewritePlainClass`).
 String emitConstructor(
   String className,
-  List<String> effectNamesInDeclarationOrder,
+  List<EffectModel> effectsInDeclarationOrder,
 ) {
   final buffer = StringBuffer()..writeln('  $className() {');
-  for (final name in effectNamesInDeclarationOrder) {
-    buffer.writeln('    $name;');
+  for (final e in effectsInDeclarationOrder) {
+    buffer.writeln('    ${emitEffectInit(e)}');
   }
   buffer.write('  }');
   return buffer.toString();
 }
 
-/// Splices Effect-materialization reads (`<effectName>;`, in declaration
-/// order) into the END of a user-declared plain-class constructor body,
-/// after any user statements. The user's body is preserved verbatim — only
-/// the trailing `}` is shifted to make room for the materialization lines.
+/// Splices Effect-materialization assignments (`<name> = Effect(...);`, in
+/// declaration order) into the END of a user-declared plain-class constructor
+/// body, after any user statements. The user's body is preserved verbatim —
+/// only the trailing `}` is shifted to make room for the materialization lines.
 ///
 /// Empty bodies (`;` / `{}`) are normalized to `{}` with the
 /// materialization lines as the only contents. Initializer lists, factory
@@ -626,7 +638,7 @@ String emitConstructor(
 /// depth guard rather than an expected user path.
 String mergeConstructor(
   ConstructorDeclaration ctor,
-  List<String> effectNamesInDeclarationOrder,
+  List<EffectModel> effectsInDeclarationOrder,
   String source,
   String className,
 ) {
@@ -642,8 +654,8 @@ String mergeConstructor(
   // is stripped, not appearances elsewhere in the header (initializer
   // list literals etc.).
   header = header.replaceFirst(RegExp(r'^\s*const\s+'), '');
-  final reads = effectNamesInDeclarationOrder
-      .map((name) => '    $name;')
+  final reads = effectsInDeclarationOrder
+      .map((e) => '    ${emitEffectInit(e)}')
       .join('\n');
   if (body is EmptyFunctionBody) {
     // `Foo();` → `Foo() { ... }`.

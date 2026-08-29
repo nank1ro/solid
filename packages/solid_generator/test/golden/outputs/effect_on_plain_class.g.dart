@@ -3,14 +3,14 @@ import 'package:solid_annotations/solid_annotations.dart';
 
 class Counter implements Disposable {
   Counter() {
-    log;
+    log = Effect(() {
+      print('value: ${value.value}');
+    }, name: 'log');
   }
 
   final value = Signal<int>(0, name: 'value');
 
-  late final log = Effect(() {
-    print('value: ${value.value}');
-  }, name: 'log');
+  late final Effect log;
 
   @override
   void dispose() {

@@ -14,9 +14,7 @@ class _DashboardState extends State<Dashboard> {
     () => counter.value * 2,
     name: 'doubleCounter',
   );
-  late final logBoth = Effect(() {
-    print('${counter.value} / ${doubleCounter.value}');
-  }, name: 'logBoth');
+  late final Effect logBoth;
   late final fetchSnapshot = Resource<int>(
     () async => 0,
     name: 'fetchSnapshot',
@@ -25,7 +23,9 @@ class _DashboardState extends State<Dashboard> {
   @override
   void initState() {
     super.initState();
-    logBoth;
+    logBoth = Effect(() {
+      print('${counter.value} / ${doubleCounter.value}');
+    }, name: 'logBoth');
   }
 
   @override
