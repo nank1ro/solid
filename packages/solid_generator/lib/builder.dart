@@ -1153,7 +1153,38 @@ RewriteResult _resultForClass(
   Map<String, Map<String, Set<String>>> classQueryNamesOrigins,
   Set<String> classQueryNamesShadowedNames,
 ) {
-  if (c.hasNoAnnotations) return _passthroughResult(c.decl, source);
+  if (c.hasNoAnnotations) {
+    // A no-annotation class can still be a PURE CONSUMER of a registered
+    // class's reactive members through a plain instance/constructor field
+    // (the common Flutter DI shape). Whole-file [lowerPureConsumers] only
+    // runs when NO class in the file is annotated; in a MIXED file this
+    // per-class lowering is the only path that reaches such a consumer, so a
+    // cross-class read/write (e.g. `vm.query = value`) still lowers instead
+    // of silently emitting `assignment_to_final` on the generated Signal.
+    final lowered = lowerPureConsumerClass(
+      c.decl,
+      source,
+      classRegistry: classRegistry,
+      classCollectionFields: classCollectionFields,
+      classRegistryOrigins: classRegistryOrigins,
+      classCollectionFieldsOrigins: classCollectionFieldsOrigins,
+      classRegistryShadowedNames: classRegistryShadowedNames,
+      classQueryNames: classQueryNames,
+      classQueryNamesOrigins: classQueryNamesOrigins,
+      classQueryNamesShadowedNames: classQueryNamesShadowedNames,
+    );
+    return (
+      text: lowered.text,
+      // A placed `SignalBuilder` wrap needs `flutter_solidart` in the output
+      // import block (keyed off `solidartNames` in `_renderOutput`); a
+      // `.value`-only lowering introduces no new identifier and needs none.
+      solidartNames: lowered.emittedSignalBuilder
+          ? const {'SignalBuilder'}
+          : const <String>{},
+      emitsDisposable: false,
+      constCtorNames: const <String>{},
+    );
+  }
   return _rewriteClass(
     c.decl,
     c.fields,

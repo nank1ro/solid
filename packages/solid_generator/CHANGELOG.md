@@ -1,3 +1,7 @@
+## 3.0.0-dev.10
+
+- **FIX**: A pure-consumer class that reaches a registered class's reactive members through a plain instance/constructor field (the common Flutter DI shape) now lowers even when it is co-located with annotated classes in the same file. Whole-file pure-consumer lowering only ran when NO class in the file was annotated; in a mixed file the consumer was passed through verbatim, so a cross-instance `@SolidState` write (`vm.field = x`) hit `assignment_to_final` on the generated `final Signal`, and a read stayed non-reactive. The no-annotation branch now applies the same per-class `.value` lowering + `SignalBuilder` wrap.
+
 ## 3.0.0-dev.9
 
 - **FIX**: A documentation-comment reference to a reactive field (`/// … [count] …`) is no longer rewritten to `[count.value]` — the value rewriter skips comment references (which resolve as declarations, not runtime reads), so the generated doc comment stays a valid reference. The member body still gets its `.value` append.
