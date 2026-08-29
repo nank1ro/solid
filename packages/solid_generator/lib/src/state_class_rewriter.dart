@@ -107,7 +107,7 @@ RewriteResult rewriteStateClass(
   // names, and Query method names interleave in source-declaration order —
   // the contract `emitDispose` relies on for reverse-disposal correctness.
   final disposeNames = <String>[];
-  final effectNames = <String>[];
+  final effects = <EffectModel>[];
   final pieces = <String>[];
   // Set during the `build` branch when the rewriter emitted at least one
   // `SignalBuilder` wrap — drives the `flutter_solidart` import even when
@@ -115,7 +115,7 @@ RewriteResult rewriteStateClass(
   // reading through to a sibling class's reactive state).
   var buildHasSignalBuilder = false;
   // `initState`/`dispose` emission is deferred until after the walk so the
-  // merge sees the fully-populated `effectNames` / `disposeNames` lists.
+  // merge sees the fully-populated `effects` / `disposeNames` lists.
   // The slot index reserves the member's source-order position in `pieces`
   // so it round-trips byte-identical when the user declared one.
   MethodDeclaration? initStateMethod;
@@ -137,7 +137,7 @@ RewriteResult rewriteStateClass(
         // Env fields lower to `late final … = context.read<T>();` in source-
         // declaration order. They are NOT added to `disposeNames` (the host
         // never owns disposal of injected instances) and NOT added to
-        // `effectNames` (env fields are lazy and need no initState
+        // `effects` (env fields are lazy and need no initState
         // materialization).
         pieces.add(emitEnvironmentField(env));
         continue;
@@ -184,10 +184,10 @@ RewriteResult rewriteStateClass(
         final effect = effectByName[name]!;
         pieces.add(emitEffectField(effect));
         disposeNames.add(effect.methodName);
-        effectNames.add(effect.methodName);
+        effects.add(effect);
       } else if (queryByName.containsKey(name)) {
         // Queries are lazy — joining `disposeNames` only, never
-        // `effectNames` / `initState` materialization. The first reactive
+        // `effects` / `initState` materialization. The first reactive
         // call site triggers the late-final initializer.
         final query = queryByName[name]!;
         emitQueryFields(
@@ -226,11 +226,11 @@ RewriteResult rewriteStateClass(
   // one iff at least one Effect needs materialization — otherwise skip, so
   // Signal-only goldens round-trip byte-identical.
   if (initStateMethod != null) {
-    pieces[initStateSlot] = effectNames.isEmpty
+    pieces[initStateSlot] = effects.isEmpty
         ? source.substring(initStateMethod.offset, initStateMethod.end)
-        : mergeInitState(initStateMethod, effectNames, source, className);
-  } else if (effectNames.isNotEmpty) {
-    pieces.add(emitInitState(effectNames));
+        : mergeInitState(initStateMethod, effects, source, className);
+  } else if (effects.isNotEmpty) {
+    pieces.add(emitInitState(effects));
   }
   if (disposeMethod != null) {
     pieces[disposeSlot] = mergeDispose(
@@ -277,7 +277,7 @@ RewriteResult rewriteStateClass(
       if (hasListSignalField) 'ListSignal',
       if (hasSetSignalField) 'SetSignal',
       if (hasMapSignalField) 'MapSignal',
-      if (effectNames.isNotEmpty) 'Effect',
+      if (effects.isNotEmpty) 'Effect',
       // Queries emit `Resource<T>(...)` fields; their `<query>().when(...)`
       // call sites in `build` are wrapped in `SignalBuilder` by
       // `rewriteBuildMethod` when at least one query is present.

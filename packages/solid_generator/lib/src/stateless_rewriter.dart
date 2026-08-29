@@ -152,7 +152,7 @@ RewriteResult rewriteStatelessWidget(
   );
   final initStateText = _emitInitStateText(
     userInitState: members.userInitState,
-    effectNamesInDeclarationOrder: reactiveBlock.effectNamesInDeclarationOrder,
+    effectsInDeclarationOrder: reactiveBlock.effectsInDeclarationOrder,
     source: source,
     className: className,
   );
@@ -192,7 +192,7 @@ RewriteResult rewriteStatelessWidget(
     reactiveFieldsText: reactiveBlock.fieldsText,
     disposeNamesInDeclarationOrder:
         reactiveBlock.disposeNamesInDeclarationOrder,
-    effectNamesInDeclarationOrder: reactiveBlock.effectNamesInDeclarationOrder,
+    effectsInDeclarationOrder: reactiveBlock.effectsInDeclarationOrder,
     stateFieldsText: partition.stateFieldsText,
     buildMethodText: buildMethodText,
     initStateText: initStateText,
@@ -268,7 +268,7 @@ RewriteResult rewriteStatelessWidget(
 /// before it, so the emitted `late final` lines must appear after the
 /// declarations they read in the rewritten State class.
 ///
-/// `effectNamesInDeclarationOrder` is the Effect-only subset of
+/// `effectsInDeclarationOrder` is the Effect-only subset of
 /// `disposeNamesInDeclarationOrder`, pulled out so the rewriter can
 /// synthesize `initState()` that materializes each `late final` Effect field
 /// at mount time. Queries are intentionally NOT in this list — Resources are
@@ -278,11 +278,11 @@ RewriteResult rewriteStatelessWidget(
 /// `@SolidEnvironment` env fields are emitted in source-declaration order
 /// alongside Signal/Computed/Effect/Resource fields but are NEVER added to
 /// `disposeNames` (env fields are not host-disposed) and NEVER added to
-/// `effectNames` (env fields are lazy and need no initState materialization).
+/// `effects` (env fields are lazy and need no initState materialization).
 ({
   String fieldsText,
   List<String> disposeNamesInDeclarationOrder,
-  List<String> effectNamesInDeclarationOrder,
+  List<EffectModel> effectsInDeclarationOrder,
 })
 _emitReactiveBlock(
   ClassDeclaration classDecl,
@@ -310,7 +310,7 @@ _emitReactiveBlock(
       : {for (final q in solidQueries) q.methodName: q.innerTypeText};
   final lines = <String>[];
   final disposeNames = <String>[];
-  final effectNames = <String>[];
+  final effects = <EffectModel>[];
 
   for (final member in classDecl.members) {
     if (member is FieldDeclaration) {
@@ -323,7 +323,7 @@ _emitReactiveBlock(
       }
       final env = envByName[name];
       if (env != null) {
-        // No disposeNames / effectNames push — env fields are not host-
+        // No disposeNames / effects push — env fields are not host-
         // disposed and not initState-materialized.
         lines.add(emitEnvironmentField(env));
       }
@@ -342,7 +342,7 @@ _emitReactiveBlock(
         if (e != null) {
           lines.add(emitEffectField(e));
           disposeNames.add(e.methodName);
-          effectNames.add(e.methodName);
+          effects.add(e);
           continue;
         }
         final q = queryByName[name];
@@ -364,7 +364,7 @@ _emitReactiveBlock(
   return (
     fieldsText: lines.join('\n'),
     disposeNamesInDeclarationOrder: disposeNames,
-    effectNamesInDeclarationOrder: effectNames,
+    effectsInDeclarationOrder: effects,
   );
 }
 
@@ -687,23 +687,23 @@ String _appendSuperDispose(String methodText) {
 /// and [emitInitState] in the reactive/synthesized branches.
 String _emitInitStateText({
   required MethodDeclaration? userInitState,
-  required List<String> effectNamesInDeclarationOrder,
+  required List<EffectModel> effectsInDeclarationOrder,
   required String source,
   required String className,
 }) {
   if (userInitState != null) {
-    final body = effectNamesInDeclarationOrder.isEmpty
+    final body = effectsInDeclarationOrder.isEmpty
         ? source.substring(userInitState.offset, userInitState.end)
         : mergeInitState(
             userInitState,
-            effectNamesInDeclarationOrder,
+            effectsInDeclarationOrder,
             source,
             className,
           );
     return '  ${_prependSuperInitState(body, userInitState)}';
   }
-  if (effectNamesInDeclarationOrder.isEmpty) return '';
-  return emitInitState(effectNamesInDeclarationOrder);
+  if (effectsInDeclarationOrder.isEmpty) return '';
+  return emitInitState(effectsInDeclarationOrder);
 }
 
 /// Returns [methodText] with `super.initState();` ensured as the first
@@ -762,7 +762,7 @@ String _emitStateClass({
   required String stateClassName,
   required String reactiveFieldsText,
   required List<String> disposeNamesInDeclarationOrder,
-  required List<String> effectNamesInDeclarationOrder,
+  required List<EffectModel> effectsInDeclarationOrder,
   required String stateFieldsText,
   required String buildMethodText,
   required String initStateText,

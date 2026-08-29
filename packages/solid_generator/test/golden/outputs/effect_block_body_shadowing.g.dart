@@ -10,18 +10,18 @@ class EffectShadowing extends StatefulWidget {
 
 class _EffectShadowingState extends State<EffectShadowing> {
   final counter = Signal<int>(0, name: 'counter');
-  late final logCounter = Effect(() {
-    print('outer: ${counter.value}');
-    {
-      const counter = 'shadowed';
-      print('inner: $counter');
-    }
-  }, name: 'logCounter');
+  late final Effect logCounter;
 
   @override
   void initState() {
     super.initState();
-    logCounter;
+    logCounter = Effect(() {
+      print('outer: ${counter.value}');
+      {
+        const counter = 'shadowed';
+        print('inner: $counter');
+      }
+    }, name: 'logCounter');
   }
 
   @override

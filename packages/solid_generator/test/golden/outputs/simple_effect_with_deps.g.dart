@@ -10,14 +10,14 @@ class Counter extends StatefulWidget {
 
 class _CounterState extends State<Counter> {
   final counter = Signal<int>(0, name: 'counter');
-  late final logCounter = Effect(() {
-    print('Counter changed: ${counter.value}');
-  }, name: 'logCounter');
+  late final Effect logCounter;
 
   @override
   void initState() {
     super.initState();
-    logCounter;
+    logCounter = Effect(() {
+      print('Counter changed: ${counter.value}');
+    }, name: 'logCounter');
   }
 
   @override

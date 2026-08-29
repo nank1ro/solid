@@ -3,7 +3,9 @@ import 'package:solid_annotations/solid_annotations.dart';
 
 class Inventory implements Disposable {
   Inventory() {
-    log;
+    log = Effect(() {
+      print('count=${items.length}, first=${items[0]}');
+    }, name: 'log');
   }
 
   final items = ListSignal<int>([], name: 'items');
@@ -15,9 +17,7 @@ class Inventory implements Disposable {
 
   late final count = Computed<int>(() => items.length, name: 'count');
 
-  late final log = Effect(() {
-    print('count=${items.length}, first=${items[0]}');
-  }, name: 'log');
+  late final Effect log;
 
   @override
   void dispose() {

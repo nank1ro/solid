@@ -122,7 +122,7 @@ RewriteResult rewritePlainClass(
 
   final pieces = <String>[];
   final disposeNames = <String>[];
-  final effectNames = <String>[];
+  final effects = <EffectModel>[];
   // `dispose` emission is deferred until after the walk so the merge sees
   // the fully-populated `disposeNames` list. The slot index reserves the
   // member's source-order position in `pieces` so a user-declared
@@ -131,7 +131,7 @@ RewriteResult rewritePlainClass(
   MethodDeclaration? disposeMethod;
   var disposeSlot = -1;
   // User-declared constructors (zero or more) are recorded for a merged
-  // emit after the walk — the merge needs `effectNames` populated to
+  // emit after the walk — the merge needs `effects` populated to
   // splice in the Effect-materialization reads at the end of each user
   // body. Slot indices preserve source-order position. Only generative
   // constructors get the merge; factory constructors round-trip verbatim
@@ -175,10 +175,10 @@ RewriteResult rewritePlainClass(
         final effect = effectByName[name]!;
         pieces.add(emitEffectField(effect));
         disposeNames.add(effect.methodName);
-        effectNames.add(effect.methodName);
+        effects.add(effect);
       } else if (queryByName.containsKey(name)) {
         // Queries are lazy — joining `disposeNames` only, never
-        // `effectNames`, so the synthesized constructor below skips them.
+        // `effects`, so the synthesized constructor below skips them.
         final query = queryByName[name]!;
         emitQueryFields(
           query,
@@ -233,7 +233,7 @@ RewriteResult rewritePlainClass(
     // merged result.
     final mergedHeaderAndBody = mergeConstructor(
       ctor,
-      effectNames,
+      effects,
       source,
       className,
     );
@@ -283,8 +283,8 @@ RewriteResult rewritePlainClass(
   } else {
     pieces.add(disposeText);
   }
-  if (effectNames.isNotEmpty && userCtors.isEmpty) {
-    pieces.insert(0, emitConstructor(className, effectNames));
+  if (effects.isNotEmpty && userCtors.isEmpty) {
+    pieces.insert(0, emitConstructor(className, effects));
   }
 
   final header = _buildHeaderWithDisposable(classDecl, source);
@@ -319,7 +319,7 @@ RewriteResult rewritePlainClass(
       if (hasSetSignalField) 'SetSignal',
       if (hasMapSignalField) 'MapSignal',
       if (solidGetters.isNotEmpty) 'Computed',
-      if (effectNames.isNotEmpty) 'Effect',
+      if (effects.isNotEmpty) 'Effect',
       if (solidQueries.isNotEmpty) 'Resource',
       // A multi-dep query synthesizes a Record-Computed source field,
       // requiring `Computed` in the import set.

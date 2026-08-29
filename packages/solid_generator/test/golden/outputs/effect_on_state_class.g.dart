@@ -16,14 +16,14 @@ class _CounterState extends State<Counter> {
     const Duration(seconds: 1),
   ).listen((_) {});
 
-  late final logCounter = Effect(() {
-    print('Counter: ${counter.value}');
-  }, name: 'logCounter');
+  late final Effect logCounter;
 
   @override
   void initState() {
     super.initState();
-    logCounter;
+    logCounter = Effect(() {
+      print('Counter: ${counter.value}');
+    }, name: 'logCounter');
     debugPrint('init');
   }
 

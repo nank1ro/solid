@@ -4,17 +4,17 @@ import 'package:solid_annotations/solid_annotations.dart'
 
 class FilteredController implements Disposable {
   FilteredController() {
-    record;
+    record = Effect(() {
+      final c = counter.value;
+      untracked(() => log.value = [...log.value, c]);
+    }, name: 'record');
   }
 
   final counter = Signal<int>(0, name: 'counter');
 
   final log = ListSignal<int>([], name: 'log');
 
-  late final record = Effect(() {
-    final c = counter.value;
-    untracked(() => log.value = [...log.value, c]);
-  }, name: 'record');
+  late final Effect record;
 
   @override
   void dispose() {

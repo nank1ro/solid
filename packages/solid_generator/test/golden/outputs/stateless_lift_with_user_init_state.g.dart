@@ -10,14 +10,14 @@ class Boot extends StatefulWidget {
 
 class _BootState extends State<Boot> {
   final counter = Signal<int>(0, name: 'counter');
-  late final logCounter = Effect(() {
-    print('Counter: ${counter.value}');
-  }, name: 'logCounter');
+  late final Effect logCounter;
 
   @override
   void initState() {
     super.initState();
-    logCounter;
+    logCounter = Effect(() {
+      print('Counter: ${counter.value}');
+    }, name: 'logCounter');
     debugPrint('init');
   }
 
