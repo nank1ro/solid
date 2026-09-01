@@ -1109,7 +1109,7 @@ When a generated piece of code (anything under `lib/`) references a reactive val
 
 ### 5.1 Identifier rewrite
 
-The rewrite is **type-driven and chain-aware**: any expression position whose resolved static type is `SignalBase<T>` or a subtype (`Signal<T>`, `Computed<T>`, `ReadSignal<T>`) from `package:flutter_solidart` receives a `.value` append at that position. The rule applies uniformly to:
+The rewrite is **type-driven and chain-aware**: any expression position whose resolved static type is `SignalBase<T>` or a subtype (`Signal<T>`, `Computed<T>`, `ReadSignal<T>`) receives a `.value` append at that position. `SignalBase` and its subtypes are declared in `package:solidart`; `package:flutter_solidart` re-exports them, and the analyzer reports the declaring library regardless of which package the source imports from. The rule applies uniformly to:
 
 - Bare `SimpleIdentifier`s — same-class same-class `@SolidState` reads (M1 case).
 - `PrefixedIdentifier` and `PropertyAccess` chains of arbitrary depth — cross-class reactive reads (M6 case, e.g. an `@SolidEnvironment` field whose type carries `@SolidState` declarations).

@@ -355,9 +355,8 @@ void _validateEnvironmentField(FieldDeclaration field, String className) {
   }
   // `SignalBase`-typed environment field detection, two-tier:
   //   1. Element-based: when the resolver populated the type, walk
-  //      `allSupertypes` for a `SignalBase` class anchored to the
-  //      `package:flutter_solidart/` library URI. Catches aliased imports
-  //      and user-defined subclasses of `SignalBase`.
+  //      `allSupertypes` for solidart's `SignalBase` class. Catches aliased
+  //      imports and user-defined subclasses of `SignalBase`.
   //   2. Textual fallback: when the resolver hasn't run (parsed-AST
   //      fallback or test sandboxes), match the type name's lexeme against
   //      [signalBaseTypeNames]. The user-defined subclass case is missed
@@ -368,23 +367,12 @@ void _validateEnvironmentField(FieldDeclaration field, String className) {
   }
 }
 
-/// `true` iff [type]'s resolved supertype chain contains a `SignalBase`
-/// declared in `package:flutter_solidart/`, or — when the resolver hasn't
-/// produced a type — the type's lexeme is in [signalBaseTypeNames].
+/// `true` iff [type] resolves to solidart's `SignalBase` or a subtype of it
+/// ([isSolidartSignalType]), or — when the resolver hasn't produced a type —
+/// the type's lexeme is in [signalBaseTypeNames].
 bool _isSignalBaseTyped(NamedType type) {
   final resolved = type.type;
-  if (resolved is InterfaceType) {
-    final element = resolved.element;
-    if (element.name == 'SignalBase' &&
-        isFromPackage(element.library.uri, 'flutter_solidart')) {
-      return true;
-    }
-    return supertypeChainContains(
-      resolved.allSupertypes,
-      'SignalBase',
-      packageName: 'flutter_solidart',
-    );
-  }
+  if (resolved is InterfaceType) return isSolidartSignalType(resolved);
   // Type unresolved (parsed-AST fallback / test sandbox). Fall back to
   // lexeme match against the well-known set.
   return signalBaseTypeNames.contains(type.name.lexeme);

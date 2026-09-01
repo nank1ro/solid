@@ -126,6 +126,45 @@ class SessionGuard {
     );
   });
 
+  group('managed-field no-double-append guard is not widened by the '
+      'foreign-signal getter set', () {
+    // The foreign-signal read path recognizes a wider getter set than the
+    // managed-member guard (`state` / `hasPreviousValue` on top of `value` /
+    // `hasValue` / `previousValue`) because there the receiver is PROVEN to
+    // be a `SignalBase`. Sharing one set between the two regresses every
+    // `@SolidState` field whose own payload type happens to declare a member
+    // of that name: the guard would read `machine.state` as "already on the
+    // signal API" and skip the `.value` append, emitting `machine.state`
+    // against a `Signal<MyMachine>` — which does not compile, and drops the
+    // reactive read. The foreign side is pinned by the `GateProbe` class in
+    // `test/golden/inputs/foreign_signal_value_read.dart`.
+    test(
+      '.state / .hasPreviousValue on a @SolidState field of a user type '
+      'still lower to .value.<member>',
+      () {
+        const source = r'''
+class Screen {
+  MyMachine machine;
+
+  String describe() {
+    return '${machine.state} ${machine.hasPreviousValue}';
+  }
+}
+''';
+        final method = _method(source, 'Screen', 'describe');
+        final result = collectValueEdits(method, const {'machine'}, source);
+
+        final rewritten = applyEditsToRange(
+          source.substring(method.offset, method.end),
+          result.edits,
+          method.offset,
+        );
+        expect(rewritten, contains(r'${machine.value.state}'));
+        expect(rewritten, contains(r'${machine.value.hasPreviousValue}'));
+      },
+    );
+  });
+
   group('cross-class name-collision guard (unresolved AST) — issue #110', () {
     test(
       'a name builder.dart flagged ambiguous never rewrites through an '

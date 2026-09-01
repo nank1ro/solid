@@ -171,6 +171,8 @@ const List<String> goldenNames = <String>[
   'cross_file_super_param_one_hop_local_shadow',
   'cross_file_super_param_generic_base',
   'cross_file_qualified_registry_disambiguation',
+  'foreign_signal_value_read',
+  'foreign_signal_name_collision',
 ];
 
 /// Memoized golden directory resolution. Resolved relative to the package

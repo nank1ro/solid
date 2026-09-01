@@ -1,3 +1,7 @@
+// The effect bodies below use `print` to make ordering observable in the
+// lowered output; that's the point of this fixture, not a mistake.
+// ignore_for_file: avoid_print
+
 import 'package:solid_annotations/solid_annotations.dart';
 
 // Two `@SolidEffect` methods on one class: locks in that both the field
