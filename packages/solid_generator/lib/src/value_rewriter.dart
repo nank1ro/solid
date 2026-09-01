@@ -2,6 +2,7 @@ import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/dart/ast/visitor.dart';
 import 'package:analyzer/dart/element/type.dart';
 import 'package:solid_generator/src/ast_compat.dart';
+import 'package:solid_generator/src/element_utils.dart';
 import 'package:solid_generator/src/query_model.dart';
 
 /// A single value-level edit emitted by [collectValueEdits].
@@ -303,6 +304,33 @@ String applyEditsToRange(String text, List<ValueEdit> edits, int baseOffset) {
 /// (`untracked(() => ...)`). Must stay in sync with those declarations.
 const String _untrackedName = 'untracked';
 
+/// Namespace prefix for a foreign-signal read key in
+/// [ValueRewriteResult.trackedReadNamesByOffset] — see [_foreignReadKey].
+///
+/// A generator-managed key is a `@SolidState` / `@SolidQuery` member name,
+/// i.e. a bare Dart identifier, which can never contain `:`. Prefixing the
+/// foreign keys therefore keeps the two name-spaces disjoint, which is what
+/// keeps Section 7.6 ("different signals always keep both wraps") true when
+/// a foreign signal's source text happens to spell a managed member's name.
+const String _foreignReadKeyPrefix = 'foreign:';
+
+/// Canonical [ValueRewriteResult.trackedReadNamesByOffset] key for a read of
+/// the foreign signal [receiver]: the receiver's source text, with any
+/// leading `this.` stripped (`this.gate` and `gate` name one signal, and the
+/// placement pass's same-signal collapse must see them as one), under the
+/// [_foreignReadKeyPrefix] namespace.
+String _foreignReadKey(Expression receiver) {
+  final source = receiver.toSource();
+  const thisPrefix = 'this.';
+  final canonical = source.startsWith(thisPrefix)
+      ? source.substring(thisPrefix.length)
+      : source;
+  return '$_foreignReadKeyPrefix$canonical';
+}
+
+/// True if [name] is a [_foreignReadKey] rather than a managed member name.
+bool _isForeignReadKey(String name) => name.startsWith(_foreignReadKeyPrefix);
+
 /// Name of the runtime opt-out getter on `ReadableSignal<T>` from
 /// `flutter_solidart`. Reading via this getter never subscribes the
 /// surrounding reactive context.
@@ -335,13 +363,50 @@ const Set<String> _queryRetainedStateGetterNames = {
 /// bare tracked-field access followed by any of them must skip the `.value`
 /// append. A type-driven rewriter would derive this from the resolved
 /// `staticType` of the access; in name-set mode we enumerate.
+///
+/// Deliberately NARROWER than [_foreignSignalApiGetters]. This set gates the
+/// no-double-append guard on a generator-MANAGED member, whose receiver is
+/// typed as the user's own payload type, not as a signal — so every name
+/// added here also stops being reachable as a plain property of that payload
+/// type. `state` is the concrete casualty: `@SolidState MyMachine machine;`
+/// plus `machine.state` must still lower to `machine.value.state`.
 const Set<String> _signalApiGetters = {'value', 'hasValue', 'previousValue'};
 
+/// Signal-API getter names counted as an observing read on a FOREIGN signal
+/// — one the generator does not manage, so the receiver's own static type is
+/// a `SignalBase` and no payload-type member can collide. Consulted ONLY by
+/// [_ValueRewriteVisitor._maybeRecordForeignSignalRead], which checks the
+/// receiver's type first.
+///
+/// Every name is observation-causing: `hasPreviousValue` and `previousValue`
+/// evaluate `value` internally before answering, and `Resource.state` reads
+/// the underlying signal's value (it is also the non-deprecated spelling of
+/// a Resource read — `Resource.value` is deprecated upstream).
+const Set<String> _foreignSignalApiGetters = {
+  'value',
+  'hasValue',
+  'previousValue',
+  'hasPreviousValue',
+  'state',
+};
+
 /// Subset of [_signalApiGetters] whose access counts as a tracked read for
-/// SignalBuilder placement. `.value` is excluded — by convention, an
-/// explicit `.value` read is the user opting out of the auto-tracking flow,
-/// while `.hasValue` / `.previousValue` have no bare equivalent and must be
-/// tracked to keep the enclosing widget subtree reactive to signal updates.
+/// SignalBuilder placement **on a generator-managed member** (a same-class
+/// `@SolidState` field/getter, or a cross-class one reached through the
+/// registry). `.value` is excluded there — the bare identifier IS the tracked
+/// read for those members, so an explicit `.value` on top of one is the user
+/// opting out of the auto-tracking flow, while `.hasValue` / `.previousValue`
+/// have no bare equivalent and must be tracked to keep the enclosing widget
+/// subtree reactive.
+///
+/// This exclusion does NOT extend to a signal the generator does not manage
+/// (a hand-written `Signal` field, injected or held directly): there `.value`
+/// is the ONLY way to read it, so treating it as an opt-out would leave every
+/// such read silently non-reactive. Those reads are tracked by
+/// [_ValueRewriteVisitor._maybeRecordForeignSignalRead] over the full
+/// [_foreignSignalApiGetters] set; the documented opt-outs
+/// (`untracked(() => …)`, `.untracked`, `on*` callbacks, and solidart's own
+/// `.untrackedValue`) still apply.
 const Set<String> _trackedSignalApiGetters = {'hasValue', 'previousValue'};
 
 /// Result of [_ValueRewriteVisitor._resolveReceiverType]: a cross-class
@@ -640,6 +705,22 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
     super.visitMethodInvocation(node);
   }
 
+  @override
+  void visitFunctionExpressionInvocation(FunctionExpressionInvocation node) {
+    // Callable read of a foreign signal: `SignalBase.call() => value`, so
+    // `sig()` / `gate.complete()` observes exactly like `sig.value`. The
+    // analyzer's resolver rewrites ANY zero-arg call of a non-method element
+    // (a field, parameter, or local variable — never a real method, which
+    // stays a [MethodInvocation]) into this node, `function` holding the
+    // callee expression whose `staticType` is the signal — true uniformly
+    // for both the bare (`sig()`) and property-chain (`gate.complete()`)
+    // shapes, so no separate [visitMethodInvocation] handling is needed.
+    if (node.argumentList.arguments.isEmpty) {
+      _recordForeignSignalRead(node.offset, node.function);
+    }
+    super.visitFunctionExpressionInvocation(node);
+  }
+
   /// True if [node] is a cross-instance `<receiver>.<queryName>()` call: a
   /// zero-arg `MethodInvocation` with a target (never bare — that shape is
   /// [_isQueryShape]'s same-class branch above), not shadowed when the
@@ -755,6 +836,14 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
     if ((_classRegistry.isNotEmpty || _classRegistryShadowedNames.isNotEmpty) &&
         target != null) {
       _maybeRewriteCrossClassPropertyAccess(node);
+    }
+    // `<receiver>.value` where `<receiver>` is a foreign solidart signal —
+    // the multi-level shape (`<envField>.<signalField>.value`). Runs after
+    // the registry-backed branch above, which owns the offset when the
+    // receiver is a registered `@SolidState` holder rather than a signal.
+    // The single-level shape is handled in [visitPrefixedIdentifier].
+    if (target != null) {
+      _maybeRecordForeignSignalRead(node, target, node.propertyName);
     }
     super.visitPropertyAccess(node);
   }
@@ -886,7 +975,102 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
     if (_classRegistry.isNotEmpty || _classRegistryShadowedNames.isNotEmpty) {
       _maybeRewriteCrossClass(node);
     }
+    // `<signal>.value` where `<signal>` is a foreign solidart signal held
+    // directly (a field, parameter, or `this.<field>`) — the single-level
+    // counterpart of the [visitPropertyAccess] branch.
+    _maybeRecordForeignSignalRead(node, node.prefix, node.identifier);
     super.visitPrefixedIdentifier(node);
+  }
+
+  /// Records a tracked read for `<receiver>.<signalApiGetter>` (any name in
+  /// [_foreignSignalApiGetters]) when [receiver] is statically a signal the
+  /// generator does NOT manage — a hand-written `Signal` / `Computed` / `Resource` held in a
+  /// plain field, a parameter, or reached through an `@SolidEnvironment`
+  /// receiver.
+  ///
+  /// No source edit is emitted: the user already wrote the `.value` the
+  /// lowered code needs. Only the offset matters, and it matters twice —
+  /// `build()` needs it for `SignalBuilder` placement (without a wrap the
+  /// read happens outside any tracking context, so the widget silently never
+  /// rebuilds), and `annotation_reader._readReactiveBody` needs it so a
+  /// `@SolidState` getter / `@SolidEffect` whose only dependency is a foreign
+  /// signal is not rejected as dependency-free.
+  ///
+  /// Deliberately NOT recorded in [trackedReadNames] /
+  /// [trackedCrossClassReadNames]: those drive `@SolidQuery`'s
+  /// `Resource.source:` synthesis, which needs the dep's declared element
+  /// type from the class-field-type registry — and that registry only records
+  /// `@SolidState` members. A `@SolidQuery` body reading a foreign signal
+  /// keeps its current behaviour (no synthesized `source:`).
+  ///
+  /// The recorded name is [_foreignReadKey] of the receiver, so the placement
+  /// pass's same-signal nested-wrap collapse still groups repeat reads of one
+  /// signal while keeping distinct receivers — and every managed member name
+  /// — distinct.
+  void _maybeRecordForeignSignalRead(
+    Expression node,
+    Expression receiver,
+    SimpleIdentifier property,
+  ) {
+    if (!_foreignSignalApiGetters.contains(property.name)) return;
+    // Writes (plain and compound) never subscribe — Section 6.0.
+    if (property.inSetterContext()) return;
+    _recordForeignSignalRead(node.offset, receiver);
+  }
+
+  /// Shared tail of the foreign-signal read paths (property reads via
+  /// [_maybeRecordForeignSignalRead], callable reads via
+  /// [visitFunctionExpressionInvocation]). [receiver] is the expression
+  /// whose static type must be the signal.
+  void _recordForeignSignalRead(int offset, Expression receiver) {
+    if (_untrackedDepth != 0) return;
+    // Section 6.4 opt-out: `<signal>.untracked` is an identity getter, so the
+    // receiver still types as the signal — only the spelling says "do not
+    // subscribe".
+    if (_isUntrackedOptOut(receiver)) return;
+    // Another branch already claimed this offset (a registry-backed
+    // cross-class read); do not overwrite its name.
+    if (trackedReadNamesByOffset.containsKey(offset)) return;
+    if (!_isSolidartSignalReceiver(receiver)) return;
+    _recordTrackedRead(offset, _foreignReadKey(receiver));
+  }
+
+  /// True if [receiver] is a `<…>.untracked` chain — the Section 6.4 opt-out
+  /// spelling. `UntrackedExtension` is an identity on `T`, so the chain's
+  /// static type is still the signal's; only the trailing property name
+  /// distinguishes it.
+  bool _isUntrackedOptOut(Expression receiver) {
+    if (receiver is PropertyAccess) {
+      return receiver.propertyName.name == _untrackedName;
+    }
+    if (receiver is PrefixedIdentifier) {
+      return receiver.identifier.name == _untrackedName;
+    }
+    return false;
+  }
+
+  /// True if [receiver]'s static type is a solidart `SignalBase<T>` subtype.
+  ///
+  /// Two tiers, mirroring `target_validator._isSignalBaseTyped`: the resolved
+  /// [InterfaceType] is authoritative when the resolver populated it (so a
+  /// non-signal receiver like `TextEditingController` is rejected outright,
+  /// keeping `controller.value` untracked, and a local alias of a signal —
+  /// `final alias = bag.sig;` — is correctly recognized); otherwise the
+  /// declared type name [_resolveReceiverType] recovers from the AST is
+  /// matched against [signalBaseTypeNames].
+  ///
+  /// The [_isShadowed] guard applies to the lexeme tier ONLY: there the name
+  /// is all we have, so a local of the same name must suppress the match. A
+  /// resolved `staticType` already accounts for shadowing — it IS the local's
+  /// type — so consulting the shadow set there would drop legitimate aliases.
+  bool _isSolidartSignalReceiver(Expression receiver) {
+    final type = receiver.staticType;
+    if (type is InterfaceType) return isSolidartSignalType(type);
+    if (receiver is SimpleIdentifier && _isShadowed(receiver.name)) {
+      return false;
+    }
+    final name = _resolveReceiverType(receiver)?.name;
+    return name != null && signalBaseTypeNames.contains(name);
   }
 
   /// Single-level `<receiver>.<reactiveField>` cross-class rewrite — the
@@ -1403,7 +1587,16 @@ class _ValueRewriteVisitor extends RecursiveAstVisitor<void> {
   /// `trackedReadNamesByOffset.keys` in the same order as a parallel list
   /// would emit. Every caller is in a branch that already verified
   /// `_untrackedDepth == 0`.
+  ///
+  /// A [_foreignReadKey] already recorded at [offset] is never overwritten:
+  /// the registry-backed branches can reach the SAME offset as a foreign read
+  /// (`env.sig.hasValue` starts at `env` on both paths) and would replace the
+  /// collision-proof key with a bare member name, re-opening the Section 7.6
+  /// mis-collapse the namespace exists to prevent. First foreign write wins;
+  /// the symmetric guard lives in [_recordForeignSignalRead].
   void _recordTrackedRead(int offset, String name) {
+    final existing = trackedReadNamesByOffset[offset];
+    if (existing != null && _isForeignReadKey(existing)) return;
     trackedReadNamesByOffset[offset] = name;
   }
 

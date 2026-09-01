@@ -35,22 +35,6 @@ const String solidQueryName = 'SolidQuery';
 /// as [solidStateName].
 const String solidEnvironmentName = 'SolidEnvironment';
 
-/// Lexemes of the `flutter_solidart` types whose runtime classes extend
-/// `SignalBase<T>`. Matched against the type-annotation lexeme as the
-/// unresolved-AST fallback in
-/// `target_validator._isSignalBaseTyped`; the Element-based primary path
-/// walks `InterfaceType.allSupertypes` when the resolver populated the
-/// type. Consumed by the target validator (rejecting
-/// `@SolidEnvironment` fields typed as one of these) and by the
-/// cross-class `.value` rewrite. Excludes `SignalBuilder` /
-/// `SolidartConfig` (those are non-`SignalBase` solidart names).
-const Set<String> signalBaseTypeNames = {
-  'Signal',
-  'Computed',
-  'Effect',
-  'Resource',
-};
-
 /// Lexeme of the `Future` return-type identifier on a `@SolidQuery` method.
 /// Matched textually on the return-type's [NamedType] lexeme — the user
 /// must import `dart:async` (or its re-export via `dart:core`) to write the

@@ -1,3 +1,4 @@
+import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart';
 
 /// `true` iff [uri] is a `package:<packageName>/...` URI.
@@ -31,3 +32,41 @@ bool supertypeChainContains(
   }
   return false;
 }
+
+/// Lexemes of the well-known `flutter_solidart` reactive-primitive types
+/// rejected on an `@SolidEnvironment` field / matched as a foreign-signal
+/// receiver. Most (`Signal`, `Computed`, `Resource`) extend `SignalBase<T>`;
+/// `Effect` does NOT (it `implements ReactionInterface`) but is included
+/// here as the same kind of generator-adjacent primitive an env field
+/// shouldn't hold directly. Matched against a type-annotation lexeme as the
+/// unresolved-AST fallback in `target_validator._isSignalBaseTyped` and
+/// `value_rewriter._isSolidartSignalReceiver`; the Element-based primary
+/// path — [isSolidartSignalType], which genuinely checks the `SignalBase`
+/// supertype chain — does not need this exception and correctly excludes
+/// `Effect`. Excludes `SignalBuilder` / `SolidartConfig` (non-reactive
+/// solidart names).
+const Set<String> signalBaseTypeNames = {
+  'Signal',
+  'Computed',
+  'Effect',
+  'Resource',
+};
+
+/// `true` iff [type] is `SignalBase<T>` or a subtype of it.
+///
+/// `SignalBase` and its subtypes are declared in `package:solidart`;
+/// `package:flutter_solidart` re-exports them. The declaring library — not
+/// the importing one — is what an Element reports, so both package names are
+/// accepted.
+bool isSolidartSignalType(InterfaceType type) {
+  if (_isSignalBaseElement(type.element)) return true;
+  for (final supertype in type.allSupertypes) {
+    if (_isSignalBaseElement(supertype.element)) return true;
+  }
+  return false;
+}
+
+bool _isSignalBaseElement(InterfaceElement element) =>
+    element.name == 'SignalBase' &&
+    (isFromPackage(element.library.uri, 'solidart') ||
+        isFromPackage(element.library.uri, 'flutter_solidart'));
